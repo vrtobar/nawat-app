@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "verbatimModuleSyntax": false,
+    // TS 6 no longer auto-includes node_modules/@types — Node globals
+    // (process, console) must be requested explicitly.
+    "types": ["node"]
+  },
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}
