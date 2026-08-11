@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug API (NestJS)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=api"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      // nest start --watch spawns the actual node process as a child
+      "autoAttachChildProcesses": true,
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Web (Next.js full stack)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=web"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      // When the dev server prints its URL, open a debug-attached browser
+      // so client components are debuggable too
+      "serverReadyAction": {
+        "pattern": "- Local:.+(https?://.+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    }
+  ]
+}
