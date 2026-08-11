@@ -1,0 +1,7 @@
+@import '@nahuat/config/tailwind/base.css';
+
+/*
+ * TODO(PLAN §13): design tokens live here as Tailwind v4 @theme values —
+ * brand colors, fonts, radii — plus the shadcn/ui variables once
+ * components are generated via its CLI.
+ */

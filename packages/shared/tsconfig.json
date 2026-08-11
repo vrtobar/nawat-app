@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@nahuat/config/typescript/library.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Package is CommonJS (package.json "type": "commonjs") — same
+    // override as @nahuat/database, see its tsconfig for rationale.
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src"]
+}

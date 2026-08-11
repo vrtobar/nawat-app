@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Turborepo
+.turbo/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Prisma generated client
+packages/database/src/generated/
+
+# Lambda build artifacts
+*.zip
+
+# Testing
+coverage/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Misc caches
+.eslintcache
+
+# Planning/handoff space 
+.claude/

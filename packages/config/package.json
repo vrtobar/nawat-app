@@ -1,0 +1,38 @@
+{
+  "name": "@nahuat/config",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/node": "./eslint/node.js",
+    "./eslint/nestjs": "./eslint/nestjs.js",
+    "./eslint/nextjs": "./eslint/nextjs.js",
+    "./typescript/base.json": "./typescript/base.json",
+    "./typescript/nestjs.json": "./typescript/nestjs.json",
+    "./typescript/nextjs.json": "./typescript/nextjs.json",
+    "./typescript/library.json": "./typescript/library.json",
+    "./tailwind/base.css": "./tailwind/base.css",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@eslint/eslintrc": "^3.3.6",
+    "@eslint/js": "^9.39.5",
+    "eslint-config-next": "^16.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
+    "globals": "^17.9.0",
+    "typescript-eslint": "^8.67.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^6.0.3"
+  },
+  "peerDependenciesMeta": {
+    "tailwindcss": {
+      "optional": true
+    }
+  }
+}

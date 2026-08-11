@@ -1,0 +1,6 @@
+/*
+ * Shared Tailwind entry point. Tailwind v4 config lives in CSS, not JS —
+ * apps/web imports this first, then layers its own @theme tokens and
+ * shadcn/ui setup on top in its own globals.css.
+ */
+@import 'tailwindcss';

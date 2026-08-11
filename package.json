@@ -1,0 +1,37 @@
+{
+  "name": "nahuat-platform",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "apps/workers/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "test:integration": "turbo run test:integration",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "dev:infra": "docker compose up -d",
+    "dev:infra:down": "docker compose down",
+    "db:migrate": "npm run db:migrate --workspace=@nahuat/database",
+    "db:seed": "npm run db:seed --workspace=@nahuat/database",
+    "db:studio": "npm run db:studio --workspace=@nahuat/database"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.9",
+    "typescript": "^6.0.3"
+  }
+}

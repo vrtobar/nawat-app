@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@nahuat/config/typescript/library.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Package is CommonJS (package.json "type": "commonjs") — NodeNext
+    // resolution (inherited from base.json) picks that up automatically,
+    // so only the syntax-strictness rule needs overriding here.
+    "verbatimModuleSyntax": false,
+    // TS 6 no longer auto-includes node_modules/@types — Node globals
+    // (process, globalThis) must be requested explicitly.
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
