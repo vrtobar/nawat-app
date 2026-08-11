@@ -1,0 +1,29 @@
+{
+  // Use the repo's TypeScript (6.x), not VS Code's bundled 7.x — the
+  // bundled version reports errors (e.g. deprecations) that our actual
+  // compiler doesn't, and vice versa.
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
+
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // Resolve the nearest eslint.config.mjs per workspace package
+  "eslint.workingDirectories": [{ "mode": "auto" }],
+
+  "[prisma]": {
+    "editor.defaultFormatter": "Prisma.prisma"
+  },
+
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.next": true,
+    "**/.turbo": true,
+    "**/src/generated": true,
+    "package-lock.json": true
+  }
+}
