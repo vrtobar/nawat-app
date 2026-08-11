@@ -13,3 +13,15 @@ variable "github_repo" {
   type        = string
   default     = "vrtobar/nahuat-platform"
 }
+
+variable "dmarc_report_email" {
+  description = <<-EOT
+    Address receiving DMARC aggregate reports.
+    Must be at nahuat.com: sending reports to an address on another domain
+    requires that domain to publish an authorization record
+    (nahuat.com._report._dmarc.<their-domain>), which is not possible for a
+    provider like Gmail. Reports will bounce until inbound SES is configured.
+  EOT
+  type        = string
+  default     = "dmarc@nahuat.com"
+}
