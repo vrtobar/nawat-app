@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   // Monorepo: trace files from the repo root so workspace deps
   // (@nahuat/*) are included in the standalone output.
   outputFileTracingRoot: path.join(__dirname, '../..'),
+
+  // Stops `next dev` writing AGENTS.md and CLAUDE.md into this directory.
+  // Those are agent-directed instructions authored by the framework, and
+  // the generated CLAUDE.md imports AGENTS.md, so they load into any AI
+  // assistant's context automatically. What goes in the repo is our call.
+  agentRules: false,
 };
 
 export default nextConfig;
