@@ -29,9 +29,9 @@ variable "nat_gateway_count" {
 # -----------------------------------------------------------------------------
 
 variable "rds_instance_class" {
-  description = "RDS instance class. db.t3.micro is ~$15/month."
+  description = "RDS instance class. db.t4g.micro (Graviton) is ~$11.68/month; t3 equivalent is ~$13.14."
   type        = string
-  default     = "db.t3.micro"
+  default     = "db.t4g.micro"
 }
 
 variable "rds_multi_az" {
@@ -63,7 +63,13 @@ variable "backup_retention_days" {
 # -----------------------------------------------------------------------------
 
 variable "cache_node_type" {
-  description = "ElastiCache node type. cache.t3.micro is ~$12/month."
+  description = "ElastiCache node type. cache.t4g.micro (Graviton) is ~$9.34/month; t3 equivalent is ~$9.93."
   type        = string
-  default     = "cache.t3.micro"
+  default     = "cache.t4g.micro"
+}
+
+variable "apply_immediately" {
+  description = "Apply RDS modifications at once rather than deferring to the maintenance window"
+  type        = bool
+  default     = false
 }

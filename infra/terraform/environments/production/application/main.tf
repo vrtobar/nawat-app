@@ -64,6 +64,7 @@ module "database" {
   deletion_protection   = var.deletion_protection
   skip_final_snapshot   = var.skip_final_snapshot
   backup_retention_days = var.backup_retention_days
+  apply_immediately     = var.apply_immediately
 }
 
 # =============================================================================

@@ -101,6 +101,8 @@ resource "aws_db_instance" "main" {
   # Project cost allocation tag rather than as unattributed spend.
   copy_tags_to_snapshot = true
 
+  apply_immediately = var.apply_immediately
+
   deletion_protection = var.deletion_protection
   skip_final_snapshot = var.skip_final_snapshot
 

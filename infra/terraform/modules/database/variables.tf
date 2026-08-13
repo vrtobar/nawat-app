@@ -27,9 +27,9 @@ variable "rds_sg_id" {
 # -----------------------------------------------------------------------------
 
 variable "instance_class" {
-  description = "RDS instance class. db.t3.micro is ~$15/month."
+  description = "RDS instance class. db.t4g.micro (Graviton) is ~$11.68/month; t3 equivalent is ~$13.14."
   type        = string
-  default     = "db.t3.micro"
+  default     = "db.t4g.micro"
 }
 
 variable "engine_version" {
@@ -91,4 +91,19 @@ variable "backup_retention_days" {
   description = "Automated backup retention in days. 0 disables backups entirely."
   type        = number
   default     = 7
+}
+
+variable "apply_immediately" {
+  description = <<-EOT
+    Apply modifications at once instead of deferring to the maintenance window.
+
+    AWS defaults this to false, which is safe for a database with users but
+    surprising in Terraform: an apply "succeeds" while the change sits in
+    PendingModifiedValues, and every subsequent plan shows the same diff until
+    the window passes. True is correct while the database is empty; set it
+    false before real traffic, when a reboot at an arbitrary moment matters
+    more than immediate convergence.
+  EOT
+  type        = bool
+  default     = false
 }
