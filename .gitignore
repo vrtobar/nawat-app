@@ -30,7 +30,10 @@ coverage/
 **/.terraform/
 *.tfstate
 *.tfstate.*
+# Saved plans are build artifacts, never committed. Both patterns: a plan
+# written as `-out=tfplan` has no extension and slips past *.tfplan.
 *.tfplan
+tfplan
 crash.log
 crash.*.log
 override.tf
