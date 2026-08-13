@@ -34,6 +34,9 @@ coverage/
 # written as `-out=tfplan` has no extension and slips past *.tfplan.
 *.tfplan
 tfplan
+# Terraform reads .terraform.lock.hcl from root modules only; copies inside
+# child modules are artifacts of validating them standalone.
+infra/terraform/modules/*/.terraform.lock.hcl
 crash.log
 crash.*.log
 override.tf
