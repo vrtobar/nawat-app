@@ -240,14 +240,21 @@ resource "aws_cloudfront_distribution" "web" {
 
   origin {
     origin_id   = "alb"
-    domain_name = "alb.${var.environment}.nahuat.com"
+    domain_name = "alb-${var.environment}.nahuat.com"
 
     custom_origin_config {
       http_port  = 80
       https_port = 443
-      # TRADEOFF: unencrypted CloudFront-to-ALB inside the AWS network. Going
-      # https-only needs the ACM cert on the ALB listener; see BACKLOG.md.
-      origin_protocol_policy = "http-only"
+      # https-only, and not optional: the ALB's port-80 listener 301-redirects
+      # to HTTPS, so an http-only origin produces an infinite redirect loop
+      # (CloudFront -> ALB -> 301 -> CloudFront). This also makes the path
+      # end-to-end encrypted.
+      #
+      # The origin hostname is alb-{env}.nahuat.com rather than
+      # alb.{env}.nahuat.com because CloudFront validates the origin's
+      # certificate against that name, and *.nahuat.com matches exactly one
+      # label — "alb.production" is two.
+      origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
 
       # How long CloudFront waits before treating the ALB as unreachable and

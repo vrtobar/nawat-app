@@ -120,7 +120,7 @@ module "compute" {
   # derived; alb_domain must match what foundation's CloudFront already
   # points at.
   api_domain = local.api_domain
-  alb_domain = "alb.${var.environment}.nahuat.com"
+  alb_domain = "alb-${var.environment}.nahuat.com"
 
   # Data layer
   db_secret_arn = module.database.master_user_secret_arn
