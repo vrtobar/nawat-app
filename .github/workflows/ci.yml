@@ -4,11 +4,18 @@ name: CI
 # reading the checkout. That is what makes it safe to run on pull requests from
 # forks, and it is why the Terraform job initialises with -backend=false rather
 # than reaching for state.
+#
+# Pull requests are the gate. The push trigger is main only, and is not a
+# second gate — by then the merge has happened. It is there because Actions
+# caches are readable from the current branch, the base branch, or the DEFAULT
+# branch, and nothing else: a cache written on a feature branch is invisible to
+# every other feature branch. Runs on main are what populate the layer cache
+# that pull requests into either branch restore from.
 on:
   pull_request:
     branches: [develop, main]
   push:
-    branches: [develop, main]
+    branches: [main]
 
 # A superseded run tells you nothing, and PR pushes come in bursts.
 concurrency:
