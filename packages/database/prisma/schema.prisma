@@ -682,9 +682,6 @@ enum LessonStatus {
 enum ActivityType {
   LESSON_COMPLETED
   REVIEW_SESSION
-  // Post-MVP additions:
-  // FLASHCARD_SET_STUDIED
-  // DICTIONARY_LOOKUP
 }
 
 // =============================================================================
