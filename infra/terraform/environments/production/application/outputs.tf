@@ -46,3 +46,37 @@ output "redis_port" {
 # TODO(compute): alb_dns_name, ecs_cluster_name, ecs service names — the
 # deploy workflow needs these to force new deployments and run the migration
 # task.
+
+# -----------------------------------------------------------------------------
+# Compute — read by the deploy workflow
+# -----------------------------------------------------------------------------
+
+output "alb_dns_name" {
+  description = "ALB hostname, for reaching the app directly while diagnosing CloudFront"
+  value       = module.compute.alb_dns_name
+}
+
+output "ecs_cluster_name" {
+  description = "Cluster name for update-service and run-task"
+  value       = module.compute.ecs_cluster_name
+}
+
+output "api_service_name" {
+  description = "API service name"
+  value       = module.compute.api_service_name
+}
+
+output "web_service_name" {
+  description = "Web service name"
+  value       = module.compute.web_service_name
+}
+
+output "migrate_task_family" {
+  description = "Migration task family, run before services roll"
+  value       = module.compute.migrate_task_family
+}
+
+output "api_domain" {
+  description = "Public API hostname"
+  value       = module.compute.api_domain
+}

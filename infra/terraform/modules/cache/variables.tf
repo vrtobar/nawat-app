@@ -18,9 +18,9 @@ variable "redis_sg_id" {
 }
 
 variable "node_type" {
-  description = "Cache node type. cache.t3.micro is ~$12/month."
+  description = "Cache node type. cache.t4g.micro (Graviton) is ~$9.34/month; t3 equivalent is ~$9.93."
   type        = string
-  default     = "cache.t3.micro"
+  default     = "cache.t4g.micro"
 }
 
 variable "engine_version" {
