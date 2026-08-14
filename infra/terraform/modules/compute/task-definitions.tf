@@ -64,18 +64,26 @@ locals {
 }
 
 # -----------------------------------------------------------------------------
+# Ownership split
+#
+# Terraform owns the task definition SHAPE — environment, secrets, sizing,
+# architecture, logging. CI owns the IMAGE. On each deploy the workflow
+# describes the newest revision of the family, replaces only the image, and
+# registers the result, so Terraform changes still reach production by way of
+# the revision CI copies from.
+#
+# The consequence is that var.image_tag below is not what is running; see its
+# declaration in variables.tf. The service pointer is ignored in ecs.tf for the
+# same reason.
+#
+# The migration task is different and easy to get wrong: it has no service, so
+# nothing ignores its revision, and CI must register its own copy and run THAT
+# revision by ARN. Running the family name would execute whatever image
+# Terraform last wrote — migrating with the previous release's code.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
 # API
-#
-# TODO(feat/terraform-application-ci): replace :latest with immutable
-# prod-{sha} tags. See BACKLOG.md "Switch task definitions from :latest to
-# immutable tags". :latest makes rollback require re-tagging in ECR, records no
-# provenance, and defeats the deployment circuit breaker in ecs.tf — which can
-# only roll back to a revision that names the same failing image.
-# COUPLED: that change also restores ignore_changes = [task_definition] on the
-# services in ecs.tf.
-#
-# For now: Terraform defines the task shape, GitHub Actions ships code with
-# --force-new-deployment, which re-pulls :latest against the same revision.
 # -----------------------------------------------------------------------------
 resource "aws_ecs_task_definition" "api" {
   family                   = "${var.prefix}-api"
@@ -97,7 +105,7 @@ resource "aws_ecs_task_definition" "api" {
   container_definitions = jsonencode([
     {
       name      = "api"
-      image     = "${var.ecr_api_url}:latest"
+      image     = "${var.ecr_api_url}:${var.image_tag}"
       essential = true
 
       portMappings = [
@@ -159,7 +167,7 @@ resource "aws_ecs_task_definition" "web" {
   container_definitions = jsonencode([
     {
       name      = "web"
-      image     = "${var.ecr_web_url}:latest"
+      image     = "${var.ecr_web_url}:${var.image_tag}"
       essential = true
 
       portMappings = [
@@ -233,7 +241,7 @@ resource "aws_ecs_task_definition" "migrate" {
   container_definitions = jsonencode([
     {
       name      = "migrate"
-      image     = "${var.ecr_api_url}:latest"
+      image     = "${var.ecr_api_url}:${var.image_tag}"
       essential = true
 
       command = ["npm", "run", "db:migrate", "--workspace=@nahuat/database"]

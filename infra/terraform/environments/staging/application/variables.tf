@@ -78,6 +78,14 @@ variable "apply_immediately" {
 # Compute
 # -----------------------------------------------------------------------------
 
+# No default, and not set in terraform.tfvars: staging is created and destroyed
+# by its workflow, which passes the tag it just built. A missing value should
+# fail the plan rather than resolve to something stale.
+variable "image_tag" {
+  description = "Image tag to deploy, passed by the staging workflow as staging-{sha}"
+  type        = string
+}
+
 variable "api_cpu" {
   description = "API task CPU units; 256 = 0.25 vCPU"
   type        = number

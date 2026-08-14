@@ -87,9 +87,16 @@ resource "aws_acm_certificate_validation" "wildcard" {
 # from main's tree. Only one role may write here; see github_build below.
 # -----------------------------------------------------------------------------
 
+# IMMUTABLE is load-bearing, not hygiene. Task definitions name a tag rather
+# than a digest, so a mutable tag means the bytes behind a deployed release can
+# change after the fact — the build role could repoint prod-{sha} at different
+# content and ECS would pull it on the next task placement, with no deployment
+# and nothing in the service history to show for it. Immutability makes a tag
+# a permanent name for one manifest, which is also what lets the deployment
+# circuit breaker roll back to a genuinely different image.
 resource "aws_ecr_repository" "api" {
   name                 = "nahuat-api"
-  image_tag_mutability = "MUTABLE" # required to move the :latest tag
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true # no cost
@@ -98,7 +105,7 @@ resource "aws_ecr_repository" "api" {
 
 resource "aws_ecr_repository" "web" {
   name                 = "nahuat-web"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -340,8 +347,21 @@ data "aws_iam_policy_document" "github_production" {
     resources = ["*"]
   }
 
-  # Rolling deploy: --force-new-deployment against the existing task
-  # definition, which already points at the :latest image tag.
+  # Registering a revision is how a release is expressed: the workflow copies
+  # the newest revision Terraform wrote, substitutes the image tag, and
+  # registers the result. Unscoped because RegisterTaskDefinition supports no
+  # resource-level permissions at all — the family does not exist as an ARN
+  # until the call succeeds. PassProductionTaskRoles below is the real bound:
+  # a revision is only useful if it can name roles to run as, and that is
+  # restricted to nahuat-production-*.
+  statement {
+    sid       = "RegisterProductionTaskDefinition"
+    effect    = "Allow"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["*"]
+  }
+
+  # Points a service at the revision registered above.
   statement {
     sid     = "DeployProductionServices"
     effect  = "Allow"

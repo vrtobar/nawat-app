@@ -92,6 +92,20 @@ variable "ecr_web_url" {
   type        = string
 }
 
+# Not the tag that is running. Because ignore_changes covers task_definition on
+# both services, the revision Terraform registers here is only a base for CI to
+# copy and a floor for recreating the environment from nothing. What is serving
+# traffic is whatever revision the deploy workflow last pointed the service at.
+variable "image_tag" {
+  description = "Image tag Terraform writes into task definitions; CI overrides it per deploy"
+  type        = string
+
+  validation {
+    condition     = can(regex("^(prod|staging)-[0-9a-f]{40}$", var.image_tag))
+    error_message = "image_tag must be prod-<sha> or staging-<sha> with a full 40-character commit SHA. Mutable tags such as 'latest' are rejected: they make every revision indistinguishable, so the deployment circuit breaker rolls back onto the same failing image."
+  }
+}
+
 variable "assets_bucket_name" {
   description = "Assets bucket name, injected as S3_BUCKET"
   type        = string

@@ -21,17 +21,16 @@ resource "aws_ecs_cluster" "main" {
 # the gateway's ~$32/month but put the tasks one security group mistake away
 # from being directly reachable.
 #
-# Terraform owns the task definition; CI does not. The deploy pipeline ships
-# code with --force-new-deployment, which re-pulls :latest against the SAME
-# revision, so the two never contend. Putting task_definition in
-# ignore_changes would be actively harmful here: Terraform would register new
-# revisions for env var, secret, and sizing changes that the service never
-# adopts. Only desired_count is ignored, because autoscaling owns it.
+# task_definition and desired_count are both ignored because Terraform is not
+# the authority on either: CI moves the revision pointer on deploy, autoscaling
+# moves the count. Without the ignores, the next apply reverts whichever one
+# has moved since.
 #
-# TODO(feat/terraform-application-ci): when task definitions move to immutable
-# prod-{sha} tags, CI starts owning the revision pointer and task_definition
-# MUST go back into ignore_changes. See BACKLOG.md and the matching TODO in
-# task-definitions.tf — the two changes are one decision.
+# task_definition may only be ignored while image tags are immutable. Under a
+# floating tag CI never changes the revision, so ignoring it would mean
+# Terraform's env var, secret, and sizing changes register new revisions that
+# the service silently never adopts. The safety of this ignore depends on
+# var.image_tag rejecting mutable tags, which its validation block enforces.
 # -----------------------------------------------------------------------------
 
 resource "aws_ecs_service" "api" {
@@ -73,7 +72,7 @@ resource "aws_ecs_service" "api" {
   depends_on = [aws_lb_listener_rule.api]
 
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [task_definition, desired_count]
   }
 
   tags = { Name = "${var.prefix}-api" }
@@ -111,7 +110,7 @@ resource "aws_ecs_service" "web" {
   depends_on = [aws_lb_listener.https]
 
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [task_definition, desired_count]
   }
 
   tags = { Name = "${var.prefix}-web" }
