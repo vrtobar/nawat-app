@@ -18,8 +18,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "test:unit": "turbo run test:unit",
+    "test": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -32,6 +31,7 @@
   "devDependencies": {
     "prettier": "^3.9.6",
     "turbo": "^2.10.9",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

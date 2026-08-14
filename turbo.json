@@ -17,13 +17,14 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "test": {
-      "dependsOn": ["^build"],
-      "outputs": []
-    },
+    // No umbrella "test" task: with no package implementing it, `turbo run
+    // test` resolved its ^build dependencies and reported success having run
+    // nothing. Call the specific task instead.
     "test:unit": {
       "outputs": []
     },
+    // Not yet implemented by any package — it needs a schema to run against,
+    // and the first migration does not exist. Wired into CI when it does.
     "test:integration": {
       "dependsOn": ["^build"],
       "outputs": []

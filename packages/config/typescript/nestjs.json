@@ -8,6 +8,9 @@
     // TS 6 no longer auto-includes node_modules/@types — Node globals
     // (process, console) must be requested explicitly.
     "types": ["node"]
-  },
-  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+  }
+  // Spec files are deliberately NOT excluded here: this preset backs
+  // `tsc --noEmit`, and excluding them means test files are never
+  // typechecked. Keeping them out of the emitted build is the job of the
+  // consumer's tsconfig.build.json.
 }
