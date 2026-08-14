@@ -20,3 +20,18 @@ cache_node_type = "cache.t4g.micro" # Graviton: ~6% cheaper than t3
 
 # Database is empty and unused; flip to false before real traffic.
 apply_immediately = true
+
+# Compute — production: conservative rollout, one task serving throughout
+api_cpu                    = 256
+api_memory                 = 512
+web_cpu                    = 256
+web_memory                 = 512
+health_check_interval      = 30
+health_check_timeout       = 5
+unhealthy_threshold        = 3
+health_check_grace_period  = 60
+deregistration_delay       = 300
+deployment_min_healthy_pct = 50
+ecs_stop_timeout           = 30
+log_retention_days         = 30
+enable_autoscaling         = false

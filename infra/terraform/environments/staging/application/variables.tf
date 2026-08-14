@@ -73,3 +73,85 @@ variable "apply_immediately" {
   type        = bool
   default     = false
 }
+
+# -----------------------------------------------------------------------------
+# Compute
+# -----------------------------------------------------------------------------
+
+variable "api_cpu" {
+  description = "API task CPU units; 256 = 0.25 vCPU"
+  type        = number
+  default     = 256
+}
+
+variable "api_memory" {
+  description = "API task memory in MiB"
+  type        = number
+  default     = 512
+}
+
+variable "web_cpu" {
+  description = "Web task CPU units"
+  type        = number
+  default     = 256
+}
+
+variable "web_memory" {
+  description = "Web task memory in MiB"
+  type        = number
+  default     = 512
+}
+
+variable "health_check_interval" {
+  description = "Seconds between target health checks"
+  type        = number
+  default     = 30
+}
+
+variable "health_check_timeout" {
+  description = "Seconds before a health check attempt fails"
+  type        = number
+  default     = 5
+}
+
+variable "unhealthy_threshold" {
+  description = "Consecutive failures before a target is unhealthy"
+  type        = number
+  default     = 3
+}
+
+variable "health_check_grace_period" {
+  description = "Seconds ECS ignores health checks after task start"
+  type        = number
+  default     = 60
+}
+
+variable "deregistration_delay" {
+  description = "Seconds the ALB drains a target before removing it"
+  type        = number
+  default     = 300
+}
+
+variable "deployment_min_healthy_pct" {
+  description = "Minimum percent of desired count kept running during a deploy"
+  type        = number
+  default     = 50
+}
+
+variable "ecs_stop_timeout" {
+  description = "Seconds between SIGTERM and SIGKILL on shutdown"
+  type        = number
+  default     = 30
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days"
+  type        = number
+  default     = 30
+}
+
+variable "enable_autoscaling" {
+  description = "Scale services on CPU between the module's min and max"
+  type        = bool
+  default     = false
+}

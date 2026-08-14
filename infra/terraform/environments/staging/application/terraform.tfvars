@@ -21,3 +21,20 @@ cache_node_type = "cache.t4g.micro" # Graviton: ~6% cheaper than t3
 
 # Database is empty and unused; flip to false before real traffic.
 apply_immediately = true
+
+# Compute — staging: faster feedback over safety, since it is rebuilt often.
+# Shorter checks detect failure sooner, 0% minimum healthy allows a full
+# replacement rather than waiting for drain, and logs age out in a week.
+api_cpu                    = 256
+api_memory                 = 512
+web_cpu                    = 256
+web_memory                 = 512
+health_check_interval      = 10
+health_check_timeout       = 3
+unhealthy_threshold        = 2
+health_check_grace_period  = 30
+deregistration_delay       = 30
+deployment_min_healthy_pct = 0
+ecs_stop_timeout           = 5
+log_retention_days         = 7
+enable_autoscaling         = false
