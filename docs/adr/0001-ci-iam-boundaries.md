@@ -9,8 +9,8 @@
 GitHub Actions needs AWS credentials to build images, apply the staging
 application layer, and deploy to production. Federation is via OIDC, so no
 access keys are stored in GitHub and there is nothing to leak or rotate. The
-open question is not *how* CI authenticates but *what each identity may do once
-it has*.
+open question is not _how_ CI authenticates but _what each identity may do once
+it has_.
 
 Three properties of the setup shape the answer:
 
@@ -29,11 +29,11 @@ Three properties of the setup shape the answer:
 
 Three roles, each with one job.
 
-| Role | Trusted subject | May do |
-| --- | --- | --- |
-| `nahuat-github-actions-build` | `ref:refs/heads/{develop,main}` | Push to two ECR repositories |
-| `nahuat-github-actions-staging` | `ref:refs/heads/develop` | `terraform apply` the staging application layer |
-| `nahuat-github-actions-production` | `environment:production` | Register task definitions, update services, run the migration task, update Lambda code |
+| Role                               | Trusted subject                 | May do                                                                                 |
+| ---------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
+| `nahuat-github-actions-build`      | `ref:refs/heads/{develop,main}` | Push to two ECR repositories                                                           |
+| `nahuat-github-actions-staging`    | `ref:refs/heads/develop`        | `terraform apply` the staging application layer                                        |
+| `nahuat-github-actions-production` | `environment:production`        | Register task definitions, update services, run the migration task, update Lambda code |
 
 Production holds no create or delete rights on infrastructure, no Terraform
 state write, and no secrets access.
@@ -44,8 +44,8 @@ Originally the staging role held ECR push for both environments, and
 production's build job assumed it. That put the artifact production runs in the
 hands of an identity obtained by any push to `develop`, carrying `rds:*`,
 `ecs:*` and `lambda:*` on `Resource: "*"` that a build has no use for. The
-production approval gate then covered the *promotion* but not the *thing being
-promoted*.
+production approval gate then covered the _promotion_ but not the _thing being
+promoted_.
 
 It also meant staging's trust policy had to list `refs/heads/main` purely so
 production could borrow it — staging's security boundary encoding a fact about
@@ -79,7 +79,7 @@ closes and whether that escalation was reachable at the time of writing.
 Without this block, a workflow triggered by a push to `develop` could delete the
 production database or push a deployment onto production services. The
 production environment's approval gate would then be decorative: it gates the
-production *role* while an ungated role holds equivalent power over the same
+production _role_ while an ungated role holds equivalent power over the same
 resources.
 
 **Reachable when written (2026-08-13)** for RDS, ECS, ElastiCache, Lambda and
@@ -91,7 +91,7 @@ later.
 **Known gap:** the block lists no EC2 ARNs. Route tables and NAT gateways are
 instead protected by a tag condition on the Allow side
 (`ec2:ResourceTag/Environment = staging`), because the application layer owns
-the NAT gateway while the *foundation* layer owns the route tables it writes
+the NAT gateway while the _foundation_ layer owns the route tables it writes
 into. Without that condition the staging role could write a default route into
 production's private route tables and redirect all production egress.
 
@@ -110,7 +110,7 @@ actions. This is the backstop that keeps it that way.
 
 It matters because the obvious guard does not work. **`aws:RequestedRegion`
 cannot constrain IAM.** IAM's endpoint lives in `us-east-1`, so a `us-east-1`
-region condition *admits* IAM calls rather than blocking them. That is why the
+region condition _admits_ IAM calls rather than blocking them. That is why the
 IAM Allow statements are scoped by ARN prefix instead of by region, and why a
 future "simplification" that replaces prefix scoping with a region condition
 would silently open the entire surface.
@@ -151,8 +151,8 @@ its thumbprint or client IDs subverts the federation all three roles depend on.
 - ARNs inside `DenyCicdSelfModification` are written as literal strings rather
   than resource references, because the roles and policies consume the policy
   document — referencing them creates a dependency cycle.
-- IAM role *descriptions* reject the em dash (U+2014) and other non-Latin-1
-  characters; `CreateRole` fails with a 400. IAM *policy* descriptions accept
+- IAM role _descriptions_ reject the em dash (U+2014) and other non-Latin-1
+  characters; `CreateRole` fails with a 400. IAM _policy_ descriptions accept
   it. IAM policy descriptions are also write-once — changing one forces
   Terraform to replace the policy, briefly detaching it from its role.
 - Three roles means three GitHub repository variables to keep in sync.
@@ -164,7 +164,7 @@ with staging apply rights plus production deploy rights makes the production
 approval gate meaningless, since the same power is reachable without it.
 
 **Two roles, with production borrowing staging's ECR access.** What existed
-before this decision. Rejected for the reasons in *Why build is separate*.
+before this decision. Rejected for the reasons in _Why build is separate_.
 
 **Action-level allow-lists instead of service wildcards.** Genuinely tighter,
 but breaks on provider upgrades and fails mid-apply. Deferred rather than

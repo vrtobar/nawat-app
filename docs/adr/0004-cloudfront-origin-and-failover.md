@@ -68,7 +68,7 @@ show the page. `custom_error_response` names the path explicitly, so `/` works.
 
 The planning draft set `default_root_object = "index.html"`, which is the
 correct setting for static S3 hosting and wrong here: it rewrites `/` into
-`/index.html` on *every* request, including normal ones, and an SSR origin has
+`/index.html` on _every_ request, including normal ones, and an SSR origin has
 no such route. It would break the homepage permanently in order to improve an
 outage page.
 

@@ -16,7 +16,7 @@ reasoning for the reversal is more useful than the conclusion.
 **First position:** the free tier allows several tenants, so create one per
 environment. Factually wrong — it allows one.
 
-**Second position:** use two *applications* within a single tenant, because
+**Second position:** use two _applications_ within a single tenant, because
 maintaining two accounts is tedious. This is an argument about convenience
 presented as an argument about architecture, and it does not survive contact
 with what is actually tenant-scoped.

@@ -16,7 +16,7 @@ survive a teardown — the hosted zone, the ACM certificate, the container
 registry, manually-populated secrets — sit in the same state file as the ones
 that should not.
 
-Resource *identity* is the second half of the problem. Security group IDs,
+Resource _identity_ is the second half of the problem. Security group IDs,
 subnet IDs, and Secrets Manager ARNs are referenced by IAM policies and by other
 resources. If a teardown cycle changes them, every dependent policy has to be
 rewritten.
@@ -26,11 +26,11 @@ rewritten.
 Three layers, each a separate root module with its own state file, split by how
 dangerous it is to destroy them.
 
-| Layer | State key | Destroy | Contains |
-| --- | --- | --- | --- |
-| `global` | `global/` | Never | Route 53 zone, wildcard ACM certificate, ECR repositories, CI IAM roles, SES |
-| `environments/{env}/foundation` | `{env}/foundation/` | Never | VPC, subnets, route tables, security groups, S3 buckets, CloudFront, secret shells |
-| `environments/{env}/application` | `{env}/application/` | Freely | NAT gateway, RDS, ElastiCache, ECS, ALB, ALB DNS record |
+| Layer                            | State key            | Destroy | Contains                                                                           |
+| -------------------------------- | -------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `global`                         | `global/`            | Never   | Route 53 zone, wildcard ACM certificate, ECR repositories, CI IAM roles, SES       |
+| `environments/{env}/foundation`  | `{env}/foundation/`  | Never   | VPC, subnets, route tables, security groups, S3 buckets, CloudFront, secret shells |
+| `environments/{env}/application` | `{env}/application/` | Freely  | NAT gateway, RDS, ElastiCache, ECS, ALB, ALB DNS record                            |
 
 Dependencies flow one way, read through `terraform_remote_state`: application
 reads foundation, foundation reads global. Nothing reads upward.
@@ -41,7 +41,7 @@ Several placements look arbitrary until read against "what survives a destroy".
 
 **The NAT gateway lives in `application`, not `foundation`.** It is
 ~$32/month and buys nothing while no tasks are running. Foundation owns the
-private *route tables*; the application layer only writes the default route
+private _route tables_; the application layer only writes the default route
 into them, so the tables and their subnet associations keep stable IDs across
 teardown cycles while the billable resource does not.
 
@@ -95,6 +95,6 @@ aggression — and workspaces encourage expressing those as conditionals inside
 one file, where the production path is never exercised until it matters.
 
 **Two layers, folding global into foundation.** Rejected because the hosted
-zone, wildcard certificate, and ECR repositories are shared *between*
+zone, wildcard certificate, and ECR repositories are shared _between_
 environments; duplicating them per environment would mean two certificates for
 the same domain and two registries holding the same images.

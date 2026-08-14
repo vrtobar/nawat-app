@@ -31,7 +31,7 @@ cannot catch the failure it exists for.
 
 There is a quieter fourth problem: a task replaced between deploys — by
 autoscaling, or by ECS rescheduling onto new capacity — pulls whatever
-`:latest` points at *then*. Two tasks in one service can silently run different
+`:latest` points at _then_. Two tasks in one service can silently run different
 code.
 
 ## Decision
@@ -56,7 +56,7 @@ naming an older revision, with no registry mutation at all.
 
 ### ECR repositories are `IMMUTABLE`
 
-Task definitions name a *tag*, not a digest. Under a mutable tag the bytes
+Task definitions name a _tag_, not a digest. Under a mutable tag the bytes
 behind an already-deployed release can change after the fact: repointing
 `prod-{sha}` at different content means ECS pulls the new content on the next
 task placement, with no deployment and nothing in the service history to show
@@ -116,14 +116,14 @@ missing value fails the plan.
   rebuild.
 - Every running task is traceable to a commit through its task definition.
 - The circuit breaker works as intended.
-- Production's `terraform.tfvars` carries a tag that is *not* the running
+- Production's `terraform.tfvars` carries a tag that is _not_ the running
   version, which is confusing without the comment that explains it. This is the
   main cost of the design.
 - Terraform and CI both register revisions into the same family, so the family
   accumulates revisions from two sources. Harmless — ECS keeps them all and CI
   always copies the newest.
 - Image builds must pass `--provenance=false --sbom=false`. buildx otherwise
-  emits an OCI *image index* whose children are pushed untagged, and the ECR
+  emits an OCI _image index_ whose children are pushed untagged, and the ECR
   lifecycle rule expiring untagged images after one day would delete them out
   from under the live tag — pulls begin failing roughly 24 hours after a deploy
   with no code change to blame. Observed on the first manual push, 2026-08-13.
@@ -151,4 +151,4 @@ infrastructure.
 **Have CI use `--force-new-deployment` against a Terraform-registered
 revision.** The status quo being replaced. It is the only option that requires
 no coordination between the two systems, which is why it was attractive, and
-every problem in *Context* follows from it.
+every problem in _Context_ follows from it.

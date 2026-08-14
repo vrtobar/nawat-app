@@ -25,12 +25,12 @@ historically the most likely thing to lack an ARM build
 
 ARM64 everywhere:
 
-| Resource | Choice | Saving vs x86 equivalent |
-| --- | --- | --- |
-| RDS PostgreSQL | `db.t4g.micro` | ~11% |
-| ElastiCache Valkey | `cache.t4g.micro` | ~6% |
-| ECS Fargate tasks | `cpu_architecture = "ARM64"` | ~20% on Fargate rates |
-| Container images | `--platform linux/arm64` | n/a |
+| Resource           | Choice                       | Saving vs x86 equivalent |
+| ------------------ | ---------------------------- | ------------------------ |
+| RDS PostgreSQL     | `db.t4g.micro`               | ~11%                     |
+| ElastiCache Valkey | `cache.t4g.micro`            | ~6%                      |
+| ECS Fargate tasks  | `cpu_architecture = "ARM64"` | ~20% on Fargate rates    |
+| Container images   | `--platform linux/arm64`     | n/a                      |
 
 ## The coupling this creates
 
