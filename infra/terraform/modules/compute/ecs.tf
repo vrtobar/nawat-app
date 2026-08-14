@@ -21,16 +21,13 @@ resource "aws_ecs_cluster" "main" {
 # the gateway's ~$32/month but put the tasks one security group mistake away
 # from being directly reachable.
 #
-# task_definition and desired_count are both ignored because Terraform is not
-# the authority on either: CI moves the revision pointer on deploy, autoscaling
-# moves the count. Without the ignores, the next apply reverts whichever one
-# has moved since.
+# task_definition and desired_count are both ignored because Terraform owns
+# neither: CI moves the revision pointer, autoscaling moves the count.
 #
-# task_definition may only be ignored while image tags are immutable. Under a
-# floating tag CI never changes the revision, so ignoring it would mean
-# Terraform's env var, secret, and sizing changes register new revisions that
-# the service silently never adopts. The safety of this ignore depends on
-# var.image_tag rejecting mutable tags, which its validation block enforces.
+# Ignoring task_definition is only correct while image tags are immutable —
+# under a floating tag it would mean Terraform's env, secret, and sizing
+# changes silently never reach the service. var.image_tag's validation block
+# is what holds that precondition. See docs/adr/0002-immutable-image-tags.md
 # -----------------------------------------------------------------------------
 
 resource "aws_ecs_service" "api" {
