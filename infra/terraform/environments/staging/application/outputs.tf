@@ -43,10 +43,6 @@ output "redis_port" {
   value       = module.cache.redis_port
 }
 
-# TODO(compute): alb_dns_name, ecs_cluster_name, ecs service names — the
-# deploy workflow needs these to force new deployments and run the migration
-# task.
-
 # -----------------------------------------------------------------------------
 # Compute — read by the deploy workflow
 # -----------------------------------------------------------------------------
@@ -71,6 +67,16 @@ output "web_service_name" {
   value       = module.compute.web_service_name
 }
 
+output "api_task_family" {
+  description = "API task definition family, described by the deploy workflow"
+  value       = module.compute.api_task_family
+}
+
+output "web_task_family" {
+  description = "Web task definition family, described by the deploy workflow"
+  value       = module.compute.web_task_family
+}
+
 output "migrate_task_family" {
   description = "Migration task family, run before services roll"
   value       = module.compute.migrate_task_family
@@ -79,4 +85,22 @@ output "migrate_task_family" {
 output "api_domain" {
   description = "Public API hostname"
   value       = module.compute.api_domain
+}
+
+# Network configuration for `aws ecs run-task`. The migration task uses awsvpc
+# networking, so RunTask must be handed subnets and a security group; unlike a
+# service, it has none attached to it. These originate in the foundation layer
+# and are re-exported here so the deploy workflow reads one state file rather
+# than two.
+#
+# The API security group specifically: the migration task must reach RDS, and
+# the database's ingress rule matches on that group rather than on a CIDR.
+output "ecs_subnet_ids" {
+  description = "Private subnets for run-task network configuration"
+  value       = data.terraform_remote_state.foundation.outputs.ecs_subnet_ids
+}
+
+output "ecs_api_sg_id" {
+  description = "Security group for run-task; the same one the API service uses"
+  value       = data.terraform_remote_state.foundation.outputs.ecs_api_sg_id
 }
