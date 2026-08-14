@@ -23,14 +23,20 @@ RUN npm ci --ignore-scripts
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Dummy Auth0 env — next build prerenders pages and the SDK insists on
-# its env being present; real values are injected by ECS at runtime.
-ENV AUTH0_DOMAIN=build.placeholder.auth0.com \
+# Dummy Auth0 env — next build prerenders pages and the SDK insists on its env
+# being present; real values are injected by ECS at runtime.
+#
+# Set inline on the RUN rather than as ENV. An ENV instruction bakes the values
+# into the stage's layer metadata, where `docker history` can read them back —
+# which is why buildkit's SecretsUsedInArgOrEnv check flags it, and the check is
+# right even though these particular values are placeholders. Inline, they exist
+# only for this process and are recorded nowhere.
+RUN AUTH0_DOMAIN=build.placeholder.auth0.com \
     AUTH0_CLIENT_ID=build-placeholder \
     AUTH0_CLIENT_SECRET=build-placeholder \
     AUTH0_SECRET=build-placeholder-secret-32-chars-xx \
-    APP_BASE_URL=http://localhost:3000
-RUN npx turbo run build --filter=web
+    APP_BASE_URL=http://localhost:3000 \
+    npx turbo run build --filter=web
 
 # --- runner -------------------------------------------------------------------
 FROM base AS runner
