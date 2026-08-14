@@ -10,15 +10,16 @@
     "seed": "tsx prisma/seed.ts"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
     "generate": "prisma generate",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

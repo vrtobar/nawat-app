@@ -17,13 +17,19 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "test": {
+    // No umbrella "test" task: with no package implementing it, `turbo run
+    // test` resolved its ^build dependencies and reported success having run
+    // nothing. Call the specific task instead.
+    // ^build is required, not an optimization: api's tests import
+    // @nahuat/database, which resolves through its "main" to dist/. Without
+    // this the suite passes only when a stale dist happens to be present and
+    // fails on a fresh checkout.
+    "test:unit": {
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "test:unit": {
-      "outputs": []
-    },
+    // Not yet implemented by any package — it needs a schema to run against,
+    // and the first migration does not exist. Wired into CI when it does.
     "test:integration": {
       "dependsOn": ["^build"],
       "outputs": []

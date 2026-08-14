@@ -65,3 +65,8 @@ output "github_staging_role_arn" {
   description = "Add to GitHub variable: AWS_STAGING_ROLE_ARN"
   value       = aws_iam_role.github_staging.arn
 }
+
+output "github_build_role_arn" {
+  description = "Add to GitHub variable: AWS_BUILD_ROLE_ARN"
+  value       = aws_iam_role.github_build.arn
+}

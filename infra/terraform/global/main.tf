@@ -77,17 +77,24 @@ resource "aws_acm_certificate_validation" "wildcard" {
 # -----------------------------------------------------------------------------
 # ECR — Container image repositories
 #
-# One repo per image, shared across environments: an image is built once and
-# promoted by tag, so what runs in production is the exact artifact that
-# passed staging.
+# One repo per image, shared across environments, with the environment encoded
+# in the tag prefix: prod-{sha} and staging-{sha}. The lifecycle rules below
+# key off those prefixes.
 #
-# Tags: prod-{sha} and latest (production), staging-{sha} (staging).
-# The lifecycle rules below key off those prefixes.
+# Note that this is not build-once-promote. Staging builds from develop and
+# production builds from main, and squash merges mean the two never share a
+# commit SHA, so there is no common artifact to retag. Production rebuilds
+# from main's tree. Only one role may write here; see github_build below.
 # -----------------------------------------------------------------------------
 
+# IMMUTABLE is load-bearing, not hygiene: task definitions name a tag rather
+# than a digest, so a mutable tag would let the bytes behind an already-deployed
+# release change with no deployment to show for it. Reverting this to MUTABLE
+# also invalidates ignore_changes = [task_definition] in modules/compute.
+# Rationale: docs/adr/0002-immutable-image-tags.md
 resource "aws_ecr_repository" "api" {
   name                 = "nahuat-api"
-  image_tag_mutability = "MUTABLE" # required to move the :latest tag
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true # no cost
@@ -96,7 +103,7 @@ resource "aws_ecr_repository" "api" {
 
 resource "aws_ecr_repository" "web" {
   name                 = "nahuat-web"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -207,8 +214,9 @@ data "aws_iam_policy_document" "github_production_trust" {
 # Staging trust policy
 #
 # Branch-scoped, no environment gate — staging deploys are automatic.
-# main is included so production releases can be validated against staging
-# before promotion.
+# develop only. main was previously included so that production's build job
+# could borrow this role's ECR access; that access now lives in github_build,
+# so staging's boundary no longer depends on how production builds.
 # -----------------------------------------------------------------------------
 data "aws_iam_policy_document" "github_staging_trust" {
   statement {
@@ -227,7 +235,37 @@ data "aws_iam_policy_document" "github_staging_trust" {
     }
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repo}:ref:refs/heads/develop"]
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Build trust policy
+#
+# Both deployable branches, because both produce images. No environment gate:
+# building an artifact is not the act that needs approval, deploying it is.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "github_build_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_repo}:ref:refs/heads/develop",
@@ -251,6 +289,12 @@ resource "aws_iam_role" "github_staging" {
   name               = "nahuat-github-actions-staging"
   assume_role_policy = data.aws_iam_policy_document.github_staging_trust.json
   description        = "Assumed by GitHub Actions for staging deployments; automatic on develop push"
+}
+
+resource "aws_iam_role" "github_build" {
+  name               = "nahuat-github-actions-build"
+  assume_role_policy = data.aws_iam_policy_document.github_build_trust.json
+  description        = "Assumed by GitHub Actions to push container images; no deploy or infrastructure rights"
 }
 
 
@@ -301,8 +345,17 @@ data "aws_iam_policy_document" "github_production" {
     resources = ["*"]
   }
 
-  # Rolling deploy: --force-new-deployment against the existing task
-  # definition, which already points at the :latest image tag.
+  # Unscoped because RegisterTaskDefinition supports no resource-level
+  # permissions at all. PassProductionTaskRoles below is the real bound: a
+  # revision is only useful if it can name roles to run as.
+  statement {
+    sid       = "RegisterProductionTaskDefinition"
+    effect    = "Allow"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["*"]
+  }
+
+  # Points a service at the revision registered above.
   statement {
     sid     = "DeployProductionServices"
     effect  = "Allow"
@@ -364,23 +417,14 @@ data "aws_iam_policy_document" "github_production" {
 }
 
 # -----------------------------------------------------------------------------
-# Staging permissions — build, apply the staging application layer, deploy
+# Build permissions — push images, nothing else
 #
-# Broader than production because this role does run terraform apply and
-# destroy against environments/staging/application. Scope is bounded three
-# ways: an allow-list of the service prefixes that layer actually creates,
-# a region condition, and the explicit Deny blocks at the end.
-#
-# Adding a new resource type to the staging application layer will fail with
-# AccessDenied until its service prefix is added to StagingTerraform below.
-# That is the intended tradeoff — a loud, localized failure in a staging
-# workflow, instead of a standing wildcard.
+# Separate from the staging role so that the artifact production runs is not
+# produced by an identity holding staging's infrastructure rights.
+# Rationale: docs/adr/0001-ci-iam-boundaries.md
 # -----------------------------------------------------------------------------
-data "aws_iam_policy_document" "github_staging" {
-
-  # Image builds for BOTH environments run under this role — the ECR repos
-  # are shared, and production's deploy job only promotes what was pushed
-  # here. GetAuthorizationToken has no resource-level scoping in ECR.
+data "aws_iam_policy_document" "github_build" {
+  # GetAuthorizationToken has no resource-level scoping in ECR.
   statement {
     sid       = "EcrAuth"
     effect    = "Allow"
@@ -388,6 +432,9 @@ data "aws_iam_policy_document" "github_staging" {
     resources = ["*"]
   }
 
+  # The read actions are not redundant: buildx pulls previous layers from the
+  # registry for its cache, so a push-only grant would rebuild from scratch
+  # every run.
   statement {
     sid    = "EcrPush"
     effect = "Allow"
@@ -405,6 +452,22 @@ data "aws_iam_policy_document" "github_staging" {
       aws_ecr_repository.web.arn,
     ]
   }
+}
+
+# -----------------------------------------------------------------------------
+# Staging permissions — apply the staging application layer, deploy
+#
+# Broader than production because this role does run terraform apply and
+# destroy against environments/staging/application. Scope is bounded three
+# ways: an allow-list of the service prefixes that layer actually creates,
+# a region condition, and the explicit Deny blocks at the end.
+#
+# Adding a new resource type to the staging application layer will fail with
+# AccessDenied until its service prefix is added to StagingTerraform below.
+# That is the intended tradeoff — a loud, localized failure in a staging
+# workflow, instead of a standing wildcard.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "github_staging" {
 
   # Reads the foundation layer's outputs, writes its own state and lock
   # file. Production state keys are unreachable (and denied below).
@@ -465,6 +528,74 @@ data "aws_iam_policy_document" "github_staging" {
       test     = "StringEquals"
       variable = "aws:RequestedRegion"
       values   = ["us-east-1"]
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # NAT gateway — the only EC2 write access this role has, because modules/nat
+  # lives in the application layer so staging teardown releases the gateway.
+  #
+  # Three statements because create and destroy cannot be constrained alike.
+  # ---------------------------------------------------------------------------
+
+  # Unscoped because there is nothing to scope against: the gateway and address
+  # do not exist when the call is authorized, so a resource-tag condition would
+  # evaluate against an untagged resource and deny every time.
+  statement {
+    sid    = "StagingNatProvision"
+    effect = "Allow"
+    actions = [
+      "ec2:AllocateAddress",
+      "ec2:CreateNatGateway",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+
+  # Fenced by tag, not left on "*", and this is not ceremonial: CreateRoute
+  # targets a route table owned by the FOUNDATION layer, so without the
+  # condition this role could redirect all production egress or delete
+  # production's NAT gateway. DenyProductionResources below lists no EC2 ARNs,
+  # so this condition is the only thing closing that path.
+  statement {
+    sid    = "StagingNatMutate"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateRoute",
+      "ec2:DeleteRoute",
+      "ec2:ReplaceRoute",
+      "ec2:DeleteNatGateway",
+      "ec2:ReleaseAddress",
+      "ec2:DeleteTags",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Environment"
+      values   = ["staging"]
+    }
+  }
+
+  # ec2:CreateAction confines this to tags applied during the two calls above.
+  # Consequence: a tag-only change to an existing gateway or address is a bare
+  # CreateTags with no CreateAction context and will be denied. Rare, and it
+  # fails loudly rather than silently.
+  statement {
+    sid       = "StagingNatTagOnCreate"
+    effect    = "Allow"
+    actions   = ["ec2:CreateTags"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["CreateNatGateway", "AllocateAddress"]
     }
   }
 
@@ -550,26 +681,12 @@ data "aws_iam_policy_document" "github_staging" {
   # ---------------------------------------------------------------------------
   # Deny blocks. Explicit Deny overrides every Allow above, including the
   # service wildcards, so these are the real boundaries of this role.
-  #
-  # Each block records the escalation path it closes and whether that path is
-  # reachable today, so a future edit that widens an Allow can be weighed
-  # against what these were protecting.
+  # Threat model and reachability analysis: docs/adr/0001-ci-iam-boundaries.md
   # ---------------------------------------------------------------------------
 
-  # CLOSES: staging automation reaching production.
-  #
-  # This role is assumed with no approval — every push to develop obtains it.
-  # StagingTerraform grants rds:*, ecs:*, lambda:*, sqs:* and elasticache:* on
-  # Resource "*", so without this block a workflow on develop could delete the
-  # production database or push a deployment onto production services. The
-  # production environment's approval gate would then be decorative: it gates
-  # the production ROLE while an ungated role holds equivalent power over the
-  # same resources.
-  #
-  # REACHABLE TODAY for those compute and data services. The state-file and
-  # secrets ARNs are defence in depth — ReadStagingAndGlobalState and
-  # StagingSecrets are already prefix-scoped, so those paths are shut; this
-  # keeps them shut if either statement is later widened.
+  # CLOSES: staging automation reaching production. This role is obtained by any
+  # push to develop with no approval, and StagingTerraform grants compute and
+  # data-service wildcards on Resource "*".
   statement {
     sid     = "DenyProductionResources"
     effect  = "Deny"
@@ -589,20 +706,12 @@ data "aws_iam_policy_document" "github_staging" {
     ]
   }
 
-  # CLOSES: converting temporary CI credentials into permanent ones.
+  # CLOSES: converting temporary CI credentials into permanent IAM user keys.
   #
-  # The escalation is iam:CreateUser → iam:AttachUserPolicy (Administrator
-  # Access) → iam:CreateAccessKey, which yields long-lived keys that outlive
-  # the 1-hour OIDC session, survive rotation of everything else, and are not
-  # bounded by region. Nothing in this architecture uses IAM users, so denying
-  # the whole surface costs nothing.
-  #
-  # NOT REACHABLE TODAY — no Allow above grants user, group, or access-key
-  # actions. This is the backstop that keeps that true, and it matters because
-  # the obvious guard does not work: aws:RequestedRegion cannot constrain IAM.
-  # IAM's endpoint lives in us-east-1, so a us-east-1 region condition ADMITS
-  # IAM calls rather than blocking them. That is why the IAM Allow statements
-  # above are scoped by ARN prefix instead of by region.
+  # Do not attempt to replace the ARN-prefix scoping on the IAM Allow
+  # statements above with a region condition. aws:RequestedRegion cannot
+  # constrain IAM: its endpoint lives in us-east-1, so a us-east-1 condition
+  # ADMITS IAM calls rather than blocking them.
   statement {
     sid    = "DenyIamUserManagement"
     effect = "Deny"
@@ -617,31 +726,13 @@ data "aws_iam_policy_document" "github_staging" {
     resources = ["*"]
   }
 
-  # CLOSES: the CI roles rewriting their own permissions, and staging
-  # unlocking production by editing production's trust policy.
+  # CLOSES: the CI roles rewriting their own permissions, and staging unlocking
+  # production by editing production's trust policy. Reachable because
+  # StagingServiceRoles and StagingServicePolicies span nahuat-*, and all three
+  # CI roles match that prefix — so the naming convention is load-bearing here.
   #
-  # This is the sharpest hole in the design, and it exists because of a name
-  # collision: StagingServiceRoles allows iam:PutRolePolicy,
-  # iam:AttachRolePolicy and iam:UpdateAssumeRolePolicy across role/nahuat-*,
-  # and BOTH CI roles are named nahuat-github-actions-*. Two escalations
-  # follow from that overlap:
-  #
-  #   1. iam:PutRolePolicy on its own role → attach Action "*" → every
-  #      restriction in this document becomes self-removable, making the
-  #      least-privilege split above worthless.
-  #   2. iam:UpdateAssumeRolePolicy on nahuat-github-actions-production →
-  #      widen its trust to any branch → assume the production role with no
-  #      environment approval, bypassing the gate entirely.
-  #
-  # StagingServicePolicies opens the same door via iam:CreatePolicyVersion on
-  # policy/nahuat-*. The OIDC provider is included because editing its
-  # thumbprint or client IDs subverts the federation these roles depend on.
-  #
-  # REACHABLE TODAY, and the reason this block is not optional.
-  #
-  # ARNs are written as literal strings rather than resource references
-  # (aws_iam_role.github_staging.arn and friends) because those resources
-  # consume this document — referencing them here creates a dependency cycle.
+  # ARNs are literal strings, not resource references: the roles and policies
+  # consume this document, so referencing them creates a dependency cycle.
   statement {
     sid     = "DenyCicdSelfModification"
     effect  = "Deny"
@@ -662,8 +753,14 @@ resource "aws_iam_policy" "github_production" {
 
 resource "aws_iam_policy" "github_staging" {
   name        = "nahuat-github-actions-staging"
-  description = "Staging CI/CD — image builds plus terraform on the staging application layer"
+  description = "Staging CI/CD — terraform on the staging application layer, plus deploys"
   policy      = data.aws_iam_policy_document.github_staging.json
+}
+
+resource "aws_iam_policy" "github_build" {
+  name        = "nahuat-github-actions-build"
+  description = "Container image builds — ECR push only, for both environments"
+  policy      = data.aws_iam_policy_document.github_build.json
 }
 
 resource "aws_iam_role_policy_attachment" "github_production" {
@@ -674,4 +771,9 @@ resource "aws_iam_role_policy_attachment" "github_production" {
 resource "aws_iam_role_policy_attachment" "github_staging" {
   role       = aws_iam_role.github_staging.name
   policy_arn = aws_iam_policy.github_staging.arn
+}
+
+resource "aws_iam_role_policy_attachment" "github_build" {
+  role       = aws_iam_role.github_build.name
+  policy_arn = aws_iam_policy.github_build.arn
 }

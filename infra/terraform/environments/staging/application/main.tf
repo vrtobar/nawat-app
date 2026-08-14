@@ -130,6 +130,8 @@ module "compute" {
   redis_host    = module.cache.redis_host
   redis_port    = module.cache.redis_port
 
+  image_tag = var.image_tag
+
   # Sizing and rollout
   api_cpu                    = var.api_cpu
   api_memory                 = var.api_memory

@@ -1,0 +1,203 @@
+name: CI
+
+# Deliberately credential-free: no OIDC, no secrets, no `permissions` beyond
+# reading the checkout. That is what makes it safe to run on pull requests from
+# forks, and it is why the Terraform job initialises with -backend=false rather
+# than reaching for state.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+# A superseded run tells you nothing, and PR pushes come in bursts.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  TERRAFORM_VERSION: '1.15.8'
+
+jobs:
+  # Path filtering lives here rather than in workflow-level `paths:`. A required
+  # status check skipped by a workflow-level filter never reports at all, and
+  # the pull request waits on it forever. Job-level conditions plus the `gate`
+  # job at the bottom give the same savings with an answer that always arrives.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.filter.outputs.node }}
+      terraform: ${{ steps.filter.outputs.terraform }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            node:
+              - 'apps/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
+            terraform:
+              - 'infra/terraform/**'
+              - '.github/workflows/ci.yml'
+            # Narrower than `node` on purpose. The quality job already runs
+            # `turbo run build`, which covers `next build` and `nest build`, so
+            # ordinary source changes cannot break the image without breaking
+            # that first. What this catches is the class the quality job cannot
+            # see: Dockerfile edits, and dependency changes that shift what has
+            # to be copied between stages or pruned out of the runtime tree.
+            docker:
+              - 'apps/*/Dockerfile'
+              - '.dockerignore'
+              - 'package-lock.json'
+              - 'apps/*/package.json'
+              - 'packages/*/package.json'
+              - '.github/workflows/ci.yml'
+
+  quality:
+    name: Lint, typecheck, test
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` runs @nahuat/database's postinstall (prisma generate), which
+      # the typecheck and test steps both need — the generated client is not
+      # committed.
+      - name: Install
+        run: npm ci
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # turbo resolves ^build first: api's tests import @nahuat/database
+      # through its "main" entry, which points at dist/.
+      - name: Unit tests
+        run: npm test
+
+  terraform:
+    name: Terraform validate
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # Covers modules/ as well, which the root-module validation below reaches
+      # only indirectly.
+      - name: Format
+        run: terraform fmt -check -recursive infra/terraform
+
+      # -backend=false skips S3 entirely: no credentials, no state read, no
+      # lock. It still downloads providers, which is what validate needs to
+      # check resource schemas.
+      - name: Validate root modules
+        run: |
+          set -euo pipefail
+          for dir in \
+            infra/terraform/global \
+            infra/terraform/environments/production/foundation \
+            infra/terraform/environments/production/application \
+            infra/terraform/environments/staging/foundation \
+            infra/terraform/environments/staging/application
+          do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+  # Built and thrown away. The point is that a broken Dockerfile fails review
+  # rather than a production deploy; pushing would require credentials this
+  # workflow deliberately does not have.
+  #
+  # ARM to match the task definitions' cpu_architecture. A mismatch produces an
+  # opaque exec format error at task start, so building x86 here would validate
+  # the wrong thing.
+  image:
+    name: Build ${{ matrix.app }} image
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/arm64
+          push: false
+          # Matches the deploy workflow. buildx otherwise emits an image index
+          # whose children are pushed untagged, and the ECR lifecycle rule
+          # expiring untagged images after a day would delete them out from
+          # under the live tag. Harmless here since nothing is pushed, but the
+          # two builds should not diverge.
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  # The one check to mark required in branch protection. It always runs, so it
+  # always reports, whatever the filters above decided. `result` is used rather
+  # than a plain `needs` dependency because a skipped job would otherwise be
+  # treated as success by `needs` alone — and here a skip genuinely is success,
+  # while a failure or cancellation is not.
+  gate:
+    name: All checks passed
+    needs: [quality, terraform, image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          set -euo pipefail
+          failed=0
+          for result in \
+            "quality=${{ needs.quality.result }}" \
+            "terraform=${{ needs.terraform.result }}" \
+            "image=${{ needs.image.result }}"
+          do
+            name="${result%%=*}"
+            status="${result#*=}"
+            case "$status" in
+              success|skipped) echo "ok       $name ($status)" ;;
+              *)               echo "FAILED   $name ($status)"; failed=1 ;;
+            esac
+          done
+          exit "$failed"

@@ -21,6 +21,18 @@ cache_node_type = "cache.t4g.micro" # Graviton: ~6% cheaper than t3
 # Database is empty and unused; flip to false before real traffic.
 apply_immediately = true
 
+# NOT the image that is running. The deploy workflow registers its own task
+# definition revision per release and the services ignore Terraform's, so this
+# value only takes effect when the environment is rebuilt from nothing. Treat
+# it as the disaster-recovery floor: the release a from-scratch apply would
+# come up on. Bump it when that floor should move, not on every deploy.
+#
+# PLACEHOLDER — the all-zero SHA satisfies the format validation but names no
+# real image, so a from-scratch rebuild would fail to pull. It must be replaced
+# with the first prod- tag pushed during the cutover from :latest, before the
+# services are pointed at Terraform-registered revisions.
+image_tag = "prod-0000000000000000000000000000000000000000"
+
 # Compute — production: conservative rollout, one task serving throughout
 api_cpu                    = 256
 api_memory                 = 512

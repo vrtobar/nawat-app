@@ -78,6 +78,14 @@ variable "apply_immediately" {
 # Compute
 # -----------------------------------------------------------------------------
 
+# Deliberately has no default. Production is applied by hand, and a default
+# would let an apply quietly write a stale image into a fresh task definition.
+# See the note in terraform.tfvars for what this value is actually for.
+variable "image_tag" {
+  description = "Image tag Terraform writes into task definitions; the deploy workflow overrides it"
+  type        = string
+}
+
 variable "api_cpu" {
   description = "API task CPU units; 256 = 0.25 vCPU"
   type        = number
