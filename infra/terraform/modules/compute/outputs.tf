@@ -34,6 +34,20 @@ output "web_service_name" {
   value       = aws_ecs_service.web.name
 }
 
+# Families rather than ARNs: the deploy workflow describes the family to get
+# Terraform's newest revision, substitutes the image, and registers its own.
+# Equal to the service names by construction, but exported separately so the
+# workflow does not depend on that staying true.
+output "api_task_family" {
+  description = "API task definition family"
+  value       = aws_ecs_task_definition.api.family
+}
+
+output "web_task_family" {
+  description = "Web task definition family"
+  value       = aws_ecs_task_definition.web.family
+}
+
 output "migrate_task_definition_arn" {
   description = "Migration task definition, run one-off before services roll"
   value       = aws_ecs_task_definition.migrate.arn

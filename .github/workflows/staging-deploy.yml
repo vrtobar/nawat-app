@@ -1,0 +1,293 @@
+name: Staging
+
+# Manual only. Staging is stood up to exercise something and torn down again,
+# so there is no push trigger — an automatic staging deploy would mean paying
+# for an environment nobody is looking at.
+#
+# MUST be dispatched from the `develop` ref. The staging role's trust policy
+# names repo:<repo>:ref:refs/heads/develop and nothing else, so a dispatch from
+# any other branch fails at AssumeRoleWithWebIdentity rather than at anything
+# that explains itself.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        required: true
+        type: choice
+        options:
+          - up # build, apply infrastructure, migrate
+          - deploy # build, migrate, roll services onto new code
+          - down # destroy the application layer
+        default: deploy
+
+# Never two at once, and never cancelled mid-flight: a half-applied Terraform
+# run leaves state and reality disagreeing, which is worse than queueing.
+concurrency:
+  group: staging
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: '1.15.8'
+  TF_DIR: infra/terraform/environments/staging/application
+
+jobs:
+  # Skipped on `down` — a teardown needs no artifact, and building one would
+  # add three minutes to it.
+  images:
+    name: Push ${{ matrix.app }}
+    if: inputs.action != 'down'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: true
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+
+      # No `environment:` key on this job. Naming an environment changes the
+      # OIDC subject claim to repo:<repo>:environment:<name>, which would stop
+      # matching the build role's ref-based trust condition.
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ vars.ECR_REGISTRY }}/nahuat-${{ matrix.app }}:staging-${{ github.sha }}
+          # Without these, buildx pushes an image index whose children are
+          # untagged, and the ECR lifecycle rule expiring untagged images after
+          # one day deletes them out from under the live tag — pulls start
+          # failing about 24 hours after a deploy with no code change to blame.
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=staging-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=staging-${{ matrix.app }}
+
+  infra:
+    name: Terraform ${{ inputs.action }}
+    needs: images
+    if: always() && (inputs.action == 'down' || needs.images.result == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      cluster: ${{ steps.out.outputs.cluster }}
+      subnets: ${{ steps.out.outputs.subnets }}
+      security_group: ${{ steps.out.outputs.security_group }}
+      migrate_family: ${{ steps.out.outputs.migrate_family }}
+      api_family: ${{ steps.out.outputs.api_family }}
+      web_family: ${{ steps.out.outputs.web_family }}
+      api_service: ${{ steps.out.outputs.api_service }}
+      web_service: ${{ steps.out.outputs.web_service }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_STAGING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform -chdir="$TF_DIR" init -input=false
+
+      # image_tag has no default and is not in terraform.tfvars, so it must be
+      # passed. Deliberate: staging is created and destroyed by this workflow,
+      # and a default would let an apply quietly deploy an image nobody chose.
+      - name: Apply
+        if: inputs.action == 'up'
+        run: |
+          terraform -chdir="$TF_DIR" apply -auto-approve -input=false \
+            -var "image_tag=staging-${GITHUB_SHA}"
+
+      # The tag is irrelevant to a destroy but the variable is still required,
+      # so it is passed a well-formed placeholder rather than made optional —
+      # optional here would weaken the guarantee on apply.
+      - name: Destroy
+        if: inputs.action == 'down'
+        run: |
+          terraform -chdir="$TF_DIR" destroy -auto-approve -input=false \
+            -var "image_tag=staging-0000000000000000000000000000000000000000"
+
+      - name: Read outputs
+        id: out
+        if: inputs.action != 'down'
+        run: |
+          set -euo pipefail
+          get() { terraform -chdir="$TF_DIR" output -raw "$1"; }
+          {
+            echo "cluster=$(get ecs_cluster_name)"
+            echo "security_group=$(get ecs_api_sg_id)"
+            echo "migrate_family=$(get migrate_task_family)"
+            echo "api_family=$(get api_task_family)"
+            echo "web_family=$(get web_task_family)"
+            echo "api_service=$(get api_service_name)"
+            echo "web_service=$(get web_service_name)"
+            echo "subnets=$(terraform -chdir="$TF_DIR" output -json ecs_subnet_ids | jq -r 'join(",")')"
+          } >> "$GITHUB_OUTPUT"
+
+  # Before services roll, so a failed migration stops the deploy rather than
+  # leaving new code against an old schema.
+  migrate:
+    name: Run migrations
+    needs: infra
+    if: inputs.action != 'down'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_STAGING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The migration task has no service, so nothing keeps its revision
+      # current. Its own revision is registered here with the image being
+      # deployed and THAT revision is run by ARN — running the family name
+      # would migrate using whatever image Terraform last wrote, which on a
+      # `deploy` is the previous release.
+      - name: Register migration revision
+        id: register
+        env:
+          FAMILY: ${{ needs.infra.outputs.migrate_family }}
+          IMAGE: ${{ vars.ECR_REGISTRY }}/nahuat-api:staging-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query taskDefinition > base.json
+
+          jq --arg image "$IMAGE" '
+            .containerDefinitions[0].image = $image
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' base.json > next.json
+
+          arn=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+          echo "Registered $arn"
+
+      - name: Run and wait
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          TASK_DEF: ${{ steps.register.outputs.arn }}
+          SUBNETS: ${{ needs.infra.outputs.subnets }}
+          SG: ${{ needs.infra.outputs.security_group }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+
+          # A task that never starts reports exitCode null, so anything other
+          # than an explicit 0 is a failure — defaulting to pass here would let
+          # a broken migration through silently.
+          read -r exit_code reason < <(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
+
+          echo "exitCode=$exit_code reason=$reason"
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::Migration task did not exit cleanly. Check /ecs/nahuat-staging/migrate."
+            exit 1
+          fi
+
+  # Skipped on `up`: terraform apply just created the services pointing at the
+  # image built in this run, so there is nothing to roll.
+  deploy:
+    name: Roll ${{ matrix.app }}
+    needs: [infra, migrate]
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_STAGING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Terraform owns the task definition shape; this copies its newest
+      # revision and substitutes only the image, so Terraform's environment,
+      # secret and sizing changes still reach staging by way of the revision
+      # being copied.
+      - name: Register revision and update service
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          FAMILY: ${{ matrix.app == 'api' && needs.infra.outputs.api_family || needs.infra.outputs.web_family }}
+          SERVICE: ${{ matrix.app == 'api' && needs.infra.outputs.api_service || needs.infra.outputs.web_service }}
+          IMAGE: ${{ vars.ECR_REGISTRY }}/nahuat-${{ matrix.app }}:staging-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query taskDefinition > base.json
+
+          jq --arg image "$IMAGE" '
+            .containerDefinitions[0].image = $image
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' base.json > next.json
+
+          arn=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$arn" >/dev/null
+          echo "$SERVICE -> $arn"
+
+      # The deployment circuit breaker rolls back on its own; without this the
+      # workflow would report success while ECS was reverting underneath it.
+      - name: Wait for stability
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          SERVICE: ${{ matrix.app == 'api' && needs.infra.outputs.api_service || needs.infra.outputs.web_service }}
+        run: aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+  summary:
+    name: Summary
+    needs: [images, infra, migrate, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "### Staging: \`${{ inputs.action }}\`"
+            echo
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| Images | ${{ needs.images.result }} |"
+            echo "| Terraform | ${{ needs.infra.result }} |"
+            echo "| Migrations | ${{ needs.migrate.result }} |"
+            echo "| Services | ${{ needs.deploy.result }} |"
+            echo
+            if [ "${{ inputs.action }}" = "down" ]; then
+              echo "Application layer destroyed. Foundation is untouched."
+            else
+              echo "Tag \`staging-${{ github.sha }}\` — https://staging.nahuat.com"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

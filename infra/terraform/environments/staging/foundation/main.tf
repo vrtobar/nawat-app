@@ -165,7 +165,11 @@ resource "aws_cloudfront_distribution" "cdn" {
   comment         = "Nahuat CDN - audio and image assets"
   price_class     = "PriceClass_100" # US + Europe; adequate for Central America
 
-  aliases = ["cdn.staging.nahuat.com"]
+  # cdn-staging, not cdn.staging: the ACM certificate is *.nahuat.com, which
+  # matches exactly ONE label. "cdn.staging.nahuat.com" is two and CloudFront
+  # rejects the distribution with InvalidViewerCertificate. Same rule that
+  # forced alb-{env} below.
+  aliases = ["cdn-staging.nahuat.com"]
 
   origin {
     origin_id                = "s3-assets"
@@ -236,7 +240,10 @@ resource "aws_cloudfront_distribution" "web" {
   # /index.html, which an SSR Next.js origin has no route for and answers with
   # a 404. It is an S3-static-hosting setting, not a fit for this origin.
 
-  aliases = ["staging.nahuat.com", "www.staging.nahuat.com"]
+  # No www for staging. "www.staging.nahuat.com" is two labels and therefore
+  # outside the *.nahuat.com certificate; a www-staging.nahuat.com alias would
+  # be covered but nobody types www at a staging host. Production keeps its www.
+  aliases = ["staging.nahuat.com"]
 
   origin {
     origin_id   = "alb"
@@ -402,21 +409,9 @@ resource "aws_route53_record" "root" {
   }
 }
 
-resource "aws_route53_record" "www" {
-  zone_id = data.terraform_remote_state.global.outputs.route53_zone_id
-  name    = "www.staging.nahuat.com"
-  type    = "A"
-
-  alias {
-    name                   = aws_cloudfront_distribution.web.domain_name
-    zone_id                = aws_cloudfront_distribution.web.hosted_zone_id
-    evaluate_target_health = false
-  }
-}
-
 resource "aws_route53_record" "cdn" {
   zone_id = data.terraform_remote_state.global.outputs.route53_zone_id
-  name    = "cdn.staging.nahuat.com"
+  name    = "cdn-staging.nahuat.com"
   type    = "A"
 
   alias {
