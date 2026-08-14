@@ -468,6 +468,87 @@ data "aws_iam_policy_document" "github_staging" {
     }
   }
 
+  # ---------------------------------------------------------------------------
+  # NAT gateway
+  #
+  # The only EC2 write access this role has, and the only reason it needs any:
+  # modules/nat lives in the application layer rather than foundation so that
+  # destroying staging takes the ~$32/month gateway with it. That placement is
+  # what puts EC2 mutations on the CI path.
+  #
+  # Split across three statements because the create and the destroy sides
+  # cannot be constrained the same way.
+  # ---------------------------------------------------------------------------
+
+  # Creates. Unscoped because there is nothing to scope against: the gateway
+  # and address do not exist when the call is authorized, so a resource-tag
+  # condition would evaluate against an untagged resource and deny every time.
+  # Region is the only available bound.
+  statement {
+    sid    = "StagingNatProvision"
+    effect = "Allow"
+    actions = [
+      "ec2:AllocateAddress",
+      "ec2:CreateNatGateway",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+
+  # Destroys, plus the route writes. These act on resources that already exist
+  # and already carry Environment from the provider's default_tags, so they are
+  # fenced to staging-tagged resources rather than left on "*".
+  #
+  # This is not ceremonial. CreateRoute targets a route table owned by the
+  # FOUNDATION layer, and without the tag condition this role could write a
+  # default route into production's private route tables — redirecting all
+  # production egress — or delete production's NAT gateway outright. Neither is
+  # covered by DenyProductionResources below, which lists no EC2 ARNs.
+  statement {
+    sid    = "StagingNatMutate"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateRoute",
+      "ec2:DeleteRoute",
+      "ec2:ReplaceRoute",
+      "ec2:DeleteNatGateway",
+      "ec2:ReleaseAddress",
+      "ec2:DeleteTags",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Environment"
+      values   = ["staging"]
+    }
+  }
+
+  # Tag-on-create. ec2:CreateAction confines this to tags applied as part of
+  # the two calls above, so it cannot be used to retag unrelated resources.
+  #
+  # Consequence worth knowing: a tag-only change to an existing gateway or
+  # address is a bare CreateTags with no CreateAction context, and will be
+  # denied. That is rare (the tags come from default_tags plus a Name derived
+  # from var.prefix) and fails loudly in CI rather than silently.
+  statement {
+    sid       = "StagingNatTagOnCreate"
+    effect    = "Allow"
+    actions   = ["ec2:CreateTags"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["CreateNatGateway", "AllocateAddress"]
+    }
+  }
+
   # Secrets: read metadata and values for staging only. The AWS-managed RDS
   # master secret is created by RDS itself, hence the second ARN pattern.
   statement {
