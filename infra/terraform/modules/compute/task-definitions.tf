@@ -66,10 +66,16 @@ locals {
 # -----------------------------------------------------------------------------
 # API
 #
-# The image tag is :latest and stays that way. Terraform defines the shape of
-# the task; GitHub Actions ships new code by forcing a new deployment, which
-# re-pulls :latest. That keeps image rollout out of Terraform's state entirely
-# — otherwise every deploy would be a Terraform apply.
+# TODO(feat/terraform-application-ci): replace :latest with immutable
+# prod-{sha} tags. See BACKLOG.md "Switch task definitions from :latest to
+# immutable tags". :latest makes rollback require re-tagging in ECR, records no
+# provenance, and defeats the deployment circuit breaker in ecs.tf — which can
+# only roll back to a revision that names the same failing image.
+# COUPLED: that change also restores ignore_changes = [task_definition] on the
+# services in ecs.tf.
+#
+# For now: Terraform defines the task shape, GitHub Actions ships code with
+# --force-new-deployment, which re-pulls :latest against the same revision.
 # -----------------------------------------------------------------------------
 resource "aws_ecs_task_definition" "api" {
   family                   = "${var.prefix}-api"
@@ -171,13 +177,16 @@ resource "aws_ecs_task_definition" "web" {
         { name = "APP_BASE_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
       ]
 
-      # v4 SDK variable names. AUTH0_SECRET encrypts the session cookie and is
-      # unrelated to the Auth0 application credentials beside it.
+      # v4 SDK variable names. AUTH0_SECRET encrypts the session cookie; it is
+      # a separate key inside the auth0 secret rather than a reuse of
+      # INTERNAL_SECRET, which guards the /auth/role endpoint. Sharing one
+      # value across both would mean compromising either one compromises the
+      # other, despite serving unrelated trust boundaries.
       secrets = [
         { name = "AUTH0_DOMAIN", valueFrom = "${var.secret_arns["auth0"]}:domain::" },
         { name = "AUTH0_CLIENT_ID", valueFrom = "${var.secret_arns["auth0"]}:clientId::" },
         { name = "AUTH0_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0"]}:clientSecret::" },
-        { name = "AUTH0_SECRET", valueFrom = "${var.secret_arns["internal"]}:secret::" },
+        { name = "AUTH0_SECRET", valueFrom = "${var.secret_arns["auth0"]}:sessionSecret::" },
       ]
 
       logConfiguration = {

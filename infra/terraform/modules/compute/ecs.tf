@@ -21,10 +21,17 @@ resource "aws_ecs_cluster" "main" {
 # the gateway's ~$32/month but put the tasks one security group mistake away
 # from being directly reachable.
 #
-# ignore_changes on task_definition is what makes the deploy pipeline work:
-# GitHub Actions calls UpdateService with --force-new-deployment, which
-# re-pulls :latest without registering a new revision. Without this,
-# the next terraform apply would revert whatever the pipeline did.
+# Terraform owns the task definition; CI does not. The deploy pipeline ships
+# code with --force-new-deployment, which re-pulls :latest against the SAME
+# revision, so the two never contend. Putting task_definition in
+# ignore_changes would be actively harmful here: Terraform would register new
+# revisions for env var, secret, and sizing changes that the service never
+# adopts. Only desired_count is ignored, because autoscaling owns it.
+#
+# TODO(feat/terraform-application-ci): when task definitions move to immutable
+# prod-{sha} tags, CI starts owning the revision pointer and task_definition
+# MUST go back into ignore_changes. See BACKLOG.md and the matching TODO in
+# task-definitions.tf — the two changes are one decision.
 # -----------------------------------------------------------------------------
 
 resource "aws_ecs_service" "api" {
@@ -66,7 +73,7 @@ resource "aws_ecs_service" "api" {
   depends_on = [aws_lb_listener_rule.api]
 
   lifecycle {
-    ignore_changes = [task_definition, desired_count]
+    ignore_changes = [desired_count]
   }
 
   tags = { Name = "${var.prefix}-api" }
@@ -104,7 +111,7 @@ resource "aws_ecs_service" "web" {
   depends_on = [aws_lb_listener.https]
 
   lifecycle {
-    ignore_changes = [task_definition, desired_count]
+    ignore_changes = [desired_count]
   }
 
   tags = { Name = "${var.prefix}-web" }
