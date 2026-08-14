@@ -12,9 +12,17 @@ export function buildDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string |
   const { DB_USERNAME, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME } = env;
   if (!DB_USERNAME || !DB_PASSWORD || !DB_HOST || !DB_PORT || !DB_NAME) return undefined;
 
+  // sslmode is required, not optional: RDS ships rds.force_ssl=1 by default,
+  // and an unencrypted connection is refused outright with
+  // "no pg_hba.conf entry ... no encryption".
+  //
+  // no-verify encrypts but does not validate the server certificate. Full
+  // verification needs the Amazon RDS CA bundle shipped in the image; see
+  // BACKLOG.md. Only this branch adds it — local Postgres has no TLS at all,
+  // and forcing it there would break development.
   return (
     `postgresql://${encodeURIComponent(DB_USERNAME)}:${encodeURIComponent(DB_PASSWORD)}` +
-    `@${DB_HOST}:${DB_PORT}/${DB_NAME}`
+    `@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=no-verify`
   );
 }
 
