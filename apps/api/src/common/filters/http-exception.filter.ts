@@ -9,6 +9,11 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
+import {
+  CORRELATION_ID_HEADER,
+  resolveCorrelationId,
+} from '../middleware/correlation-id.middleware';
+
 // Every error leaves the API in the envelope shape declared in @nahuat/shared:
 //
 //   { success: false, error: { code, message, correlationId, details? } }
@@ -29,10 +34,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // Assigned by CorrelationIdMiddleware. The fallback covers throws from
-    // before middleware runs, which should not happen but must not produce an
-    // envelope missing a required field.
-    const correlationId = req.correlationId ?? 'req_unassigned';
+    // Normally assigned by CorrelationIdMiddleware. It is not always: NestJS
+    // registers body-parser ahead of configure() middleware, so a malformed
+    // JSON body throws before the middleware runs. resolveCorrelationId falls
+    // back to the client's header, or generates one — never a fixed sentinel,
+    // which would make every such request share an id that traces nothing.
+    const correlationId = resolveCorrelationId(req);
+
+    // The middleware sets this header on responses it sees. For the requests
+    // it never saw, this is the only place it can be set, and the id is no use
+    // to a caller who cannot read it.
+    if (!res.headersSent) {
+      res.setHeader(CORRELATION_ID_HEADER, correlationId);
+    }
 
     const { code, message, details } = describe(exception, status);
 

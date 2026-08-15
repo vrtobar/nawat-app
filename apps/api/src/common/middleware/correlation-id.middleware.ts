@@ -34,14 +34,29 @@ declare module 'express' {
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
-    const supplied = req.header(CORRELATION_ID_HEADER);
-    const correlationId = isUsable(supplied) ? supplied : generate();
+    const correlationId = resolveCorrelationId(req);
 
     req.correlationId = correlationId;
     res.setHeader(CORRELATION_ID_HEADER, correlationId);
 
     next();
   }
+}
+
+// Exported because this middleware is not the first thing to run. NestJS
+// registers body-parser ahead of configure() middleware, so a malformed JSON
+// body throws before this executes — verified: such a request reaches the
+// exception filter with req.correlationId unset.
+//
+// The filter calls this to recover, which is why the fallback must not be a
+// constant. A fixed sentinel would give every malformed request the same id,
+// and an id shared by everything identifies nothing — worse than none, because
+// it looks real when a user quotes it in a support request.
+export function resolveCorrelationId(req: Request): string {
+  if (req.correlationId !== undefined) return req.correlationId;
+
+  const supplied = req.header(CORRELATION_ID_HEADER);
+  return isUsable(supplied) ? supplied : generate();
 }
 
 // A client may propagate its own ID so one trace spans services. Accepted only

@@ -44,8 +44,9 @@ const run = (exception: unknown, correlationId: string | null = 'req_abc123'): C
         correlationId: correlationId ?? undefined,
         method: 'GET',
         url: '/api/v1/entries',
+        header: () => undefined,
       }),
-      getResponse: () => res,
+      getResponse: () => ({ ...res, headersSent: false, setHeader: () => undefined }),
     }),
   };
 
@@ -110,11 +111,16 @@ describe('HttpExceptionFilter', () => {
     expect(body.error.correlationId).toBe('req_traced99');
   });
 
-  it('still emits a correlation id when middleware did not run', () => {
-    // The envelope requires the field. An error thrown before middleware must
-    // not produce a body that fails its own schema.
-    const { body } = run(new NotFoundException(), null);
-    expect(body.error.correlationId).toBe('req_unassigned');
+  it('generates a unique id when middleware did not run', () => {
+    // Body-parser throws before configure() middleware, so this path is
+    // reachable by any client sending malformed JSON. A fixed sentinel would
+    // give every such request the same id — one that traces nothing while
+    // looking real enough to quote in a support ticket.
+    const first = run(new NotFoundException(), null).body.error.correlationId;
+    const second = run(new NotFoundException(), null).body.error.correlationId;
+
+    expect(first).toMatch(/^req_[A-Za-z0-9_-]+$/);
+    expect(first).not.toBe(second);
   });
 
   it('omits details when there are none', () => {

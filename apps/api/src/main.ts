@@ -35,9 +35,14 @@ async function bootstrap() {
   // @Body(new ZodValidationPipe(CreateEntrySchema)).
   //
   // TODO(PLAN §12): still to come —
-  //   - TransformInterceptor     (common/interceptors) — success envelope
-  //   - LoggingInterceptor       (common/interceptors) — Pino + correlationId
   //   - JwtAuthGuard via APP_GUARD, global by default with @Public() escape
+  //
+  //   - Request logging as MIDDLEWARE, not an interceptor. PLAN §12 says
+  //     LoggingInterceptor; that shape cannot work. Interceptors run after
+  //     guards, so a request rejected by JwtAuthGuard never reaches one — no
+  //     401 or 403 would ever be logged, which is the opposite of what an
+  //     access log is for. Log on response finish from middleware instead, and
+  //     keep an interceptor only if handler-level timing is wanted separately.
 
   const port = config.get('PORT', { infer: true });
   await app.listen(port);
