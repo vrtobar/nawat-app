@@ -82,9 +82,13 @@ variable "api_domain" {
 
 variable "alb_domain" {
   description = <<-EOT
-    Internal ALB hostname: alb.staging.nahuat.com, alb-production.nahuat.com.
-    The two differ in shape because production shares the one-label
-    *.nahuat.com certificate while staging has its own wildcard.
+    Internal ALB hostname: alb.staging.nahuat.com, alb.nahuat.com. Same shape
+    in both environments — production drops the environment label because it
+    owns the apex, exactly as api_domain does.
+
+    Each is one label under its environment's wildcard certificate, which is
+    what the earlier hyphenated alb-production.nahuat.com was working around:
+    alb.production.nahuat.com would have been two labels under *.nahuat.com.
 
     Must match the origin domain the foundation CloudFront distribution
     already points at — this record appearing and disappearing is what drives
