@@ -4,6 +4,7 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { validateEnv } from './config/env.validation';
@@ -37,6 +38,10 @@ import { HealthModule } from './modules/health/health.module';
     // Authentication is the default so that forgetting a decorator produces a
     // 401 in development rather than an endpoint quietly open to the internet.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // MUST stay after JwtAuthGuard. Nest runs global guards in registration
+    // order, and this one reads the user that JwtAuthGuard attaches — reversed,
+    // every @Roles route would 403 because no user exists yet.
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule implements NestModule {
