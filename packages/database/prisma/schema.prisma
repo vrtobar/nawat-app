@@ -94,8 +94,6 @@ model User {
   createdTranslations Translation[] @relation("TranslationCreator")
   updatedTranslations Translation[] @relation("TranslationUpdater")
 
-  @@index([username])
-  @@index([deletedAt])
   @@map("users")
 }
 
@@ -137,13 +135,16 @@ model Entry {
 
   translations Translation[]
 
-  @@index([nahuatContent])
-  @@index([isPublished])
-  @@index([deletedAt])
-  // Serves the hot "public dictionary list" query: WHERE isPublished = true
-  // AND deletedAt IS NULL. Leftmost-prefix also covers isPublished-only
-  // lookups, so it overlaps with the single-column index above.
-  @@index([isPublished, deletedAt])
+  // Substring search (ILIKE '%foo%'). A btree index cannot serve a leading
+  // wildcard; a trigram GIN index can. Depends on the pg_trgm extension,
+  // created by 20260815155000_enable_pg_trgm — Prisma does not model
+  // extensions, so nothing here can declare that dependency. Regenerating
+  // the init migration is safe; that one must not be deleted.
+  @@index([nahuatContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "entries_nahuat_content_trgm_idx")
+  // NOT THE FULL INDEX SET. entries_live_idx is a partial index defined in
+  // 20260815160500_partial_live_indexes — Prisma cannot express a WHERE
+  // clause, so it is invisible here. Check that migration before adding an
+  // index on (isPublished, deletedAt): the partial one already covers it.
   @@map("entries")
 }
 
@@ -219,12 +220,13 @@ model Translation {
   @@index([spanishContent])
   @@index([englishContent])
   @@index([dialectCode])
-  @@index([entryId])
-  @@index([isPublished])
-  @@index([deletedAt])
-  // Serves the hot "public dictionary list/search" filter — see note on
-  // Entry's equivalent index above.
-  @@index([isPublished, deletedAt])
+  // Substring search — see note on Entry's trigram index above. Separate
+  // indexes rather than one multi-column GIN: searches hit either language
+  // alone, and the planner can BitmapOr the two when a query spans both.
+  @@index([spanishContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_spanish_content_trgm_idx")
+  @@index([englishContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_english_content_trgm_idx")
+  // See note on Entry: translations_live_idx is partial and lives in the
+  // migration, not here.
   @@map("translations")
 }
 
@@ -262,7 +264,6 @@ model FlashcardSet {
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   flashcards Flashcard[]
 
-  @@index([userId])
   @@index([userId, updatedAt])
   @@index([isOfficial, isFeatured, updatedAt])
   @@map("flashcard_sets")
@@ -277,7 +278,6 @@ model Flashcard {
   translation Translation  @relation(fields: [translationId], references: [id], onDelete: Restrict)
 
   @@unique([setId, translationId])
-  @@index([setId])
   @@map("flashcards")
 }
 
@@ -345,13 +345,10 @@ model Course {
   units              Unit[]
   userCourseProgress UserCourseProgress[]
 
+  // Kept unfiltered for the admin panel, which browses drafts and archived
+  // courses. The public course browser uses courses_live_idx instead — a
+  // partial index in 20260815160500_partial_live_indexes, not visible here.
   @@index([levelId, order])
-  @@index([isPublished])
-  @@index([deletedAt])
-  @@index([archivedAt])
-  // Serves the hot "course browser" query: WHERE isPublished = true AND
-  // deletedAt IS NULL (archivedAt filtered separately where relevant).
-  @@index([isPublished, deletedAt])
   @@map("courses")
 }
 
@@ -379,11 +376,9 @@ model Unit {
   lessons          Lesson[]
   userUnitProgress UserUnitProgress[]
 
+  // Admin-facing, same split as Course — units_live_idx is partial and lives
+  // in the migration.
   @@index([courseId, order])
-  @@index([isPublished])
-  @@index([deletedAt])
-  @@index([archivedAt])
-  @@index([isPublished, deletedAt])
   @@map("units")
 }
 
@@ -421,11 +416,9 @@ model Lesson {
   userLessonProgress UserLessonProgress[]
   userLessonAttempts UserLessonAttempt[]
 
+  // Admin-facing, same split as Course — lessons_live_idx is partial and
+  // lives in the migration.
   @@index([unitId, order])
-  @@index([isPublished])
-  @@index([deletedAt])
-  @@index([archivedAt])
-  @@index([isPublished, deletedAt])
   @@map("lessons")
 }
 
@@ -503,7 +496,6 @@ model ExerciseTranslation {
   translation Translation @relation(fields: [translationId], references: [id], onDelete: Restrict)
 
   @@unique([exerciseId, translationId])
-  @@index([exerciseId])
   @@map("exercise_translations")
 }
 
@@ -560,7 +552,6 @@ model UserCourseProgress {
   course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
 
   @@unique([userId, courseId])
-  @@index([userId])
   @@map("user_course_progress")
 }
 
@@ -581,7 +572,6 @@ model UserUnitProgress {
   unit Unit @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@unique([userId, unitId])
-  @@index([userId])
   @@map("user_unit_progress")
 }
 
@@ -608,7 +598,6 @@ model UserLessonProgress {
   lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Restrict)
 
   @@unique([userId, lessonId])
-  @@index([userId])
   @@map("user_lesson_progress")
 }
 
