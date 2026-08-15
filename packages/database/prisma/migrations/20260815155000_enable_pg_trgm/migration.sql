@@ -1,0 +1,24 @@
+-- Enable trigram search support.
+--
+-- Its own migration, ordered before the initial schema, for two reasons.
+--
+-- 1. Prisma cannot generate this. Without the postgresqlExtensions preview
+--    feature Prisma neither creates extensions nor drops them, so the
+--    statement has to be hand-written. Kept inside the generated init
+--    migration it would be destroyed the next time anyone regenerated that
+--    file with `prisma migrate dev --create-only --name init` — silently, and
+--    only failing later when the gin_trgm_ops indexes run against a fresh
+--    database. Prisma only ever rewrites the migration it is told to
+--    generate, so an isolated file is safe.
+--
+-- 2. It can be applied out-of-band. If an environment ever refuses extension
+--    creation to the migrating role, this one migration can be run manually
+--    and marked with `prisma migrate resolve --applied`, which is impossible
+--    for a statement embedded in init.
+--
+-- Ordering is load-bearing: the gin_trgm_ops indexes in the init migration
+-- error if pg_trgm does not already exist, so this must sort first.
+--
+-- pg_trgm is a trusted extension as of PostgreSQL 13, so the RDS master user
+-- installs it without rds_superuser.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
