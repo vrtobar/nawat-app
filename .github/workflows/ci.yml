@@ -41,6 +41,7 @@ jobs:
       node: ${{ steps.filter.outputs.node }}
       terraform: ${{ steps.filter.outputs.terraform }}
       docker: ${{ steps.filter.outputs.docker }}
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - uses: actions/checkout@v7
 
@@ -71,6 +72,12 @@ jobs:
               - 'apps/*/package.json'
               - 'packages/*/package.json'
               - '.github/workflows/ci.yml'
+            # Every workflow, not just ci.yml. The deploy workflows were
+            # previously matched by no filter at all, so a pull request
+            # changing only one of them ran zero jobs and still reported
+            # "All checks passed".
+            workflows:
+              - '.github/workflows/**'
 
   quality:
     name: Lint, typecheck, test
@@ -180,6 +187,29 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 
+  # Catches what YAML validity cannot: `needs` naming a job that does not
+  # exist, ${{ }} expressions referencing missing outputs or contexts
+  # unavailable at that point, unknown action inputs, and — via the shellcheck
+  # it embeds — bugs inside every `run:` block. The deploy workflows carry most
+  # of the shell in this repo and none of it was checked by anything.
+  #
+  # Credential-free like the rest of CI: actionlint only reads files.
+  workflows:
+    name: Lint workflows
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned rather than tracking latest: a linter that changes rules on its
+      # own schedule turns an unrelated pull request red for reasons its author
+      # did not introduce.
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
+
   # The one check to mark required in branch protection. It always runs, so it
   # always reports, whatever the filters above decided. `result` is used rather
   # than a plain `needs` dependency because a skipped job would otherwise be
@@ -187,7 +217,7 @@ jobs:
   # while a failure or cancellation is not.
   gate:
     name: All checks passed
-    needs: [quality, terraform, image]
+    needs: [quality, terraform, image, workflows]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -198,7 +228,8 @@ jobs:
           for result in \
             "quality=${{ needs.quality.result }}" \
             "terraform=${{ needs.terraform.result }}" \
-            "image=${{ needs.image.result }}"
+            "image=${{ needs.image.result }}" \
+            "workflows=${{ needs.workflows.result }}"
           do
             name="${result%%=*}"
             status="${result#*=}"
