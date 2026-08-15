@@ -582,6 +582,25 @@ data "aws_iam_policy_document" "github_staging" {
     }
   }
 
+  # Releasing an EIP that is still attached requires disassociating it first,
+  # and Terraform does both in one destroy. This cannot carry the tag condition
+  # used below: DisassociateAddress authorizes against the network interface as
+  # well as the address, and a NAT gateway's ENI is created by AWS without our
+  # default_tags, so the condition would evaluate against an untagged resource
+  # and deny every time. Bounded by region here and by DenyProductionEc2 below.
+  statement {
+    sid       = "StagingNatDisassociate"
+    effect    = "Allow"
+    actions   = ["ec2:DisassociateAddress"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+
   # ec2:CreateAction confines this to tags applied during the two calls above.
   # Consequence: a tag-only change to an existing gateway or address is a bare
   # CreateTags with no CreateAction context and will be denied. Rare, and it
@@ -751,6 +770,27 @@ data "aws_iam_policy_document" "github_staging" {
       "arn:aws:sqs:us-east-1:${data.aws_caller_identity.current.account_id}:nahuat-production-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/nahuat-production-*",
     ]
+  }
+
+  # CLOSES: the unscopable EC2 grants above reaching production. Every EC2
+  # resource this project creates carries Environment from the provider's
+  # default_tags, so denying on that tag is precise where a resource-ARN list
+  # cannot be — EIP and NAT gateway IDs are generated, not predictable.
+  #
+  # This is what makes StagingNatDisassociate safe to leave unfenced: without
+  # it, that grant would allow detaching production's NAT gateway address and
+  # cutting all production egress.
+  statement {
+    sid       = "DenyProductionEc2"
+    effect    = "Deny"
+    actions   = ["ec2:*"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Environment"
+      values   = ["production"]
+    }
   }
 
   # CLOSES: converting temporary CI credentials into permanent IAM user keys.
