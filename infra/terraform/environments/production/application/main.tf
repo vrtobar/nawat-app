@@ -20,6 +20,11 @@ locals {
   # Production drops the environment from the hostname; other
   # environments include it.
   api_domain = "api.nahuat.com"
+
+  # Still hyphenated: production shares the *.nahuat.com certificate, which
+  # matches one label, so alb.production.nahuat.com would not be covered.
+  # Renaming this to alb.nahuat.com is tracked separately.
+  alb_domain = "alb-production.nahuat.com"
 }
 
 # One remote state read, not two: foundation re-exports what it needs from
@@ -120,7 +125,7 @@ module "compute" {
   # derived; alb_domain must match what foundation's CloudFront already
   # points at.
   api_domain = local.api_domain
-  alb_domain = "alb-${var.environment}.nahuat.com"
+  alb_domain = local.alb_domain
 
   # Data layer
   db_secret_arn = module.database.master_user_secret_arn

@@ -110,9 +110,12 @@ output "web_distribution_id" {
 # Re-exported so the application layer reads one remote state instead of two.
 # -----------------------------------------------------------------------------
 
+# Staging's own certificate, not the global one. Reading the validation
+# resource rather than the certificate means consumers cannot attach a cert
+# ACM has not issued yet.
 output "acm_certificate_arn" {
-  description = "Wildcard ACM cert ARN, for the ALB HTTPS listener"
-  value       = data.terraform_remote_state.global.outputs.acm_certificate_arn
+  description = "Staging ACM cert ARN (staging.nahuat.com + *.staging.nahuat.com), for the ALB HTTPS listener"
+  value       = aws_acm_certificate_validation.staging.certificate_arn
 }
 
 output "route53_zone_id" {

@@ -140,6 +140,73 @@ resource "aws_s3_object" "maintenance_page" {
 }
 
 # =============================================================================
+# ACM — STAGING CERTIFICATE
+#
+# Staging carries its own certificate rather than borrowing the global
+# *.nahuat.com one. Two reasons, and the second is the one that matters:
+#
+#   1. Isolation. Nothing staging-side depends on a production certificate, so
+#      a replacement or validation failure in one environment cannot reach the
+#      other. This matches the layer split — staging owns staging's resources.
+#
+#   2. It is what makes environment-nested hostnames possible at all. TLS
+#      wildcards match exactly ONE label, so *.nahuat.com does not cover
+#      api.staging.nahuat.com. Without this cert, every staging hostname would
+#      have to be flattened to api-staging, cdn-staging, alb-staging — naming
+#      shaped by a certificate rather than by intent.
+#
+# staging.nahuat.com is listed as an explicit SAN alongside the wildcard: it is
+# one label and therefore already covered by *.nahuat.com, but naming it here
+# is what lets the staging web distribution use THIS cert instead of the
+# global one, so no staging resource references production's.
+#
+# us-east-1 is required for CloudFront, which is where this layer already is.
+# =============================================================================
+
+resource "aws_acm_certificate" "staging" {
+  domain_name               = "staging.nahuat.com"
+  subject_alternative_names = ["*.staging.nahuat.com"]
+  validation_method         = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = { Name = "${local.prefix}-cert" }
+}
+
+# Both names produce the same validation CNAME, so the map is keyed by domain
+# and allow_overwrite lets the two entries resolve to one record rather than
+# colliding.
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.staging.domain_validation_options :
+    dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = data.terraform_remote_state.global.outputs.route53_zone_id
+}
+
+# Consumers reference this, not the certificate resource: depending on the
+# validation is what prevents anything attaching a cert ACM has not issued yet.
+resource "aws_acm_certificate_validation" "staging" {
+  certificate_arn = aws_acm_certificate.staging.arn
+
+  validation_record_fqdns = [
+    for record in aws_route53_record.cert_validation : record.fqdn
+  ]
+}
+
+# =============================================================================
 # CLOUDFRONT
 # =============================================================================
 
@@ -165,11 +232,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   comment         = "Nahuat CDN - audio and image assets"
   price_class     = "PriceClass_100" # US + Europe; adequate for Central America
 
-  # cdn-staging, not cdn.staging: the ACM certificate is *.nahuat.com, which
-  # matches exactly ONE label. "cdn.staging.nahuat.com" is two and CloudFront
-  # rejects the distribution with InvalidViewerCertificate. Same rule that
-  # forced alb-{env} below.
-  aliases = ["cdn-staging.nahuat.com"]
+  aliases = ["cdn.staging.nahuat.com"]
 
   origin {
     origin_id                = "s3-assets"
@@ -188,7 +251,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = data.terraform_remote_state.global.outputs.acm_certificate_arn
+    acm_certificate_arn      = aws_acm_certificate_validation.staging.certificate_arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
@@ -240,14 +303,13 @@ resource "aws_cloudfront_distribution" "web" {
   # /index.html, which an SSR Next.js origin has no route for and answers with
   # a 404. It is an S3-static-hosting setting, not a fit for this origin.
 
-  # No www for staging. "www.staging.nahuat.com" is two labels and therefore
-  # outside the *.nahuat.com certificate; a www-staging.nahuat.com alias would
-  # be covered but nobody types www at a staging host. Production keeps its www.
+  # No www alias. The staging certificate would cover it, but a staging
+  # environment has no need for one. Production keeps its own.
   aliases = ["staging.nahuat.com"]
 
   origin {
     origin_id   = "alb"
-    domain_name = "alb-${var.environment}.nahuat.com"
+    domain_name = "alb.${var.environment}.nahuat.com"
 
     custom_origin_config {
       http_port  = 80
@@ -359,7 +421,7 @@ resource "aws_cloudfront_distribution" "web" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = data.terraform_remote_state.global.outputs.acm_certificate_arn
+    acm_certificate_arn      = aws_acm_certificate_validation.staging.certificate_arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
@@ -411,7 +473,7 @@ resource "aws_route53_record" "root" {
 
 resource "aws_route53_record" "cdn" {
   zone_id = data.terraform_remote_state.global.outputs.route53_zone_id
-  name    = "cdn-staging.nahuat.com"
+  name    = "cdn.staging.nahuat.com"
   type    = "A"
 
   alias {
