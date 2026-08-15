@@ -1,0 +1,288 @@
+name: Production
+
+# Every merge to main deploys, subject to the production environment's
+# required-reviewer gate. Automatic triggering with a human gate rather than
+# manual dispatch: it makes main mean "what is live", and the approval is
+# recorded against the run instead of living in whoever remembered to dispatch.
+#
+# workflow_dispatch is kept for redeploying without a new commit — recovering
+# from a rolled-back service, or shipping an image that already exists.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Production is never torn down, so unlike staging there is no action input.
+# The only thing this workflow does is move production onto the current commit.
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: '1.15.8'
+  TF_DIR: infra/terraform/environments/production/application
+
+jobs:
+  # Deliberately outside the production environment. Building an artifact is
+  # not the act that needs approval — deploying it is — so images are ready by
+  # the time a reviewer looks, and a build failure is visible without anyone
+  # having to approve it first.
+  images:
+    name: Push ${{ matrix.app }}
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: true
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+
+      # No `environment:` key. Naming an environment changes the OIDC subject
+      # claim to repo:<repo>:environment:<name>, which would stop matching the
+      # build role's ref-based trust. The build role trusts refs/heads/main and
+      # refs/heads/develop precisely so this job works on both.
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ vars.ECR_REGISTRY }}/nahuat-${{ matrix.app }}:prod-${{ github.sha }}
+          # Without these, buildx pushes an image index whose children are
+          # untagged, and the ECR lifecycle rule expiring untagged images after
+          # one day deletes them out from under the live tag — pulls start
+          # failing about 24 hours after a deploy with no code change to blame.
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=production-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=production-${{ matrix.app }}
+
+  # ONE job, where staging uses four.
+  #
+  # Two reasons. AWS_PRODUCTION_ROLE_ARN is scoped to the production
+  # environment, so every job that touches AWS has to declare
+  # `environment: production` — and each such job independently requests
+  # approval. Four jobs would mean a reviewer approving the same deploy
+  # repeatedly, with the run half-applied between clicks.
+  #
+  # It also matches what a production deploy is: migrate, roll, verify is one
+  # operation that either completes or needs looking at. Staging splits them
+  # because staging has no gate and the granularity is free there.
+  deploy:
+    name: Deploy to production
+    needs: images
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_PRODUCTION_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # Read-only. This role holds s3:GetObject on production/* and no
+      # PutObject, so it cannot write state or take a lock even by accident.
+      # Production infrastructure changes are applied by a human; CI only
+      # promotes artifacts onto what already exists.
+      - name: Init
+        run: terraform -chdir="$TF_DIR" init -input=false
+
+      - name: Read outputs
+        id: out
+        run: |
+          set -euo pipefail
+          get() { terraform -chdir="$TF_DIR" output -raw "$1"; }
+          {
+            echo "cluster=$(get ecs_cluster_name)"
+            echo "security_group=$(get ecs_api_sg_id)"
+            echo "migrate_family=$(get migrate_task_family)"
+            echo "api_family=$(get api_task_family)"
+            echo "web_family=$(get web_task_family)"
+            echo "api_service=$(get api_service_name)"
+            echo "web_service=$(get web_service_name)"
+            echo "subnets=$(terraform -chdir="$TF_DIR" output -json ecs_subnet_ids | jq -r 'join(",")')"
+          } >> "$GITHUB_OUTPUT"
+
+      # The migration task has no service, so nothing keeps its revision
+      # current. Its own revision is registered here with the image being
+      # deployed and THAT revision is run by ARN — running the family name
+      # would migrate using whatever image Terraform last wrote, which is the
+      # previous release.
+      - name: Register migration revision
+        id: register_migrate
+        env:
+          FAMILY: ${{ steps.out.outputs.migrate_family }}
+          IMAGE: ${{ vars.ECR_REGISTRY }}/nahuat-api:prod-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query taskDefinition > base.json
+
+          jq --arg image "$IMAGE" '
+            .containerDefinitions[0].image = $image
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' base.json > next.json
+
+          arn=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+          echo "Registered $arn"
+
+      # Before services roll, so a failed migration stops the deploy rather
+      # than leaving new code against an old schema.
+      - name: Run migrations
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          TASK_DEF: ${{ steps.register_migrate.outputs.arn }}
+          SUBNETS: ${{ steps.out.outputs.subnets }}
+          SG: ${{ steps.out.outputs.security_group }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+
+          # A task that never starts reports exitCode null, so anything other
+          # than an explicit 0 is a failure — defaulting to pass here would let
+          # a broken migration through silently.
+          read -r exit_code reason < <(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
+
+          echo "exitCode=$exit_code reason=$reason"
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::Migration task did not exit cleanly. Check /ecs/nahuat-production/migrate."
+            exit 1
+          fi
+
+      # Terraform owns the task definition shape; this copies its newest
+      # revision and substitutes only the image, so Terraform's environment,
+      # secret and sizing changes still reach production by way of the revision
+      # being copied.
+      #
+      # Both services are rolled before either is waited on, so the two
+      # rollouts overlap instead of running back to back.
+      - name: Roll services
+        id: roll
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          API_FAMILY: ${{ steps.out.outputs.api_family }}
+          WEB_FAMILY: ${{ steps.out.outputs.web_family }}
+          API_SERVICE: ${{ steps.out.outputs.api_service }}
+          WEB_SERVICE: ${{ steps.out.outputs.web_service }}
+          REGISTRY: ${{ vars.ECR_REGISTRY }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          roll() {
+            local app="$1" family="$2" service="$3"
+            aws ecs describe-task-definition --task-definition "$family" \
+              --query taskDefinition > "base-$app.json"
+
+            jq --arg image "$REGISTRY/nahuat-$app:prod-$SHA" '
+              .containerDefinitions[0].image = $image
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                    .compatibilities, .registeredAt, .registeredBy)
+            ' "base-$app.json" > "next-$app.json"
+
+            local arn
+            arn=$(aws ecs register-task-definition --cli-input-json "file://next-$app.json" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+
+            aws ecs update-service --cluster "$CLUSTER" --service "$service" \
+              --task-definition "$arn" >/dev/null
+            echo "$service -> $arn"
+          }
+
+          roll api "$API_FAMILY" "$API_SERVICE"
+          roll web "$WEB_FAMILY" "$WEB_SERVICE"
+
+      # services-stable gives up after ~10 minutes, which is longer than a
+      # healthy rollout and shorter than waiting on one that will never
+      # converge. The circuit breaker may also roll back underneath us; either
+      # way this fails rather than reporting success.
+      - name: Wait for both services
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          API: ${{ steps.out.outputs.api_service }}
+          WEB: ${{ steps.out.outputs.web_service }}
+        run: |
+          set -euo pipefail
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$API" "$WEB"
+          echo "Both services stable."
+
+      # Without this the failure above is just a timeout, and the actual reason
+      # lives in the console. Task placement failures in particular (secrets,
+      # image pull, subnet capacity) never reach the container log group,
+      # because no container ever started.
+      - name: Diagnose
+        if: failure()
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          API: ${{ steps.out.outputs.api_service }}
+          WEB: ${{ steps.out.outputs.web_service }}
+        run: |
+          for svc in "$API" "$WEB"; do
+            echo "::group::$svc"
+            aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+              --query 'services[0].{running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
+              --output table
+            echo "recent events:"
+            aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+              --query 'services[0].events[:5].message' --output text | tr '\t' '\n'
+            echo "stopped tasks:"
+            for t in $(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$svc" \
+                        --desired-status STOPPED --query 'taskArns[:2]' --output text); do
+              aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$t" \
+                --query 'tasks[0].stoppedReason' --output text
+            done
+            echo "::endgroup::"
+          done
+
+  summary:
+    name: Summary
+    needs: [images, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "### Production deploy"
+            echo
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| Images | ${{ needs.images.result }} |"
+            echo "| Deploy | ${{ needs.deploy.result }} |"
+            echo
+            echo "Tag \`prod-${{ github.sha }}\` — https://nahuat.com"
+          } >> "$GITHUB_STEP_SUMMARY"
