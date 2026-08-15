@@ -259,17 +259,67 @@ jobs:
             --task-definition "$arn" >/dev/null
           echo "$SERVICE -> $arn"
 
-      # The deployment circuit breaker rolls back on its own; without this the
-      # workflow would report success while ECS was reverting underneath it.
-      - name: Wait for stability
+  # Runs for `up` as well as `deploy`, which is the point. Previously only the
+  # deploy path waited, so `up` reported success the moment terraform apply
+  # returned — and on 2026-08-14 that meant a green run while the web service
+  # had zero running tasks and had been failing to place them for half an hour.
+  # A stand-up that cannot tell you it did not stand up is worth little.
+  verify:
+    name: Verify services
+    needs: [infra, migrate, deploy]
+    if: always() && inputs.action != 'down' && needs.migrate.result == 'success' && needs.deploy.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_STAGING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # services-stable gives up after ~10 minutes, which is longer than a
+      # healthy rollout and shorter than waiting on one that will never
+      # converge. The circuit breaker may also roll back underneath us; either
+      # way this fails rather than reporting success.
+      - name: Wait for both services
         env:
           CLUSTER: ${{ needs.infra.outputs.cluster }}
-          SERVICE: ${{ matrix.app == 'api' && needs.infra.outputs.api_service || needs.infra.outputs.web_service }}
-        run: aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          API: ${{ needs.infra.outputs.api_service }}
+          WEB: ${{ needs.infra.outputs.web_service }}
+        run: |
+          set -euo pipefail
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$API" "$WEB"
+          echo "Both services stable."
+
+      # Without this the failure above is just a timeout, and the actual reason
+      # lives in the console. Task placement failures in particular (secrets,
+      # image pull, subnet capacity) never reach the container log group,
+      # because no container ever started.
+      - name: Diagnose
+        if: failure()
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          API: ${{ needs.infra.outputs.api_service }}
+          WEB: ${{ needs.infra.outputs.web_service }}
+        run: |
+          for svc in "$API" "$WEB"; do
+            echo "::group::$svc"
+            aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+              --query 'services[0].{running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
+              --output table
+            echo "recent events:"
+            aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+              --query 'services[0].events[:5].message' --output text | tr '\t' '\n'
+            echo "stopped tasks:"
+            for t in $(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$svc" \
+                        --desired-status STOPPED --query 'taskArns[:2]' --output text); do
+              aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$t" \
+                --query 'tasks[0].stoppedReason' --output text
+            done
+            echo "::endgroup::"
+          done
 
   summary:
     name: Summary
-    needs: [images, infra, migrate, deploy]
+    needs: [images, infra, migrate, deploy, verify]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -284,6 +334,7 @@ jobs:
             echo "| Terraform | ${{ needs.infra.result }} |"
             echo "| Migrations | ${{ needs.migrate.result }} |"
             echo "| Services | ${{ needs.deploy.result }} |"
+            echo "| Verified | ${{ needs.verify.result }} |"
             echo
             if [ "${{ inputs.action }}" = "down" ]; then
               echo "Application layer destroyed. Foundation is untouched."

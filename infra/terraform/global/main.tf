@@ -205,7 +205,7 @@ data "aws_iam_policy_document" "github_production_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:production"]
+      values   = ["${var.github_subject}:environment:production"]
     }
   }
 }
@@ -237,7 +237,7 @@ data "aws_iam_policy_document" "github_staging_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/develop"]
+      values   = ["${var.github_subject}:ref:refs/heads/develop"]
     }
   }
 }
@@ -268,8 +268,8 @@ data "aws_iam_policy_document" "github_build_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${var.github_repo}:ref:refs/heads/develop",
-        "repo:${var.github_repo}:ref:refs/heads/main",
+        "${var.github_subject}:ref:refs/heads/develop",
+        "${var.github_subject}:ref:refs/heads/main",
       ]
     }
   }
@@ -582,6 +582,25 @@ data "aws_iam_policy_document" "github_staging" {
     }
   }
 
+  # Releasing an EIP that is still attached requires disassociating it first,
+  # and Terraform does both in one destroy. This cannot carry the tag condition
+  # used below: DisassociateAddress authorizes against the network interface as
+  # well as the address, and a NAT gateway's ENI is created by AWS without our
+  # default_tags, so the condition would evaluate against an untagged resource
+  # and deny every time. Bounded by region here and by DenyProductionEc2 below.
+  statement {
+    sid       = "StagingNatDisassociate"
+    effect    = "Allow"
+    actions   = ["ec2:DisassociateAddress"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+
   # ec2:CreateAction confines this to tags applied during the two calls above.
   # Consequence: a tag-only change to an existing gateway or address is a bare
   # CreateTags with no CreateAction context and will be denied. Rare, and it
@@ -613,6 +632,53 @@ data "aws_iam_policy_document" "github_staging" {
       "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:nahuat/staging/*",
       "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:rds!*",
     ]
+  }
+
+  # ---------------------------------------------------------------------------
+  # RDS-managed master password
+  #
+  # modules/database sets manage_master_user_password, so RDS creates the
+  # credentials secret AS THE CALLER rather than as a service principal.
+  # Without CreateSecret the entire CreateDBInstance call fails with a 403 that
+  # names Secrets Manager and never mentions RDS — the permission that is
+  # missing is not the one the failing API suggests.
+  #
+  # Unfenced by tag because neither the secret nor its tags exist when the call
+  # is authorized. Bounded instead by the rds! prefix, which only RDS creates,
+  # and by DenyProductionResources below barring this role from creating a
+  # production database in the first place.
+  # ---------------------------------------------------------------------------
+  statement {
+    sid    = "StagingRdsSecretCreate"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:TagResource",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:rds!*",
+    ]
+  }
+
+  # Teardown, which staging does routinely. Fenced by tag: RDS-managed secrets
+  # inherit the provider's default_tags, so Environment distinguishes staging's
+  # from production's. The name cannot — both are rds!db-<uuid>, and the uuid
+  # is not predictable.
+  statement {
+    sid    = "StagingRdsSecretTeardown"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:DeleteSecret",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.current.account_id}:secret:rds!*",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "secretsmanager:ResourceTag/Environment"
+      values   = ["staging"]
+    }
   }
 
   # DNS records for the staging ALB, confined to this project's zone.
@@ -704,6 +770,27 @@ data "aws_iam_policy_document" "github_staging" {
       "arn:aws:sqs:us-east-1:${data.aws_caller_identity.current.account_id}:nahuat-production-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/nahuat-production-*",
     ]
+  }
+
+  # CLOSES: the unscopable EC2 grants above reaching production. Every EC2
+  # resource this project creates carries Environment from the provider's
+  # default_tags, so denying on that tag is precise where a resource-ARN list
+  # cannot be — EIP and NAT gateway IDs are generated, not predictable.
+  #
+  # This is what makes StagingNatDisassociate safe to leave unfenced: without
+  # it, that grant would allow detaching production's NAT gateway address and
+  # cutting all production egress.
+  statement {
+    sid       = "DenyProductionEc2"
+    effect    = "Deny"
+    actions   = ["ec2:*"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Environment"
+      values   = ["production"]
+    }
   }
 
   # CLOSES: converting temporary CI credentials into permanent IAM user keys.

@@ -17,9 +17,11 @@
 locals {
   prefix = "nahuat-${var.environment}"
 
-  # Production drops the environment from the hostname; other
-  # environments include it.
+  # Environment-nested, which the staging certificate
+  # (staging.nahuat.com + *.staging.nahuat.com) covers. Production drops the
+  # environment label because it owns the apex.
   api_domain = "api.staging.nahuat.com"
+  alb_domain = "alb.staging.nahuat.com"
 }
 
 # One remote state read, not two: foundation re-exports what it needs from
@@ -120,7 +122,7 @@ module "compute" {
   # derived; alb_domain must match what foundation's CloudFront already
   # points at.
   api_domain = local.api_domain
-  alb_domain = "alb-${var.environment}.nahuat.com"
+  alb_domain = local.alb_domain
 
   # Data layer
   db_secret_arn = module.database.master_user_secret_arn

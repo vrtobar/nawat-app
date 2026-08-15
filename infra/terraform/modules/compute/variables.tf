@@ -62,22 +62,33 @@ variable "route53_zone_id" {
   type        = string
 }
 
-# Passed explicitly rather than derived from environment, because the two do
-# not follow the same pattern: production's API is api.nahuat.com while
-# staging's is api.staging.nahuat.com, yet the internal ALB hostname is
-# alb.{environment}.nahuat.com in both. A conditional on the environment name
-# would silently do the wrong thing for any third environment.
+# CONSTRAINT on both hostnames below: each must be covered by the certificate
+# this environment's foundation layer passes as acm_certificate_arn. TLS
+# wildcards match exactly ONE label, so api.staging.nahuat.com needs
+# *.staging.nahuat.com and is NOT covered by *.nahuat.com.
+#
+# Nothing catches a violation at apply time — an ALB accepts any certificate
+# ARN without checking what it will serve, so a mismatch appears only as a TLS
+# failure on the first request, including the web app's server-side fetches.
+#
+# Both are passed explicitly rather than derived from var.environment, because
+# production omits the environment label (it owns the apex) while other
+# environments include it. A conditional on the environment name would silently
+# do the wrong thing for any third environment.
 variable "api_domain" {
-  description = "Public API hostname, e.g. api.nahuat.com or api.staging.nahuat.com"
+  description = "Public API hostname, e.g. api.nahuat.com or api.staging.nahuat.com. Must be covered by acm_certificate_arn."
   type        = string
 }
 
 variable "alb_domain" {
   description = <<-EOT
-    Internal ALB hostname, alb.{environment}.nahuat.com. Must match the origin
-    domain the foundation CloudFront distribution already points at — this
-    record appearing and disappearing is what drives failover to the
-    maintenance page.
+    Internal ALB hostname: alb.staging.nahuat.com, alb-production.nahuat.com.
+    The two differ in shape because production shares the one-label
+    *.nahuat.com certificate while staging has its own wildcard.
+
+    Must match the origin domain the foundation CloudFront distribution
+    already points at — this record appearing and disappearing is what drives
+    failover to the maintenance page.
   EOT
   type        = string
 }

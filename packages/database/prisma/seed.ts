@@ -3,8 +3,11 @@ import 'dotenv/config'; // db:seed runs tsx directly — nothing else loads .env
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { PrismaClient } from '../src/generated/prisma/client';
+import { buildDatabaseUrl } from '../src/url';
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// Same reason as prisma.config.ts: this runs as an ECS task too, where
+// DATABASE_URL does not exist and the connection is assembled from DB_*.
+const adapter = new PrismaPg({ connectionString: buildDatabaseUrl() });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
