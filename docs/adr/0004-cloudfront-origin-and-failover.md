@@ -3,6 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-08-14 (records decisions taken 2026-08-12 and 2026-08-13)
 - **Applies to:** `infra/terraform/environments/*/foundation/main.tf`
+- **Amended by:** [ADR 9](0009-per-environment-certificates.md) — the hyphenated
+  hostname reasoning below applies to production only; staging now has its own
+  certificate and uses nested names.
 
 ## Context
 
