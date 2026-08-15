@@ -66,7 +66,20 @@ resource "aws_ecs_service" "api" {
 
   # The listener rule must exist before targets register, or the ALB has
   # nowhere to route them.
-  depends_on = [aws_lb_listener_rule.api]
+  #
+  # execution_secrets is the non-obvious one. A service depends on its task
+  # definition, which depends on the execution role's ARN — but nothing depends
+  # on that role's INLINE POLICY, so Terraform is free to start tasks before
+  # the role can read their secrets. Tasks then die with
+  # ResourceInitializationError and ECS retries with backoff, which usually
+  # self-heals and therefore hides the race on most applies. Observed on
+  # staging 2026-08-14: the policy also references the RDS secret ARN, so a
+  # failed database create left it uncreated while the service existed and
+  # spent half an hour failing to place a task.
+  depends_on = [
+    aws_lb_listener_rule.api,
+    aws_iam_role_policy.execution_secrets,
+  ]
 
   lifecycle {
     ignore_changes = [task_definition, desired_count]
@@ -104,7 +117,10 @@ resource "aws_ecs_service" "web" {
     rollback = true
   }
 
-  depends_on = [aws_lb_listener.https]
+  depends_on = [
+    aws_lb_listener.https,
+    aws_iam_role_policy.execution_secrets,
+  ]
 
   lifecycle {
     ignore_changes = [task_definition, desired_count]
