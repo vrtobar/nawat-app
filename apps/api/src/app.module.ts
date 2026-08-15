@@ -1,11 +1,13 @@
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { validateEnv } from './config/env.validation';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 
 // TODO(PLAN §12): feature modules land here as they're implemented —
@@ -22,6 +24,7 @@ import { HealthModule } from './modules/health/health.module';
       // loading them here too would just create a second source of truth.
       ignoreEnvFile: true,
     }),
+    AuthModule,
     HealthModule,
   ],
   providers: [
@@ -30,6 +33,10 @@ import { HealthModule } from './modules/health/health.module';
     // and Pino are the likely ones.
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    // Global: every route needs a valid token unless it carries @Public().
+    // Authentication is the default so that forgetting a decorator produces a
+    // 401 in development rather than an endpoint quietly open to the internet.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule implements NestModule {
