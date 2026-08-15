@@ -27,11 +27,11 @@ apply_immediately = true
 # it as the disaster-recovery floor: the release a from-scratch apply would
 # come up on. Bump it when that floor should move, not on every deploy.
 #
-# PLACEHOLDER — the all-zero SHA satisfies the format validation but names no
-# real image, so a from-scratch rebuild would fail to pull. It must be replaced
-# with the first prod- tag pushed during the cutover from :latest, before the
-# services are pointed at Terraform-registered revisions.
-image_tag = "prod-0000000000000000000000000000000000000000"
+# First real prod- tag, built by the production workflow from main at 809c161
+# and verified present in both ECR repositories. Replaces the all-zero
+# placeholder, which satisfied the format validation but named no image a
+# from-scratch rebuild could pull.
+image_tag = "prod-809c1618c1438495db43a09e7dbffeffa464e0df"
 
 # Compute — production: conservative rollout, one task serving throughout
 api_cpu                    = 256

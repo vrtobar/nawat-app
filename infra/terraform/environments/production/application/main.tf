@@ -21,10 +21,16 @@ locals {
   # environments include it.
   api_domain = "api.nahuat.com"
 
-  # Still hyphenated: production shares the *.nahuat.com certificate, which
-  # matches one label, so alb.production.nahuat.com would not be covered.
-  # Renaming this to alb.nahuat.com is tracked separately.
-  alb_domain = "alb-production.nahuat.com"
+  # Production omits the environment label here for the same reason api_domain
+  # does — it owns the apex. That also resolves what the hyphen was working
+  # around: alb.production.nahuat.com is two labels and *.nahuat.com matches
+  # exactly one, so the name was bent to alb-production.nahuat.com rather than
+  # the convention being questioned. alb.nahuat.com is one label and covered.
+  #
+  # MUST match the origin domain in foundation's CloudFront distribution.
+  # Changing one without the other points CloudFront at a hostname that does
+  # not exist, which fails over to the maintenance page.
+  alb_domain = "alb.nahuat.com"
 }
 
 # One remote state read, not two: foundation re-exports what it needs from

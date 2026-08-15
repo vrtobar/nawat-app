@@ -236,7 +236,7 @@ resource "aws_cloudfront_distribution" "web" {
 
   origin {
     origin_id   = "alb"
-    domain_name = "alb-${var.environment}.nahuat.com"
+    domain_name = "alb.nahuat.com"
 
     custom_origin_config {
       http_port  = 80
@@ -246,10 +246,15 @@ resource "aws_cloudfront_distribution" "web" {
       # (CloudFront -> ALB -> 301 -> CloudFront). This also makes the path
       # end-to-end encrypted.
       #
-      # The origin hostname is alb-{env}.nahuat.com rather than
-      # alb.{env}.nahuat.com because CloudFront validates the origin's
-      # certificate against that name, and *.nahuat.com matches exactly one
-      # label — "alb.production" is two.
+      # CloudFront validates the origin's certificate against the origin
+      # hostname, and *.nahuat.com matches exactly one label. alb.nahuat.com
+      # is one and is covered; the earlier alb.production.nahuat.com was two,
+      # which is what the hyphenated alb-production.nahuat.com worked around
+      # until production dropped the environment label entirely.
+      #
+      # Set literally rather than interpolating var.environment: production
+      # owns the apex, so there is no environment to substitute. Staging's
+      # equivalent keeps the label as alb.staging.nahuat.com.
       origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
 
