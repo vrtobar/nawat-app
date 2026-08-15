@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  // Type-checks the two TypeScript files that run in production but live
+  // outside src/, so tsconfig.json's `include: ["src"]` never saw them:
+  //
+  //   prisma.config.ts  — read by the Prisma CLI on every migrate, generate,
+  //                       studio and db seed, including the ECS migration task
+  //   prisma/seed.ts    — runs as an ECS task via a command override
+  //
+  // They cannot go in tsconfig.json: rootDir is src and outDir is dist, so
+  // including files above rootDir breaks the emit layout and would ship them
+  // into dist. Same split as tsconfig.build.json — a wide config checks, a
+  // narrow one emits — except here the wide config is the one that cannot emit
+  // at all.
+  "compilerOptions": {
+    "noEmit": true,
+    // Files sit at the package root, not under src.
+    "rootDir": "."
+  },
+  "include": ["prisma.config.ts", "prisma/**/*.ts"]
+}
