@@ -1,6 +1,9 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_FILTER } from '@nestjs/core';
 
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { HealthModule } from './modules/health/health.module';
 
@@ -20,5 +23,17 @@ import { HealthModule } from './modules/health/health.module';
     }),
     HealthModule,
   ],
+  providers: [
+    // Registered as a provider rather than via app.useGlobalFilters() so it can
+    // take constructor dependencies later without rewiring — the audit logger
+    // and Pino are the likely ones.
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // '{*path}' rather than '*'. NestJS 11 runs Express 5, whose path-to-regexp
+    // v8 rejects a bare '*' — it throws at boot, before any request is served.
+    consumer.apply(CorrelationIdMiddleware).forRoutes('{*path}');
+  }
+}
