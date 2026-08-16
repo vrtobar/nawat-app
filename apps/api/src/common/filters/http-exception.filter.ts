@@ -30,9 +30,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const req = ctx.getRequest<Request>();
     const res = ctx.getResponse<Response>();
 
-    const status = exception instanceof HttpException
-      ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status =
+      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
     // Normally assigned by CorrelationIdMiddleware. It is not always: NestJS
     // registers body-parser ahead of configure() middleware, so a malformed

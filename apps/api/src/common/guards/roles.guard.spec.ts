@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { RolesGuard } from './roles.guard';
 
 const check = (required: Role | undefined, role: Role | undefined) => {
-  const reflector = { getAllAndOverride: vi.fn().mockReturnValue(required) } as unknown as Reflector;
+  const reflector = {
+    getAllAndOverride: vi.fn().mockReturnValue(required),
+  } as unknown as Reflector;
   const user = role === undefined ? undefined : ({ role } as JwtClaims);
 
   const context = {
