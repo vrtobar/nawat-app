@@ -188,6 +188,14 @@ resource "aws_ecs_task_definition" "web" {
         { name = "AUTH0_CLIENT_ID", valueFrom = "${var.secret_arns["auth0"]}:clientId::" },
         { name = "AUTH0_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0"]}:clientSecret::" },
         { name = "AUTH0_SECRET", valueFrom = "${var.secret_arns["auth0"]}:sessionSecret::" },
+        # The web app must REQUEST this audience when it authorizes, or Auth0
+        # mints an opaque access token instead of a JWT. The API would then
+        # reject every request before signature verification, because what
+        # arrives is not a JWT at all — a failure that looks like broken auth
+        # rather than missing configuration.
+        #
+        # Same key the API container reads above: one identifier, one place.
+        { name = "AUTH0_AUDIENCE", valueFrom = "${var.secret_arns["auth0"]}:audience::" },
       ]
 
       logConfiguration = {
