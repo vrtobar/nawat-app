@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 
 // Registers the JWT strategy so the globally-bound JwtAuthGuard can resolve
@@ -8,6 +10,7 @@ import { JwtStrategy } from './jwt.strategy';
 // session cookie, so Passport's session serialisation would be dead weight.
 @Module({
   imports: [PassportModule.register({ defaultStrategy: 'jwt', session: false })],
-  providers: [JwtStrategy],
+  controllers: [AuthController],
+  providers: [JwtStrategy, AuthService],
 })
 export class AuthModule {}
