@@ -18,8 +18,18 @@ backup_retention_days = 7
 # Cache
 cache_node_type = "cache.t4g.micro" # Graviton: ~6% cheaper than t3
 
-# Database is empty and unused; flip to false before real traffic.
-apply_immediately = true
+# False now that production serves real logins. A modification applied
+# immediately can reboot the instance the moment the apply runs; deferring to
+# the maintenance window trades convergence speed for not choosing an arbitrary
+# minute to drop connections.
+#
+# The cost is the confusing part described in the module's variable: an apply
+# succeeds while the change sits in PendingModifiedValues, and every plan until
+# the window shows the same diff. That is the correct trade once anyone is
+# using the database.
+#
+# Staging stays true — it is rebuilt constantly and has no users to disturb.
+apply_immediately = false
 
 # NOT the image that is running. The deploy workflow registers its own task
 # definition revision per release and the services ignore Terraform's, so this
