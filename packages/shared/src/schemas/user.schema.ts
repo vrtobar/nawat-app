@@ -10,10 +10,11 @@ export type Role = z.infer<typeof RoleSchema>;
 
 // -----------------------------------------------------------------------------
 // USER PROFILE
-// Returned from /auth/me and /users/me.
+// Returned from /users/me.
 // Sensitive fields excluded: auth0Id, deletedAt, updatedAt.
-// username is nullable — auto-generated on first login, but the field
-// itself is optional in the DB until that upsert runs.
+// username is nullable and stays null: nothing generates it, because nothing
+// displays it. See BACKLOG — user-published flashcard sets or a leaderboard
+// are what would give it a consumer.
 // -----------------------------------------------------------------------------
 
 export const UserProfileSchema = z.object({
@@ -38,6 +39,37 @@ export type UserProfile = z.infer<typeof UserProfileSchema>;
 // role and userId come from the namespaced custom claims
 // (https://nahuat.com/role, https://nahuat.com/userId).
 // -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// LOGIN SYNC — POST /auth/role
+// Called by the Auth0 Post Login Action, authenticated by x-internal-secret
+// rather than a JWT: it runs before any token exists. It is the single write
+// path for User identity fields, and the only moment "synced from Auth0 on
+// every login" actually means anything.
+//
+// POST rather than GET because it upserts. A GET that writes may be retried or
+// cached by intermediaries, and the alternative — profile fields as query
+// params — puts the user's email and name into every access log.
+// -----------------------------------------------------------------------------
+
+export const SyncUserSchema = z.object({
+  auth0Id: z.string().min(1), // Auth0 `sub`, e.g. "google-oauth2|123"
+  email: z.email(),
+  // Auth0 omits `name` for some connections; the Action sends the email in its
+  // place rather than leaving it blank, since User.name is non-nullable.
+  name: z.string().min(1),
+  pictureUrl: z.url().nullish(),
+});
+
+export type SyncUser = z.infer<typeof SyncUserSchema>;
+
+// What the Action embeds into the access token as namespaced claims.
+export const AuthRoleSchema = z.object({
+  userId: z.string(),
+  role: RoleSchema,
+});
+
+export type AuthRole = z.infer<typeof AuthRoleSchema>;
 
 export const JwtClaimsSchema = z.object({
   sub: z.string(), // Auth0 user id

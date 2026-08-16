@@ -23,12 +23,26 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // TODO(PLAN §12): global providers, in order:
-  //   - ZodValidationPipe        (common/pipes)
-  //   - HttpExceptionFilter      (common/filters) — uniform error envelope
-  //   - TransformInterceptor     (common/interceptors) — success envelope
-  //   - LoggingInterceptor       (common/interceptors) — Pino + correlationId
+  // Cross-cutting providers are registered in AppModule rather than here, so
+  // they can take constructor dependencies. Done:
+  //   - CorrelationIdMiddleware  — middleware, not an interceptor: guards throw
+  //                                before interceptors run, and a 401 without a
+  //                                correlation id is the one you most want
+  //   - HttpExceptionFilter      — uniform error envelope
+  //
+  // ZodValidationPipe is NOT global: a global pipe cannot know which schema a
+  // given handler expects. It is applied per parameter —
+  // @Body(new ZodValidationPipe(CreateEntrySchema)).
+  //
+  // TODO(PLAN §12): still to come —
   //   - JwtAuthGuard via APP_GUARD, global by default with @Public() escape
+  //
+  //   - Request logging as MIDDLEWARE, not an interceptor. PLAN §12 says
+  //     LoggingInterceptor; that shape cannot work. Interceptors run after
+  //     guards, so a request rejected by JwtAuthGuard never reaches one — no
+  //     401 or 403 would ever be logged, which is the opposite of what an
+  //     access log is for. Log on response finish from middleware instead, and
+  //     keep an interceptor only if handler-level timing is wanted separately.
 
   const port = config.get('PORT', { infer: true });
   await app.listen(port);
