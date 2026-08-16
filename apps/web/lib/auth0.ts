@@ -9,6 +9,17 @@ import { Auth0Client } from '@auth0/nextjs-auth0/server';
 // NOTE: v4 paths — the Auth0 dashboard callback/logout URLs must use
 // /auth/callback, NOT the v3-era /api/auth/callback in the planning docs.
 //
-// TODO(PLAN §13): pass authorizationParameters.audience here so access
-// tokens are minted for the NestJS API (AUTH0_AUDIENCE).
-export const auth0 = new Auth0Client();
+// The audience is required, not an optimisation. Without it Auth0 issues an
+// OPAQUE access token — a reference string, not a JWT — and the API rejects
+// every request before it reaches signature verification. The symptom looks
+// like broken authentication rather than missing configuration, which makes it
+// slow to diagnose backwards from a 401.
+//
+// Requesting it tells Auth0 the token is for the NestJS API, which is what
+// makes it a JWT carrying `aud: https://api.nahuat.com` — the value
+// JwtStrategy checks.
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: process.env.AUTH0_AUDIENCE,
+  },
+});

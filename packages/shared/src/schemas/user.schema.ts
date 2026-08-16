@@ -71,12 +71,22 @@ export const AuthRoleSchema = z.object({
 
 export type AuthRole = z.infer<typeof AuthRoleSchema>;
 
+// Everything the API can rely on being present in an Auth0 ACCESS token.
+//
+// email and name are deliberately absent. Auth0 puts them in the ID token,
+// which the browser holds and the API never sees — an access token carries
+// only `sub`, standard registered claims, and whatever the Post Login Action
+// adds. Requiring them here rejected every genuine token, verified against a
+// real one on 2026-08-16.
+//
+// They are also not needed. Authorization uses userId and role; anything
+// wanting the profile reads it from the database, where /auth/role syncs it on
+// every login. Adding them as custom claims would have made the schema true at
+// the cost of putting PII in every request and duplicating a source of truth.
 export const JwtClaimsSchema = z.object({
-  sub: z.string(), // Auth0 user id
-  email: z.email(),
-  name: z.string(),
-  role: RoleSchema,
-  userId: z.string(), // Nahuat platform user id
+  sub: z.string(), // Auth0 user id, e.g. google-oauth2|1038929...
+  role: RoleSchema, // https://nahuat.com/role
+  userId: z.string(), // https://nahuat.com/userId — the Nahuat platform id
 });
 
 export type JwtClaims = z.infer<typeof JwtClaimsSchema>;

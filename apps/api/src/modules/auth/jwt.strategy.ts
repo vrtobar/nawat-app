@@ -62,8 +62,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   validate(payload: Record<string, unknown>): JwtClaims {
     const result = JwtClaimsSchema.safeParse({
       sub: payload.sub,
-      email: payload.email,
-      name: payload.name,
       role: payload[ROLE_CLAIM],
       userId: payload[USER_ID_CLAIM],
     });

@@ -10,6 +10,7 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { UsersModule } from './modules/users/users.module';
 
 // TODO(PLAN §12): feature modules land here as they're implemented —
 // AuthModule, DictionaryModule, LessonsModule, ProgressModule,
@@ -27,6 +28,7 @@ import { HealthModule } from './modules/health/health.module';
     }),
     AuthModule,
     HealthModule,
+    UsersModule,
   ],
   providers: [
     // Registered as a provider rather than via app.useGlobalFilters() so it can

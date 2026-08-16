@@ -73,6 +73,41 @@ describe('JwtAuthGuard', () => {
     }
   });
 
+  it('surfaces a reason thrown by validate(), not just verification failures', () => {
+    // The strategy rejects a token whose custom claims are missing. Passport
+    // reports that through `err`, never `info`, so reading only `info`
+    // collapsed it to "Authentication required" and threw away the diagnosis.
+    const { guard } = guardWith(false);
+    const thrown = new UnauthorizedException({
+      code: 'UNAUTHORIZED',
+      message: 'Token is missing required claims',
+    });
+
+    try {
+      guard.handleRequest(thrown, false, undefined);
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as UnauthorizedException).getResponse()).toMatchObject({
+        message: 'Token is missing required claims',
+      });
+    }
+  });
+
+  it('prefers the verification failure when both are present', () => {
+    // `info` describes why the token itself failed, which is more specific
+    // than whatever wrapper `err` carries.
+    const { guard } = guardWith(false);
+
+    try {
+      guard.handleRequest(new Error('wrapped'), false, new Error('jwt expired'));
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as UnauthorizedException).getResponse()).toMatchObject({
+        message: 'jwt expired',
+      });
+    }
+  });
+
   it('passes a verified user through', () => {
     const { guard } = guardWith(false);
     const user = { sub: 'auth0|1', userId: 'usr_1', role: 'USER' };
