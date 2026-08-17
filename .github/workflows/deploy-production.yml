@@ -240,6 +240,39 @@ jobs:
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$API" "$WEB"
           echo "Both services stable."
 
+      # services-stable used to prove database connectivity as a side effect:
+      # the ALB health check ran the Prisma indicator, so no task reached steady
+      # state without it. That check is liveness only now, so the property has
+      # to be asserted here or a release goes green with the API unable to reach
+      # Postgres.
+      #
+      # This is a smoke check, not the old guarantee: one request through
+      # CloudFront reaches one task, where the ALB probed every task. It still
+      # catches what actually goes wrong — a bad secret or the wrong security
+      # group on the new task definition, which is uniform across tasks.
+      #
+      # No ordering trap: the image being verified was built from this same
+      # commit, so /api/health/ready exists in it whenever this step exists.
+      - name: Verify readiness
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code}' --max-time 20 \
+              https://api.nahuat.com/api/health/ready || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "readiness ok"
+              cat /tmp/ready.json
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code"
+            if [ "$attempt" -lt 5 ]; then
+              sleep 10
+            fi
+          done
+          echo "::error::readiness check failed after 5 attempts"
+          cat /tmp/ready.json 2>/dev/null || true
+          exit 1
+
       # Without this the failure above is just a timeout, and the actual reason
       # lives in the console. Task placement failures in particular (secrets,
       # image pull, subnet capacity) never reach the container log group,
