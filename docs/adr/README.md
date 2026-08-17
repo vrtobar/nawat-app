@@ -12,17 +12,22 @@ not get one.
 They are not updated as the code changes. A decision that is superseded gets a
 new record and the old one is marked as such, so the history stays readable.
 
-Records 3 through 8 were written after the fact, from the code and from the
-decisions' own history. They carry the date of the decision alongside the date
-of the record.
+Records 3 through 8, and 10 onward, were written after the fact, from the code
+and from the decisions' own history. They carry the date of the decision
+alongside the date of the record.
 
-| #                                                 | Title                                                | Status   |
-| ------------------------------------------------- | ---------------------------------------------------- | -------- |
-| [1](0001-ci-iam-boundaries.md)                    | CI/CD IAM boundaries                                 | Accepted |
-| [2](0002-immutable-image-tags.md)                 | Immutable image tags, and who owns a task definition | Accepted |
-| [3](0003-terraform-layer-split.md)                | Three Terraform layers, split by destroy safety      | Accepted |
-| [4](0004-cloudfront-origin-and-failover.md)       | CloudFront origin, TLS, and the maintenance page     | Accepted |
-| [5](0005-auth0-tenant-separation.md)              | One Auth0 tenant per environment                     | Accepted |
-| [6](0006-arm64-everywhere.md)                     | ARM64 (Graviton) across the whole stack              | Accepted |
-| [7](0007-database-connectivity-and-migrations.md) | Database connectivity and migration execution        | Accepted |
-| [8](0008-rest-resource-shape.md)                  | Shallow-nested REST resources                        | Accepted |
+| #                                                       | Title                                                | Status   |
+| ------------------------------------------------------- | ---------------------------------------------------- | -------- |
+| [1](0001-ci-iam-boundaries.md)                          | CI/CD IAM boundaries                                 | Accepted |
+| [2](0002-immutable-image-tags.md)                       | Immutable image tags, and who owns a task definition | Accepted |
+| [3](0003-terraform-layer-split.md)                      | Three Terraform layers, split by destroy safety      | Accepted |
+| [4](0004-cloudfront-origin-and-failover.md)             | CloudFront origin, TLS, and the maintenance page     | Accepted |
+| [5](0005-auth0-tenant-separation.md)                    | One Auth0 tenant per environment                     | Accepted |
+| [6](0006-arm64-everywhere.md)                           | ARM64 (Graviton) across the whole stack              | Accepted |
+| [7](0007-database-connectivity-and-migrations.md)       | Database connectivity and migration execution        | Accepted |
+| [8](0008-rest-resource-shape.md)                        | Shallow-nested REST resources                        | Accepted |
+| [9](0009-per-environment-certificates.md)               | One TLS certificate per environment                  | Accepted |
+| [10](0010-zod-as-the-payload-contract.md)               | Zod schemas as the only payload contract             | Accepted |
+| [11](0011-polyglot-workers-and-packaging.md)            | Polyglot queue consumers, packaged as containers     | Accepted |
+| [12](0012-migration-composition-and-index-ownership.md) | Migration composition and index ownership            | Accepted |
+| [13](0013-authentication-and-authorization.md)          | Authentication and authorization model               | Accepted |

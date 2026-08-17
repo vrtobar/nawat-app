@@ -12,36 +12,59 @@ import { PrismaHealthIndicator } from './prisma.health';
 describe('HealthController', () => {
   const buildController = async (indicatorResult: unknown) => {
     const healthCheck = vi.fn().mockResolvedValue(indicatorResult);
+    const isHealthy = vi.fn();
 
     const moduleRef = await Test.createTestingModule({
       controllers: [HealthController],
       providers: [
         { provide: HealthCheckService, useValue: { check: healthCheck } },
-        { provide: PrismaHealthIndicator, useValue: { isHealthy: vi.fn() } },
+        { provide: PrismaHealthIndicator, useValue: { isHealthy } },
       ],
     }).compile();
 
-    return { controller: moduleRef.get(HealthController), healthCheck };
+    return { controller: moduleRef.get(HealthController), healthCheck, isHealthy };
   };
 
-  it('reports the database indicator when it is up', async () => {
-    const { controller } = await buildController({
-      status: 'ok',
-      info: { database: { status: 'up' } },
+  describe('liveness', () => {
+    it('reports ok', async () => {
+      const { controller } = await buildController({ status: 'ok' });
+
+      expect(controller.live()).toMatchObject({ status: 'ok' });
     });
 
-    await expect(controller.check()).resolves.toMatchObject({
-      status: 'ok',
-      info: { database: { status: 'up' } },
+    // The property the whole split exists for. If liveness ever consults a
+    // dependency, one database blip marks every task unhealthy and ECS drains
+    // the entire service — so this asserts the absence of a call, not a value.
+    it('consults no dependency', async () => {
+      const { controller, healthCheck, isHealthy } = await buildController({ status: 'ok' });
+
+      controller.live();
+
+      expect(healthCheck).not.toHaveBeenCalled();
+      expect(isHealthy).not.toHaveBeenCalled();
     });
   });
 
-  it('delegates to the terminus health check rather than querying directly', async () => {
-    const { controller, healthCheck } = await buildController({ status: 'ok' });
+  describe('readiness', () => {
+    it('reports the database indicator when it is up', async () => {
+      const { controller } = await buildController({
+        status: 'ok',
+        info: { database: { status: 'up' } },
+      });
 
-    await controller.check();
+      await expect(controller.ready()).resolves.toMatchObject({
+        status: 'ok',
+        info: { database: { status: 'up' } },
+      });
+    });
 
-    expect(healthCheck).toHaveBeenCalledOnce();
-    expect(healthCheck.mock.calls[0]?.[0]).toHaveLength(1);
+    it('delegates to the terminus health check rather than querying directly', async () => {
+      const { controller, healthCheck } = await buildController({ status: 'ok' });
+
+      await controller.ready();
+
+      expect(healthCheck).toHaveBeenCalledOnce();
+      expect(healthCheck.mock.calls[0]?.[0]).toHaveLength(1);
+    });
   });
 });
