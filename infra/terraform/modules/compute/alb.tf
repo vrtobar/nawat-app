@@ -37,10 +37,16 @@ resource "aws_lb" "main" {
 # target_type = "ip" is mandatory for Fargate: tasks have ENIs, not EC2
 # instance IDs, so there is nothing to register by instance.
 #
-# The health check paths differ meaningfully. The API exposes a real
-# /api/health that queries Postgres, so an unhealthy database takes the task
-# out of rotation. The web app has no equivalent endpoint yet, so "/" is the
-# best available signal — it proves the Next.js server renders, nothing more.
+# Both target groups poll a LIVENESS endpoint: 200 whenever the process is up,
+# no dependency checks. That is deliberate and was not always true — the API's
+# /api/health queried Postgres until 2026-08-17, which meant a database blip
+# marked every task unhealthy, ECS drained them all, and a hiccup that might
+# resolve in seconds became a full outage.
+#
+# Dependency health is asked elsewhere, at a time when the answer is actionable:
+# the API's /api/health/ready is checked by the production deploy workflow after
+# a rollout. A load balancer is the wrong thing to tell about a database, because
+# its only available response is to remove capacity.
 # -----------------------------------------------------------------------------
 
 resource "aws_lb_target_group" "api" {
@@ -75,9 +81,14 @@ resource "aws_lb_target_group" "web" {
 
   deregistration_delay = var.deregistration_delay
 
+  # COUPLED CHANGE — this path must not be applied before the web image serving
+  # it is deployed. The route is added in apps/web/app/api/health/route.ts; if
+  # this applies first the ALB polls a 404, every web task fails its health
+  # check, ECS drains them, and the circuit breaker rolls back — an outage
+  # caused entirely by a health check change. Deploy the code, then apply.
   health_check {
     enabled             = true
-    path                = "/"
+    path                = "/api/health"
     protocol            = "HTTP"
     matcher             = "200"
     interval            = var.health_check_interval
