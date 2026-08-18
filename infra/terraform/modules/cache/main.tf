@@ -5,7 +5,7 @@
 # relicensed; ioredis and @nestjs/throttler treat it as Redis, and it costs
 # less per node than the equivalent Redis offering.
 #
-# Serves three things (PLAN §9):
+# Serves three things:
 #   rate limit counters shared across ECS tasks (@nestjs/throttler)
 #   dictionary entry cache   — entry:{entryId},       1 hour TTL
 #   search result cache      — search:{md5(params)},  5 minute TTL

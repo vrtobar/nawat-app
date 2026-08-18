@@ -1,4 +1,4 @@
-// TODO(PLAN §13): real landing page — hero, dictionary search entry
+// TODO: real landing page — hero, dictionary search entry
 // point, and course preview. This placeholder just proves the stack
 // (App Router + Tailwind) renders.
 export default function LandingPage() {

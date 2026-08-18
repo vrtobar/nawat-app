@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 // =============================================================================
-// ENVIRONMENT VALIDATION (PLAN §22 — Zod, not Joi)
+// ENVIRONMENT VALIDATION — Zod, not Joi, so the schemas here use the same
+// vocabulary as every other contract in the repo (docs/adr/0010).
 // Wired into ConfigModule.forRoot({ validate: validateEnv }) — the process
 // exits at boot with field-level errors if anything required is missing.
 //

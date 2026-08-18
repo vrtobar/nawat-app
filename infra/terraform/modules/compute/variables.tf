@@ -149,10 +149,10 @@ variable "db_secret_arn" {
   description = <<-EOT
     ARN of the AWS-managed RDS credentials secret.
 
-    NOTE: it holds only `username` and `password`. PLAN §7 assumed six keys
-    including host/port/dbname; verified against the live secret, they are not
-    there. Host, port, and database name are passed as plain environment
-    variables from the values below instead.
+    NOTE: it holds only `username` and `password`. The original design assumed
+    six keys including host/port/dbname; verified against the live secret, they
+    are not there. Host, port, and database name are passed as plain
+    environment variables from the values below instead.
   EOT
   type        = string
 }

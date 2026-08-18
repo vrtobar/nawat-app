@@ -1,6 +1,6 @@
 import './env-bootstrap'; // MUST be first — see comment in that file
 
-// TODO(PLAN §12): initialize AWS X-Ray here, BEFORE NestFactory.create —
+// TODO: initialize AWS X-Ray here, BEFORE NestFactory.create —
 // the SDK must patch http/https/pg before anything else imports them.
 import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -34,15 +34,16 @@ async function bootstrap() {
   // given handler expects. It is applied per parameter —
   // @Body(new ZodValidationPipe(CreateEntrySchema)).
   //
-  // TODO(PLAN §12): still to come —
+  // TODO: still to come —
   //   - JwtAuthGuard via APP_GUARD, global by default with @Public() escape
   //
-  //   - Request logging as MIDDLEWARE, not an interceptor. PLAN §12 says
-  //     LoggingInterceptor; that shape cannot work. Interceptors run after
-  //     guards, so a request rejected by JwtAuthGuard never reaches one — no
-  //     401 or 403 would ever be logged, which is the opposite of what an
-  //     access log is for. Log on response finish from middleware instead, and
-  //     keep an interceptor only if handler-level timing is wanted separately.
+  //   - Request logging as MIDDLEWARE, not an interceptor. The original
+  //     design called for a LoggingInterceptor; that shape cannot work.
+  //     Interceptors run after guards, so a request rejected by JwtAuthGuard
+  //     never reaches one — no 401 or 403 would ever be logged, which is the
+  //     opposite of what an access log is for. Log on response finish from
+  //     middleware instead, and keep an interceptor only if handler-level
+  //     timing is wanted separately.
 
   const port = config.get('PORT', { infer: true });
   await app.listen(port);

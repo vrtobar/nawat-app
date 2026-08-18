@@ -12,10 +12,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { UsersModule } from './modules/users/users.module';
 
-// TODO(PLAN §12): feature modules land here as they're implemented —
-// AuthModule, DictionaryModule, LessonsModule, ProgressModule,
-// FlashcardsModule, ReviewModule, UploadsModule, UsersModule,
-// AuditModule (@Global), CacheModule, SqsModule.
+// TODO: feature modules land here as they're implemented. Still to come —
+// DictionaryModule, LessonsModule, ProgressModule, FlashcardsModule,
+// ReviewModule, UploadsModule, AuditModule (@Global), CacheModule, SqsModule.
+// Auth, Health and Users are already below.
 @Module({
   imports: [
     ConfigModule.forRoot({
