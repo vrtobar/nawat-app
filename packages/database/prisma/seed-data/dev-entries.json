@@ -1,0 +1,72 @@
+{
+  "$comment": [
+    "PLACEHOLDER TEST DATA — NOT REAL NAHUAT. DO NOT PUBLISH OR CITE.",
+    "",
+    "Loaded only by `npm run db:seed:dev`, never by `db:seed`, so this cannot",
+    "reach production. It exists so the dictionary endpoints, the trigram",
+    "indexes and entries_live_idx have rows to work against before real",
+    "vocabulary is available.",
+    "",
+    "The entries below are structural fixtures with obviously fake content.",
+    "They are deliberately NOT plausible Nahuat: a placeholder that looks",
+    "real is the one that eventually gets copied somewhere it shouldn't.",
+    "Real vocabulary does not belong in this file — it goes in through the",
+    "API once the dictionary module exists, so it inherits validation,",
+    "priority resolution, audit logging and attribution to a real person.",
+    "",
+    "Shape is validated at load against CreateEntrySchema and",
+    "CreateTranslationSchema from @nahuat/shared, so this file cannot drift",
+    "from the API contract without failing loudly."
+  ],
+  "entries": [
+    {
+      "nahuatContent": "zzz-placeholder-one",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "spanishContent": "marcador de posición uno",
+          "englishContent": "placeholder one",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[placeholder]",
+          "priority": 1
+        },
+        {
+          "dialectCode": "common",
+          "spanishContent": "segundo sentido de prueba",
+          "englishContent": "second test sense",
+          "partOfSpeech": "NOUN",
+          "priority": 2
+        }
+      ]
+    },
+    {
+      "nahuatContent": "zzz-placeholder-two",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "spanishContent": "marcador de posición dos",
+          "englishContent": "placeholder two",
+          "partOfSpeech": "VERB",
+          "exampleNahuat": "zzz-placeholder-two example sentence",
+          "exampleSpanish": "oración de ejemplo",
+          "priority": 1
+        }
+      ]
+    },
+    {
+      "nahuatContent": "zzz-placeholder-phrase one two",
+      "type": "PHRASE",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "spanishContent": "frase de marcador de posición",
+          "englishContent": "placeholder phrase",
+          "partOfSpeech": "PHRASE",
+          "priority": 1
+        }
+      ]
+    }
+  ]
+}
