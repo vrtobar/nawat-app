@@ -1,14 +1,19 @@
-# Nahuat Platform
+# Nawat Platform
 
-A language learning app for Nahuat — a critically endangered indigenous
+A language learning app for Nawat — a critically endangered indigenous
 language of El Salvador with roughly 100 remaining speakers.
 
 ## About
 
-Nahuat is an indigenous language of El Salvador with approximately 100
-remaining speakers. This project aims to make learning Nahuat accessible
-through an interactive, gamified experience — preserving the language for
-future generations.
+This project aims to make learning Nawat accessible through an interactive,
+gamified experience — preserving the language for future generations.
+
+**On the spelling.** "Nawat" is the orthography the revitalization movement in
+El Salvador standardised on, and it is what this project uses for the language
+everywhere. The domain and infrastructure keep the older and more widely
+recognised "Nahuat" — `nahuat.com`, the repository slug, and the AWS resource
+names. The rule and the reasoning behind it are in
+[ADR 14](docs/adr/0014-nawat-for-the-language-nahuat-for-the-project.md).
 
 ## Tech Stack
 
