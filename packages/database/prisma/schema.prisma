@@ -155,7 +155,7 @@ enum EntryType {
 
 model Dialect {
   id          String  @id @default(cuid())
-  code        String  @unique // e.g. "base", "western", "eastern"
+  code        String  @unique // e.g. "common"; regional variants added when data justifies them
   name        String  @unique // e.g. "Common Nahuat", "Western Nahuat"
   description String?
 
@@ -185,7 +185,7 @@ model Translation {
   // Lower number = higher priority (1 = primary/most common meaning).
   // e.g. "takat": priority 1 = "hombre" (most common), priority 2 = "persona"
   //
-  // Unique per (entry, dialect) — this is what makes "the priority=1 base
+  // Unique per (entry, dialect) — this is what makes "the priority=1 common
   // dialect translation" in DictionaryEntryListItem.primaryTranslation
   // (see packages/shared entry.schema.ts) a well-defined, single row instead
   // of an arbitrary pick among ties. Service layer must resolve the next

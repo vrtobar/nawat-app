@@ -14,7 +14,8 @@ export type EntryType = z.infer<typeof EntryTypeSchema>;
 // PRIMARY TRANSLATION INLINE
 // Lean shape embedded in list items — just enough to render a search result
 // row with Spanish meaning, audio button, and part of speech badge.
-// Always the priority=1 base dialect translation — well-defined thanks to
+// Always the priority=1 `common` dialect translation — the form used across
+// the majority of the country. Well-defined thanks to
 // the (entryId, dialectCode, priority) unique constraint in schema.prisma.
 // Full translation data available in DictionaryEntryDetail.
 // -----------------------------------------------------------------------------
