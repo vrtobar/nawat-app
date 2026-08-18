@@ -17,9 +17,9 @@ const run = async (returned: unknown, skip = false): Promise<unknown> => {
 
 describe('TransformInterceptor', () => {
   it('wraps a single item', async () => {
-    await expect(run({ id: 'ent_1', nahuatContent: 'takat' })).resolves.toEqual({
+    await expect(run({ id: 'ent_1', nawatContent: 'takat' })).resolves.toEqual({
       success: true,
-      data: { id: 'ent_1', nahuatContent: 'takat' },
+      data: { id: 'ent_1', nawatContent: 'takat' },
     });
   });
 

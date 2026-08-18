@@ -13,8 +13,10 @@ import { z } from 'zod';
 
 export const LevelSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  titleEn: z.string().nullable(),
+  descriptionEs: z.string().nullable(),
+  descriptionEn: z.string().nullable(),
   cefrLabel: z.string().nullable(), // e.g. "A1", "A2", "B1" — optional reference
   order: z.number().int(),
   isPublished: z.boolean(),
@@ -32,8 +34,10 @@ export type Level = z.infer<typeof LevelSchema>;
 // -----------------------------------------------------------------------------
 
 export const CreateLevelSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().optional(),
+  titleEs: z.string().min(1).max(200),
+  titleEn: z.string().min(1).max(200).optional(),
+  descriptionEs: z.string().optional(),
+  descriptionEn: z.string().optional(),
   cefrLabel: z.string().max(10).optional(),
   order: z.number().int().min(1),
 });

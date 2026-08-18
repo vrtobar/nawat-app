@@ -1,6 +1,15 @@
 import { prisma } from '@nahuat/database';
-import type { UserProfile } from '@nahuat/shared';
+import type { Locale, UserProfile } from '@nahuat/shared';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+
+// The Postgres enum is ES/EN, the wire format is es/en. Both casings are
+// deliberate — see locale.schema.ts — and this is the one place they meet.
+// A Record rather than .toLowerCase() so adding a locale to schema.prisma
+// fails to compile here instead of silently returning an unhandled string.
+const LOCALE_TO_WIRE: Record<'ES' | 'EN', Locale> = {
+  ES: 'es',
+  EN: 'en',
+};
 
 @Injectable()
 export class UsersService {
@@ -15,6 +24,7 @@ export class UsersService {
         email: true,
         name: true,
         role: true,
+        locale: true,
         username: true,
         pictureUrl: true,
         xp: true,
@@ -53,6 +63,7 @@ export class UsersService {
 
     return {
       ...profile,
+      locale: LOCALE_TO_WIRE[profile.locale],
       // Prisma returns Date; the schema declares ISO strings, and the frontend
       // parses them with the same schema it types against.
       lastActiveAt: profile.lastActiveAt?.toISOString() ?? null,

@@ -32,12 +32,13 @@ export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 
 export const TranslationDetailSchema = z.object({
   id: z.string(),
-  spanishContent: z.string(),
-  englishContent: z.string().nullable(),
+  contentEs: z.string(),
+  contentEn: z.string().nullable(),
   phonetic: z.string().nullable(),
   partOfSpeech: PartOfSpeechSchema.nullable(),
-  exampleNahuat: z.string().nullable(),
-  exampleSpanish: z.string().nullable(),
+  exampleNawat: z.string().nullable(),
+  exampleEs: z.string().nullable(),
+  exampleEn: z.string().nullable(),
   audioUrl: z.url().nullable(),
   priority: z.number().int(),
   isPublished: z.boolean(),
@@ -60,12 +61,13 @@ export type TranslationDetail = z.infer<typeof TranslationDetailSchema>;
 
 export const CreateTranslationSchema = z.object({
   dialectCode: z.string(),
-  spanishContent: z.string().min(1),
-  englishContent: z.string().optional(),
+  contentEs: z.string().min(1),
+  contentEn: z.string().optional(),
   phonetic: z.string().optional(),
   partOfSpeech: PartOfSpeechSchema.optional(),
-  exampleNahuat: z.string().optional(),
-  exampleSpanish: z.string().optional(),
+  exampleNawat: z.string().optional(),
+  exampleEs: z.string().optional(),
+  exampleEn: z.string().optional(),
   audioUrl: z.url().optional(),
   priority: z.number().int().min(1).optional(),
 });

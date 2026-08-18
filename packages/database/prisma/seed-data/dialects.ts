@@ -16,7 +16,7 @@ import type { CreateDialect } from '@nahuat/shared';
 // region, which is what makes DictionaryEntryListItem.primaryTranslation — the
 // priority=1 translation in this dialect — well defined.
 //
-// The description is deliberately not geographic. Nahuat predates every
+// The description is deliberately not geographic. Nawat predates every
 // political boundary that could be used to place it, so framing the language
 // through a modern state is both anachronistic and the wrong unit: the
 // variation that actually survives is by community.
@@ -28,11 +28,19 @@ import type { CreateDialect } from '@nahuat/shared';
 export const DIALECTS: CreateDialect[] = [
   {
     code: 'common',
-    name: 'Common Nahuat',
-    // User-facing: this string reaches dictionary filters and translation
-    // responses via DialectSchema, so it is written for a learner rather than
-    // a maintainer. The reasoning above stays here.
-    description:
-      'Forms shared broadly among Nahuat speakers rather than specific to one community. Shown when an entry has no regional distinction.',
+    nameEs: 'Nawat común',
+    nameEn: 'Common Nawat',
+    // User-facing: these strings reach dictionary filters and translation
+    // responses via DialectSchema, so they are written for a learner rather
+    // than a maintainer. The reasoning above stays here.
+    //
+    // Both languages are required on Dialect, unlike everywhere else. These
+    // rows are authored by the project rather than contributed, so the rule
+    // that keeps English optional — never block a Nawat speaker on an English
+    // gloss — has nobody to protect here.
+    descriptionEs:
+      'Formas de uso amplio entre los hablantes de nawat, sin ser propias de una sola comunidad. Se muestra cuando una entrada no tiene distinción regional.',
+    descriptionEn:
+      'Forms in broad use among Nawat speakers rather than specific to one community. Shown when an entry has no regional distinction.',
   },
 ];

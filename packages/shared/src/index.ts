@@ -7,6 +7,9 @@
 // API response envelope — import this first, used everywhere
 export * from './schemas/api-response.schema';
 
+// Locale — the suffix that names half the columns in the schema
+export * from './schemas/locale.schema';
+
 // Users
 export * from './schemas/user.schema';
 

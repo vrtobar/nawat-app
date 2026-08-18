@@ -25,7 +25,7 @@ export const ExerciseTypeSchema = z.enum([
   'IMAGE_SELECT',
 ]);
 
-export const DirectionSchema = z.enum(['NAHUAT_TO_SPANISH', 'SPANISH_TO_NAHUAT']);
+export const DirectionSchema = z.enum(['NAWAT_TO_SPANISH', 'SPANISH_TO_NAWAT']);
 
 export const TranslationRoleSchema = z.enum(['TARGET', 'DISTRACTOR', 'COMPONENT']);
 
@@ -46,15 +46,15 @@ export const ExerciseTranslationSchema = z.object({
   order: z.number().int(),
   translation: z.object({
     id: z.string(),
-    spanishContent: z.string(),
-    englishContent: z.string().nullable(),
+    contentEs: z.string(),
+    contentEn: z.string().nullable(),
     audioUrl: z.url().nullable(),
     phonetic: z.string().nullable(),
     dialectCode: z.string(),
   }),
   entry: z.object({
     id: z.string(),
-    nahuatContent: z.string(),
+    nawatContent: z.string(),
     imageUrl: z.url().nullable(),
     type: EntryTypeSchema,
   }),
@@ -107,7 +107,7 @@ export const ExerciseTranslationInputSchema = z.object({
 
 export const CreateExerciseSchema = z.object({
   type: ExerciseTypeSchema,
-  direction: DirectionSchema.default('NAHUAT_TO_SPANISH'),
+  direction: DirectionSchema.default('NAWAT_TO_SPANISH'),
   order: z.number().int().min(1),
   config: ExerciseConfigValueSchema.optional(),
   translations: z.array(ExerciseTranslationInputSchema).min(1),

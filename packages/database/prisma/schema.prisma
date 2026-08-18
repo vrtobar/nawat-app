@@ -22,11 +22,13 @@ datasource db {
 // =============================================================================
 
 model Level {
-  id          String  @id @default(cuid())
-  title       String // e.g. "Beginner", "Elementary", "Intermediate"
-  description String?
-  order       Int // display order — lower = shown first
-  cefrLabel   String? @map("cefr_label") // e.g. "A1", "A2", "B1" — optional reference
+  id            String  @id @default(cuid())
+  titleEs       String  @map("title_es") // e.g. "Principiante", "Elemental", "Intermedio"
+  titleEn       String? @map("title_en") // e.g. "Beginner", "Elementary", "Intermediate"
+  descriptionEs String? @map("description_es")
+  descriptionEn String? @map("description_en")
+  order         Int // display order — lower = shown first
+  cefrLabel     String? @map("cefr_label") // e.g. "A1", "A2", "B1" — optional reference
 
   // Draft by default — ADMIN publishes when content is ready.
   isPublished Boolean @default(false) @map("is_published")
@@ -63,6 +65,11 @@ model User {
   // Profile photo synced from Auth0/social provider on every login
   pictureUrl String? @map("picture_url")
 
+  // Learning language — which locale content is served in. Beats
+  // Accept-Language during resolution: a Salvadoran-American may well have an
+  // English browser and want Spanish. See ADR 15.
+  locale Locale @default(ES)
+
   // Gamification
   // streak and lastActiveAt are denormalized caches — updated when
   // UserActivity is logged. Avoids recalculating streak on every request.
@@ -97,6 +104,17 @@ model User {
   @@map("users")
 }
 
+// Locales content can be served in. Uppercase to match every other enum here;
+// the wire format is lowercase ("?locale=es") and the column suffix is
+// capitalized (contentEs) — see LOCALE_FIELD_SUFFIX in packages/shared.
+//
+// Nawat is deliberately absent. It is the subject being taught, shown to every
+// learner regardless of language, and never a value selected between.
+enum Locale {
+  ES
+  EN
+}
+
 enum Role {
   USER // learner — default role on signup, sees published content only
   CONTRIBUTOR // read drafts, create and edit all content (dictionary entries
@@ -109,11 +127,11 @@ enum Role {
 // =============================================================================
 
 model Entry {
-  id            String    @id @default(cuid())
-  type          EntryType @default(WORD)
-  nahuatContent String    @unique @map("nahuat_content")
-  imageUrl      String?   @map("image_url")
-  imageKey      String?   @map("image_key") // S3 key — source of truth for file location
+  id           String    @id @default(cuid())
+  type         EntryType @default(WORD)
+  nawatContent String    @unique @map("nawat_content")
+  imageUrl     String?   @map("image_url")
+  imageKey     String?   @map("image_key") // S3 key — source of truth for file location
 
   // Draft by default — only ADMIN can publish.
   // Unpublished entries hidden from USER via Prisma middleware.
@@ -138,7 +156,7 @@ model Entry {
   // created by 20260815155000_enable_pg_trgm — Prisma does not model
   // extensions, so nothing here can declare that dependency. Regenerating
   // the init migration is safe; that one must not be deleted.
-  @@index([nahuatContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "entries_nahuat_content_trgm_idx")
+  @@index([nawatContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "entries_nawat_content_trgm_idx")
   // NOT THE FULL INDEX SET. entries_live_idx is a partial index defined in
   // 20260815160500_partial_live_indexes — Prisma cannot express a WHERE
   // clause, so it is invisible here. Check that migration before adding an
@@ -152,10 +170,16 @@ enum EntryType {
 }
 
 model Dialect {
-  id          String  @id @default(cuid())
-  code        String  @unique // e.g. "common"; regional variants added when data justifies them
-  name        String  @unique // e.g. "Common Nahuat", "Western Nahuat"
-  description String?
+  id            String @id @default(cuid())
+  code          String @unique // e.g. "common"; regional variants added when data justifies them
+  // Required in both languages, unlike every other localized model. Dialects
+  // are reference data authored by the project rather than contributed
+  // content, so the "English required to publish, not to create" rule in
+  // ADR 15 has nothing to protect here — there is no contributor to unblock.
+  nameEs        String @unique @map("name_es") // e.g. "Nawat común", "Nawat occidental"
+  nameEn        String @unique @map("name_en") // e.g. "Common Nawat", "Western Nawat"
+  descriptionEs String @map("description_es")
+  descriptionEn String @map("description_en")
 
   translations Translation[]
 
@@ -167,13 +191,14 @@ model Translation {
   entryId     String @map("entry_id")
   dialectCode String @map("dialect_code")
 
-  spanishContent String        @map("spanish_content")
-  englishContent String?       @map("english_content")
-  phonetic       String? // pronunciation guide
-  partOfSpeech   PartOfSpeech? @map("part_of_speech")
+  contentEs    String        @map("content_es")
+  contentEn    String?       @map("content_en")
+  phonetic     String? // pronunciation guide — IPA
+  partOfSpeech PartOfSpeech? @map("part_of_speech")
 
-  exampleNahuat  String? @map("example_nahuat")
-  exampleSpanish String? @map("example_spanish")
+  exampleNawat String? @map("example_nawat")
+  exampleEs    String? @map("example_es")
+  exampleEn    String? @map("example_en")
 
   audioUrl String? @map("audio_url")
   audioKey String? @map("audio_key") // S3 key
@@ -215,14 +240,12 @@ model Translation {
   userCardProgress     UserCardProgress[]
 
   @@unique([entryId, dialectCode, priority])
-  @@index([spanishContent])
-  @@index([englishContent])
   @@index([dialectCode])
   // Substring search — see note on Entry's trigram index above. Separate
   // indexes rather than one multi-column GIN: searches hit either language
   // alone, and the planner can BitmapOr the two when a query spans both.
-  @@index([spanishContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_spanish_content_trgm_idx")
-  @@index([englishContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_english_content_trgm_idx")
+  @@index([contentEs(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_es_trgm_idx")
+  @@index([contentEn(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_en_trgm_idx")
   // See note on Entry: translations_live_idx is partial and lives in the
   // migration, not here.
   @@map("translations")
@@ -246,10 +269,22 @@ enum PartOfSpeech {
 // =============================================================================
 
 model FlashcardSet {
-  id          String  @id @default(cuid())
-  userId      String  @map("user_id")
-  name        String
-  description String?
+  id            String  @id @default(cuid())
+  userId        String  @map("user_id")
+  // Both nullable, and exactly one rule does not apply to both kinds of set.
+  //
+  // A private set is named once by its author, in their own language: asking a
+  // learner to name their own study deck twice is friction with no payoff, and
+  // there is nobody else to fill the gap. An official set is project content
+  // and needs both, enforced on the isOfficial toggle rather than here.
+  //
+  // "At least one name" is a CHECK constraint in the migration — Prisma cannot
+  // express one. "Both when official" is deliberately NOT a constraint: it is
+  // a product rule, and it belongs with the other _NOT_PUBLISHABLE guards.
+  nameEs        String? @map("name_es")
+  nameEn        String? @map("name_en")
+  descriptionEs String? @map("description_es")
+  descriptionEn String? @map("description_en")
 
   // isOfficial — admin/contributor created, surfaced as curated sets
   // isFeatured — pinned to top of explore page by admin
@@ -323,11 +358,13 @@ enum CardState {
 // All courses within a published level are available from day one — no unlock gates.
 // Units within a course unlock sequentially (complete Unit N → unlock Unit N+1).
 model Course {
-  id          String  @id @default(cuid())
-  levelId     String  @map("level_id")
-  title       String
-  description String?
-  order       Int // suggested display order within level — not an unlock gate
+  id            String  @id @default(cuid())
+  levelId       String  @map("level_id")
+  titleEs       String  @map("title_es")
+  titleEn       String? @map("title_en")
+  descriptionEs String? @map("description_es")
+  descriptionEn String? @map("description_en")
+  order         Int // suggested display order within level — not an unlock gate
 
   isPublished Boolean @default(false) @map("is_published")
 
@@ -355,11 +392,13 @@ model Course {
 // Units unlock sequentially: complete Unit N → unlock Unit N+1.
 // Completing all units in a course completes the course.
 model Unit {
-  id          String  @id @default(cuid())
-  courseId    String  @map("course_id")
-  title       String
-  description String?
-  order       Int // sequence within section — reordered on soft delete or archive
+  id            String  @id @default(cuid())
+  courseId      String  @map("course_id")
+  titleEs       String  @map("title_es")
+  titleEn       String? @map("title_en")
+  descriptionEs String? @map("description_es")
+  descriptionEn String? @map("description_en")
+  order         Int // sequence within section — reordered on soft delete or archive
 
   isPublished Boolean @default(false) @map("is_published")
 
@@ -388,13 +427,15 @@ model Unit {
 //              exercises are generated at runtime from unit vocabulary (not stored as Exercise rows)
 // Completing all lessons (including RECAP) in a unit completes the unit.
 model Lesson {
-  id          String     @id @default(cuid())
-  unitId      String     @map("unit_id")
-  type        LessonType @default(STANDARD)
-  title       String
-  description String?
-  order       Int // sequence within unit — RECAP always has highest order
-  xpReward    Int        @default(10) @map("xp_reward")
+  id            String     @id @default(cuid())
+  unitId        String     @map("unit_id")
+  type          LessonType @default(STANDARD)
+  titleEs       String     @map("title_es")
+  titleEn       String?    @map("title_en")
+  descriptionEs String?    @map("description_es")
+  descriptionEn String?    @map("description_en")
+  order         Int // sequence within unit — RECAP always has highest order
+  xpReward      Int        @default(10) @map("xp_reward")
 
   isPublished Boolean @default(false) @map("is_published")
 
@@ -447,7 +488,7 @@ model LessonVocabulary {
 //   TYPE_ANSWER     — TARGET only (accent-insensitive matching in NestJS)
 //   MATCH_PAIRS     — 3-6 COMPONENT rows only, no TARGET
 //   BUILD_PHRASE    — TARGET (phrase entry) + 2+ COMPONENTs + optional DISTRACTORS
-//                     prompt from TARGET.translation.spanishContent
+//                     prompt from TARGET.translation.contentEs
 //                     correct order from COMPONENT.order field
 //   LISTEN_TYPE     — TARGET only (requires audioUrl on TARGET)
 //
@@ -459,7 +500,7 @@ model Exercise {
   id        String       @id @default(cuid())
   lessonId  String       @map("lesson_id")
   type      ExerciseType
-  direction Direction    @default(NAHUAT_TO_SPANISH)
+  direction Direction    @default(NAWAT_TO_SPANISH)
   order     Int
   config    Json?
 
@@ -502,9 +543,9 @@ enum ExerciseType {
   MULTIPLE_CHOICE // see prompt, pick correct answer from options
   LISTEN_SELECT // hear audio, pick correct translation
   TYPE_ANSWER // see prompt, type the answer (accent-insensitive)
-  MATCH_PAIRS // match Nahuat words to Spanish translations (COMPONENT only)
+  MATCH_PAIRS // match Nawat words to Spanish translations (COMPONENT only)
   TRUE_FALSE // is this translation correct? config: { isCorrect }
-  BUILD_PHRASE // arrange word tiles to form a Nahuat phrase
+  BUILD_PHRASE // arrange word tiles to form a Nawat phrase
 
   // Phase 2 — Post-MVP
   FILL_BLANK // complete a sentence with the missing word. config: { sentence, hint? }
@@ -525,8 +566,8 @@ enum LessonType {
 }
 
 enum Direction {
-  NAHUAT_TO_SPANISH
-  SPANISH_TO_NAHUAT
+  NAWAT_TO_SPANISH
+  SPANISH_TO_NAWAT
 }
 
 // =============================================================================

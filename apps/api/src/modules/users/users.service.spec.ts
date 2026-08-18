@@ -15,6 +15,7 @@ const row = (overrides: Record<string, unknown> = {}) => ({
   email: 'victor@example.com',
   name: 'Victor',
   role: 'USER',
+  locale: 'ES',
   username: null,
   pictureUrl: null,
   xp: 40,
@@ -36,6 +37,18 @@ describe('UsersService', () => {
       id: 'usr_1',
       role: 'USER',
       xp: 40,
+    });
+  });
+
+  it('maps the locale enum to its wire format', async () => {
+    // The column is ES/EN and the contract is es/en. The mock is cast to
+    // `never`, so nothing about this crosses the type checker — without an
+    // assertion the service can return undefined here and every other test in
+    // this file still passes.
+    findUnique.mockResolvedValue(row({ locale: 'EN' }) as never);
+
+    await expect(new UsersService().findProfile('usr_1')).resolves.toMatchObject({
+      locale: 'en',
     });
   });
 

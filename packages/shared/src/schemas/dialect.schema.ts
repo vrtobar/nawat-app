@@ -9,14 +9,21 @@ import { z } from 'zod';
 export const DialectSchema = z.object({
   id: z.string(),
   code: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
+  nameEs: z.string(),
+  nameEn: z.string(),
+  descriptionEs: z.string(),
+  descriptionEn: z.string(),
 });
 
 export const CreateDialectSchema = z.object({
   code: z.string().min(1).max(32),
-  name: z.string().min(1).max(100),
-  description: z.string().optional(),
+  // Required in both languages, unlike every other localized model — dialects
+  // are reference data the project authors, so there is no contributor to
+  // unblock by making English optional.
+  nameEs: z.string().min(1).max(100),
+  nameEn: z.string().min(1).max(100),
+  descriptionEs: z.string().min(1),
+  descriptionEn: z.string().min(1),
 });
 
 export const UpdateDialectSchema = CreateDialectSchema.partial();

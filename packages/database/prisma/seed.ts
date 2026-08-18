@@ -25,7 +25,7 @@ const prisma = new PrismaClient({ adapter });
 // A flag would have been fewer lines. It is rejected because the seed task's
 // command is overridden at RunTask time, so an environment variable or an
 // argv typo is the only thing that would stand between production and a
-// dictionary full of fake Nahuat. A language preservation project cannot
+// dictionary full of fake Nawat. A language preservation project cannot
 // treat that as a low-severity mistake: wrong data that looks authoritative
 // is worse than an empty table, because it gets copied outward.
 //
@@ -45,7 +45,12 @@ async function seedReference(): Promise<void> {
     await prisma.dialect.upsert({
       where: { code: dialect.code },
       create: dialect,
-      update: { name: dialect.name, description: dialect.description ?? null },
+      update: {
+        nameEs: dialect.nameEs,
+        nameEn: dialect.nameEn,
+        descriptionEs: dialect.descriptionEs,
+        descriptionEn: dialect.descriptionEn,
+      },
     });
   }
 
@@ -117,7 +122,7 @@ async function seedDevContent(): Promise<void> {
       // the file and line that caused it.
       if (!dialectCodes.has(t.dialectCode)) {
         throw new Error(
-          `Unknown dialectCode "${t.dialectCode}" on "${entry.nahuatContent}" — ` +
+          `Unknown dialectCode "${t.dialectCode}" on "${entry.nawatContent}" — ` +
             `known: ${[...dialectCodes].join(', ')}`,
         );
       }
@@ -128,9 +133,9 @@ async function seedDevContent(): Promise<void> {
     // unpublished rows would leave them empty and the queries they exist for
     // untested. See 20260815160500_partial_live_indexes.
     const record = await prisma.entry.upsert({
-      where: { nahuatContent: entry.nahuatContent },
+      where: { nawatContent: entry.nawatContent },
       create: {
-        nahuatContent: entry.nahuatContent,
+        nawatContent: entry.nawatContent,
         type: entry.type,
         isPublished: true,
         creatorId: author.id,
@@ -161,20 +166,20 @@ async function seedDevContent(): Promise<void> {
           entryId: record.id,
           dialectCode: t.dialectCode,
           priority,
-          spanishContent: t.spanishContent,
-          englishContent: t.englishContent ?? null,
+          contentEs: t.contentEs,
+          contentEn: t.contentEn ?? null,
           phonetic: t.phonetic ?? null,
           partOfSpeech: t.partOfSpeech ?? null,
-          exampleNahuat: t.exampleNahuat ?? null,
-          exampleSpanish: t.exampleSpanish ?? null,
+          exampleNawat: t.exampleNawat ?? null,
+          exampleEs: t.exampleEs ?? null,
           audioUrl: t.audioUrl ?? null,
           isPublished: true,
           creatorId: author.id,
           updaterId: author.id,
         },
         update: {
-          spanishContent: t.spanishContent,
-          englishContent: t.englishContent ?? null,
+          contentEs: t.contentEs,
+          contentEn: t.contentEn ?? null,
           updaterId: author.id,
         },
       });
@@ -184,7 +189,7 @@ async function seedDevContent(): Promise<void> {
 
   console.log(
     `dev content: ${entryCount} entries, ${translationCount} translations ` +
-      `(PLACEHOLDER — not real Nahuat)`,
+      `(PLACEHOLDER — not real Nawat)`,
   );
 }
 

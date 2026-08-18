@@ -8,8 +8,8 @@ import { z } from 'zod';
 
 // TRUE_FALSE
 // statement is derived at runtime:
-//   isCorrect=true  → "[nahuatContent] means [spanishContent]"
-//   isCorrect=false → "[nahuatContent] means [randomDistractorSpanishContent]"
+//   isCorrect=true  → "[nawatContent] means [contentEs]"
+//   isCorrect=false → "[nawatContent] means [randomDistractorContentEs]"
 // No statement stored — eliminates staleness when translations are updated.
 export const TrueFalseConfigSchema = z.object({
   isCorrect: z.boolean(),
@@ -17,7 +17,7 @@ export const TrueFalseConfigSchema = z.object({
 
 // FILL_BLANK
 // sentence is hand-authored prose with ___ placeholder.
-// Answer derived from TARGET entry.nahuatContent.
+// Answer derived from TARGET entry.nawatContent.
 // hint is optional — shown as a subtle clue below the blank.
 export const FillBlankConfigSchema = z
   .object({
@@ -30,8 +30,8 @@ export const FillBlankConfigSchema = z
   });
 
 // IMAGE_SELECT
-// word_from_image — show image, pick correct Nahuat word
-// image_from_word — show Nahuat word, pick correct image
+// word_from_image — show image, pick correct Nawat word
+// image_from_word — show Nawat word, pick correct image
 // Images sourced from ExerciseTranslation → Translation → Entry → imageUrl.
 // NestJS validation must enforce non-null imageUrl on TARGET and all DISTRACTORS.
 export const ImageSelectConfigSchema = z.object({

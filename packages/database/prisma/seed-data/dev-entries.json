@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "PLACEHOLDER TEST DATA — NOT REAL NAHUAT. DO NOT PUBLISH OR CITE.",
+    "PLACEHOLDER TEST DATA — NOT REAL NAWAT. DO NOT PUBLISH OR CITE.",
     "",
     "Loaded only by `npm run db:seed:dev`, never by `db:seed`, so this cannot",
     "reach production. It exists so the dictionary endpoints, the trigram",
@@ -8,7 +8,7 @@
     "vocabulary is available.",
     "",
     "The entries below are structural fixtures with obviously fake content.",
-    "They are deliberately NOT plausible Nahuat: a placeholder that looks",
+    "They are deliberately NOT plausible Nawat: a placeholder that looks",
     "real is the one that eventually gets copied somewhere it shouldn't.",
     "Real vocabulary does not belong in this file — it goes in through the",
     "API once the dictionary module exists, so it inherits validation,",
@@ -20,49 +20,49 @@
   ],
   "entries": [
     {
-      "nahuatContent": "zzz-placeholder-one",
+      "nawatContent": "zzz-placeholder-one",
       "type": "WORD",
       "translations": [
         {
           "dialectCode": "common",
-          "spanishContent": "marcador de posición uno",
-          "englishContent": "placeholder one",
+          "contentEs": "marcador de posición uno",
+          "contentEn": "placeholder one",
           "partOfSpeech": "NOUN",
           "phonetic": "[placeholder]",
           "priority": 1
         },
         {
           "dialectCode": "common",
-          "spanishContent": "segundo sentido de prueba",
-          "englishContent": "second test sense",
+          "contentEs": "segundo sentido de prueba",
+          "contentEn": "second test sense",
           "partOfSpeech": "NOUN",
           "priority": 2
         }
       ]
     },
     {
-      "nahuatContent": "zzz-placeholder-two",
+      "nawatContent": "zzz-placeholder-two",
       "type": "WORD",
       "translations": [
         {
           "dialectCode": "common",
-          "spanishContent": "marcador de posición dos",
-          "englishContent": "placeholder two",
+          "contentEs": "marcador de posición dos",
+          "contentEn": "placeholder two",
           "partOfSpeech": "VERB",
-          "exampleNahuat": "zzz-placeholder-two example sentence",
-          "exampleSpanish": "oración de ejemplo",
+          "exampleNawat": "zzz-placeholder-two example sentence",
+          "exampleEs": "oración de ejemplo",
           "priority": 1
         }
       ]
     },
     {
-      "nahuatContent": "zzz-placeholder-phrase one two",
+      "nawatContent": "zzz-placeholder-phrase one two",
       "type": "PHRASE",
       "translations": [
         {
           "dialectCode": "common",
-          "spanishContent": "frase de marcador de posición",
-          "englishContent": "placeholder phrase",
+          "contentEs": "frase de marcador de posición",
+          "contentEn": "placeholder phrase",
           "partOfSpeech": "PHRASE",
           "priority": 1
         }

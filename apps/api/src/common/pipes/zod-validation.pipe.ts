@@ -48,7 +48,7 @@ export class ZodValidationPipe<T extends ZodType> implements PipeTransform {
 // has no request context. The filter completes the envelope.
 function toDetails(error: ZodError, metadata: ArgumentMetadata): ApiErrorDetail[] {
   return error.issues.map((issue) => ({
-    // e.g. "body.nahuatContent", "query.page", "body.translations.0.role".
+    // e.g. "body.nawatContent", "query.page", "body.translations.0.role".
     // metadata.type is prepended so a client can tell a bad query param from a
     // bad body field when a handler validates both. Array indices arrive as
     // numbers and are joined as-is.
