@@ -59,7 +59,7 @@ export const ApiPaginatedSchema = <T extends z.ZodType>(itemSchema: T) =>
 // -----------------------------------------------------------------------------
 
 export const ApiErrorDetailSchema = z.object({
-  field: z.string().optional(), // field path e.g. "body.nahuatContent"
+  field: z.string().optional(), // field path e.g. "body.nawatContent"
   message: z.string(),
 });
 

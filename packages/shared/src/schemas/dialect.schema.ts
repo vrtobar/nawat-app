@@ -9,14 +9,14 @@ import { z } from 'zod';
 export const DialectSchema = z.object({
   id: z.string(),
   code: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
+  nameEs: z.string(),
+  descriptionEs: z.string().nullable(),
 });
 
 export const CreateDialectSchema = z.object({
   code: z.string().min(1).max(32),
-  name: z.string().min(1).max(100),
-  description: z.string().optional(),
+  nameEs: z.string().min(1).max(100),
+  descriptionEs: z.string().optional(),
 });
 
 export const UpdateDialectSchema = CreateDialectSchema.partial();

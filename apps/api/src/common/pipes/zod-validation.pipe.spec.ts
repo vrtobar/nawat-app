@@ -42,7 +42,7 @@ describe('ZodValidationPipe', () => {
   });
 
   it('prefixes the field path with the argument type', () => {
-    const pipe = new ZodValidationPipe(z.object({ nahuatContent: z.string() }));
+    const pipe = new ZodValidationPipe(z.object({ nawatContent: z.string() }));
 
     try {
       pipe.transform({}, meta('body'));
@@ -51,7 +51,7 @@ describe('ZodValidationPipe', () => {
       const payload = (error as BadRequestException).getResponse() as {
         details: { field: string }[];
       };
-      expect(payload.details).toEqual([expect.objectContaining({ field: 'body.nahuatContent' })]);
+      expect(payload.details).toEqual([expect.objectContaining({ field: 'body.nawatContent' })]);
     }
   });
 

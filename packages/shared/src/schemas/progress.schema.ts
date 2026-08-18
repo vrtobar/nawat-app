@@ -73,8 +73,8 @@ export type UserLessonProgress = z.infer<typeof UserLessonProgressSchema>;
 
 export const CourseSummarySchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   order: z.number().int(),
   unitCount: z.number().int(),
   lessonCount: z.number().int(),
@@ -83,8 +83,8 @@ export const CourseSummarySchema = z.object({
 
 export const LevelWithCoursesSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   cefrLabel: z.string().nullable(),
   order: z.number().int(),
   isPublished: z.boolean(),
@@ -101,14 +101,14 @@ export type LevelWithCourses = z.infer<typeof LevelWithCoursesSchema>;
 
 export const CourseUnitSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   order: z.number().int(),
   progress: UserUnitProgressSchema.nullable(),
   lessons: z.array(
     z.object({
       id: z.string(),
-      title: z.string(),
+      titleEs: z.string(),
       type: LessonTypeSchema,
       order: z.number().int(),
       xpReward: z.number().int(),
@@ -120,8 +120,8 @@ export const CourseUnitSchema = z.object({
 
 export const CourseDetailSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   progress: UserCourseProgressSchema.nullable(),
   units: z.array(CourseUnitSchema),
 });
@@ -209,16 +209,16 @@ export const ReviewQueueItemSchema = z.object({
   progress: UserCardProgressSchema,
   translation: z.object({
     id: z.string(),
-    spanishContent: z.string(),
-    englishContent: z.string().nullable(),
+    contentEs: z.string(),
+    contentEn: z.string().nullable(),
     phonetic: z.string().nullable(),
     audioUrl: z.url().nullable(),
-    exampleNahuat: z.string().nullable(),
-    exampleSpanish: z.string().nullable(),
+    exampleNawat: z.string().nullable(),
+    exampleEs: z.string().nullable(),
   }),
   entry: z.object({
     id: z.string(),
-    nahuatContent: z.string(),
+    nawatContent: z.string(),
     imageUrl: z.url().nullable(),
   }),
 });

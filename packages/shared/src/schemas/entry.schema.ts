@@ -13,17 +13,17 @@ export type EntryType = z.infer<typeof EntryTypeSchema>;
 // -----------------------------------------------------------------------------
 // PRIMARY TRANSLATION INLINE
 // Lean shape embedded in list items — just enough to render a search result
-// row with Spanish meaning, audio button, and part of speech badge.
-// Always the priority=1 `common` dialect translation — the form used across
-// the majority of the country. Well-defined thanks to
-// the (entryId, dialectCode, priority) unique constraint in schema.prisma.
+// row with its meaning, audio button, and part of speech badge.
+// Always the priority=1 `common` dialect translation — forms in broad use
+// among speakers rather than specific to one community. Well-defined thanks
+// to the (entryId, dialectCode, priority) unique constraint in schema.prisma.
 // Full translation data available in DictionaryEntryDetail.
 // -----------------------------------------------------------------------------
 
 const PrimaryTranslationSchema = z.object({
   id: z.string(),
-  spanishContent: z.string(),
-  englishContent: z.string().nullable(),
+  contentEs: z.string(),
+  contentEn: z.string().nullable(),
   partOfSpeech: PartOfSpeechSchema.nullable(),
   audioUrl: z.url().nullable(),
   phonetic: z.string().nullable(),
@@ -46,7 +46,7 @@ const PrimaryTranslationSchema = z.object({
 export const DictionaryEntryListItemSchema = z.object({
   id: z.string(),
   type: EntryTypeSchema,
-  nahuatContent: z.string(),
+  nawatContent: z.string(),
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   primaryTranslation: PrimaryTranslationSchema,
@@ -68,7 +68,7 @@ export type DictionaryEntryListItem = z.infer<typeof DictionaryEntryListItemSche
 export const DictionaryEntryDetailSchema = z.object({
   id: z.string(),
   type: EntryTypeSchema,
-  nahuatContent: z.string(),
+  nawatContent: z.string(),
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   creator: z.object({
@@ -116,7 +116,7 @@ export type DictionarySearchParams = z.infer<typeof DictionarySearchParamsSchema
 // -----------------------------------------------------------------------------
 
 export const CreateEntrySchema = z.object({
-  nahuatContent: z.string().min(1).max(500),
+  nawatContent: z.string().min(1).max(500),
   type: EntryTypeSchema.default('WORD'),
   imageUrl: z.url().optional(),
 });

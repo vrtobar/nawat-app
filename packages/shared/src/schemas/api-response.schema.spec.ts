@@ -47,7 +47,7 @@ describe('ApiErrorSchema', () => {
         code: 'VALIDATION_ERROR',
         message: 'Invalid request',
         correlationId: '01JD7Z2K',
-        details: [{ field: 'body.nahuatContent', message: 'Required' }],
+        details: [{ field: 'body.nawatContent', message: 'Required' }],
       },
     });
 

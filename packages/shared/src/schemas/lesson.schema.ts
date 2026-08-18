@@ -12,8 +12,8 @@ import { ExerciseDetailSchema } from './exercise.schema';
 // -----------------------------------------------------------------------------
 
 export const CreateCourseSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().optional(),
+  titleEs: z.string().min(1).max(200),
+  descriptionEs: z.string().optional(),
   order: z.number().int().min(1),
 });
 
@@ -30,8 +30,8 @@ export type UpdateCourse = z.infer<typeof UpdateCourseSchema>;
 // Includes lesson count for rendering node states.
 export const UnitListItemSchema = z.object({
   id: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   order: z.number().int(),
   isPublished: z.boolean(),
   lessonCount: z.number().int(), // total published lessons in unit
@@ -49,8 +49,8 @@ export type UnitDetail = z.infer<typeof UnitDetailSchema>;
 
 // Shallow nesting: POST /courses/:courseId/units — parent from path.
 export const CreateUnitSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().optional(),
+  titleEs: z.string().min(1).max(200),
+  descriptionEs: z.string().optional(),
   order: z.number().int().min(1),
 });
 
@@ -70,14 +70,14 @@ export const LessonVocabularyItemSchema = z.object({
   order: z.number().int(),
   translation: z.object({
     id: z.string(),
-    spanishContent: z.string(),
-    englishContent: z.string().nullable(),
+    contentEs: z.string(),
+    contentEn: z.string().nullable(),
     audioUrl: z.url().nullable(),
     partOfSpeech: z.string().nullable(),
   }),
   entry: z.object({
     id: z.string(),
-    nahuatContent: z.string(),
+    nawatContent: z.string(),
     type: EntryTypeSchema,
   }),
 });
@@ -93,8 +93,8 @@ export type LessonVocabularyItem = z.infer<typeof LessonVocabularyItemSchema>;
 export const LessonListItemSchema = z.object({
   id: z.string(),
   unitId: z.string(),
-  title: z.string(),
-  description: z.string().nullable(),
+  titleEs: z.string(),
+  descriptionEs: z.string().nullable(),
   order: z.number().int(),
   xpReward: z.number().int(),
   isPublished: z.boolean(),
@@ -120,7 +120,7 @@ export type LessonDetail = z.infer<typeof LessonDetailSchema>;
 // Frontend drives the exercise flow from this response.
 export const LessonSessionSchema = z.object({
   id: z.string(),
-  title: z.string(),
+  titleEs: z.string(),
   xpReward: z.number().int(),
   exercises: z.array(ExerciseDetailSchema), // ordered by order asc
 });
@@ -129,8 +129,8 @@ export type LessonSession = z.infer<typeof LessonSessionSchema>;
 
 // Shallow nesting: POST /units/:unitId/lessons — parent from path.
 export const CreateLessonSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().optional(),
+  titleEs: z.string().min(1).max(200),
+  descriptionEs: z.string().optional(),
   order: z.number().int().min(1),
   xpReward: z.number().int().min(0).default(10),
 });

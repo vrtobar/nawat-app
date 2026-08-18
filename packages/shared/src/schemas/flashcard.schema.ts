@@ -10,8 +10,8 @@ import { EntryTypeSchema } from './entry.schema';
 // cardCount helps user see set size before opening it.
 export const FlashcardSetListItemSchema = z.object({
   id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
+  nameEs: z.string(),
+  descriptionEs: z.string().nullable(),
   isOfficial: z.boolean(),
   isFeatured: z.boolean(),
   cardCount: z.number().int(),
@@ -30,17 +30,17 @@ export const FlashcardCardSchema = z.object({
   id: z.string(), // Flashcard id
   translation: z.object({
     id: z.string(),
-    spanishContent: z.string(),
-    englishContent: z.string().nullable(),
+    contentEs: z.string(),
+    contentEn: z.string().nullable(),
     phonetic: z.string().nullable(),
     audioUrl: z.url().nullable(),
-    exampleNahuat: z.string().nullable(),
-    exampleSpanish: z.string().nullable(),
+    exampleNawat: z.string().nullable(),
+    exampleEs: z.string().nullable(),
     dialectCode: z.string(),
   }),
   entry: z.object({
     id: z.string(),
-    nahuatContent: z.string(),
+    nawatContent: z.string(),
     imageUrl: z.url().nullable(),
     type: EntryTypeSchema,
   }),
@@ -59,8 +59,8 @@ export type FlashcardSetDetail = z.infer<typeof FlashcardSetDetailSchema>;
 // -----------------------------------------------------------------------------
 
 export const CreateFlashcardSetSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().optional(),
+  nameEs: z.string().min(1).max(200),
+  descriptionEs: z.string().optional(),
 });
 
 export const UpdateFlashcardSetSchema = CreateFlashcardSetSchema.partial();
