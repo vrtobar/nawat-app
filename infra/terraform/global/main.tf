@@ -205,7 +205,10 @@ data "aws_iam_policy_document" "github_production_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${var.github_subject}:environment:production"]
+      values = compact([
+        "${var.github_subject}:environment:production",
+        var.github_subject_previous != "" ? "${var.github_subject_previous}:environment:production" : "",
+      ])
     }
   }
 }
@@ -237,7 +240,10 @@ data "aws_iam_policy_document" "github_staging_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${var.github_subject}:ref:refs/heads/develop"]
+      values = compact([
+        "${var.github_subject}:ref:refs/heads/develop",
+        var.github_subject_previous != "" ? "${var.github_subject_previous}:ref:refs/heads/develop" : "",
+      ])
     }
   }
 }
@@ -267,10 +273,12 @@ data "aws_iam_policy_document" "github_build_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
+      values = compact([
         "${var.github_subject}:ref:refs/heads/develop",
         "${var.github_subject}:ref:refs/heads/main",
-      ]
+        var.github_subject_previous != "" ? "${var.github_subject_previous}:ref:refs/heads/develop" : "",
+        var.github_subject_previous != "" ? "${var.github_subject_previous}:ref:refs/heads/main" : "",
+      ])
     }
   }
 }

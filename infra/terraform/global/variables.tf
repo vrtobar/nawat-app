@@ -10,7 +10,7 @@ variable "github_subject" {
     NOT 'repo:owner/repo'. GitHub issues IMMUTABLE subject claims, embedding
     the numeric owner and repository IDs:
 
-      repo:vrtobar@4165944/nahuat-platform@1330083450
+      repo:vrtobar@4165944/nawat-app@1338730253
 
     Verified against CloudTrail, not inferred. The plain 'repo:owner/repo'
     form is what most documentation still shows and it does not match — the
@@ -26,7 +26,25 @@ variable "github_subject" {
       gh api users/<owner>       --jq '.id'
   EOT
   type        = string
-  default     = "repo:vrtobar@4165944/nahuat-platform@1330083450"
+  default     = "repo:vrtobar@4165944/nawat-app@1338730253"
+}
+
+variable "github_subject_previous" {
+  description = <<-EOT
+    TEMPORARY. The subject prefix of the repository being migrated away from,
+    authorized alongside `github_subject` so that neither repository is ever
+    unable to deploy during the cutover.
+
+    Both are needed because the subject embeds the repository ID, which is not
+    preserved when history is moved to a new repository — unlike a rename,
+    which the ID form is specifically designed to survive.
+
+    Set to "" and re-apply once the new repository has completed a deploy.
+    Leaving it populated leaves a repository that no longer exists able to
+    assume these roles if its ID were ever reissued.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "dmarc_report_email" {
