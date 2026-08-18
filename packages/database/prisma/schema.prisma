@@ -99,10 +99,8 @@ model User {
 
 enum Role {
   USER // learner — default role on signup, sees published content only
-  REVIEWER // read-only access to unpublished drafts — for language experts
-  //   previewing content before it goes live
-  CONTRIBUTOR // create and edit all content (dictionary entries + lesson structure)
-  //   cannot publish — only ADMIN can publish
+  CONTRIBUTOR // read drafts, create and edit all content (dictionary entries
+  //   + lesson structure). Cannot publish — only ADMIN can publish.
   ADMIN // full access — publishing, user management, destructive ops
 }
 

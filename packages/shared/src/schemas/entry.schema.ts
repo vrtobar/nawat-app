@@ -88,7 +88,7 @@ export type DictionaryEntryDetail = z.infer<typeof DictionaryEntryDetailSchema>;
 //   GET /dictionary/entries/search — pg_trgm fuzzy search, q required
 //
 // isPublished uses z.stringbool() — z.coerce.boolean() would turn the query
-// string "false" into true (Boolean('false') === true). REVIEWER+ only;
+// string "false" into true (Boolean('false') === true). CONTRIBUTOR+ only;
 // service ignores it for public/USER requests.
 // -----------------------------------------------------------------------------
 
