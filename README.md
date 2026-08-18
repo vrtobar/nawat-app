@@ -1,7 +1,7 @@
 # Nahuat Platform
 
-A language learning app for Nahuat — a dying indigenous
-language of El Salvador (~00 speakers).
+A language learning app for Nahuat — a critically endangered indigenous
+language of El Salvador with roughly 100 remaining speakers.
 
 ## About
 
