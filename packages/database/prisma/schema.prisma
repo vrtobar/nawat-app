@@ -99,10 +99,8 @@ model User {
 
 enum Role {
   USER // learner — default role on signup, sees published content only
-  REVIEWER // read-only access to unpublished drafts — for language experts
-  //   previewing content before it goes live
-  CONTRIBUTOR // create and edit all content (dictionary entries + lesson structure)
-  //   cannot publish — only ADMIN can publish
+  CONTRIBUTOR // read drafts, create and edit all content (dictionary entries
+  //   + lesson structure). Cannot publish — only ADMIN can publish.
   ADMIN // full access — publishing, user management, destructive ops
 }
 
@@ -155,7 +153,7 @@ enum EntryType {
 
 model Dialect {
   id          String  @id @default(cuid())
-  code        String  @unique // e.g. "base", "western", "eastern"
+  code        String  @unique // e.g. "common"; regional variants added when data justifies them
   name        String  @unique // e.g. "Common Nahuat", "Western Nahuat"
   description String?
 
@@ -185,7 +183,7 @@ model Translation {
   // Lower number = higher priority (1 = primary/most common meaning).
   // e.g. "takat": priority 1 = "hombre" (most common), priority 2 = "persona"
   //
-  // Unique per (entry, dialect) — this is what makes "the priority=1 base
+  // Unique per (entry, dialect) — this is what makes "the priority=1 common
   // dialect translation" in DictionaryEntryListItem.primaryTranslation
   // (see packages/shared entry.schema.ts) a well-defined, single row instead
   // of an arbitrary pick among ties. Service layer must resolve the next

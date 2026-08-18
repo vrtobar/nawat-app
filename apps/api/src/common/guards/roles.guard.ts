@@ -12,8 +12,7 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 // Rank, not set membership. Each role can do everything the one below it can:
 //
 //   USER         published content only
-//   REVIEWER     + read unpublished drafts
-//   CONTRIBUTOR  + create and edit content (needs draft access to do it)
+//   CONTRIBUTOR  + read, create and edit unpublished content
 //   ADMIN        + publish, manage users, destructive operations
 //
 // So @Roles('CONTRIBUTOR') admits ADMIN without listing it, and ADMIN passes
@@ -21,13 +20,12 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 //
 // This holds only while the ladder does. A future role that is not a superset
 // — someone who edits translations but not lesson structure — breaks ranking
-// and needs capabilities instead. Four linear roles is well inside where ranks
+// and needs capabilities instead. Three linear roles is well inside where ranks
 // are the simpler answer.
 const RANK: Record<Role, number> = {
   USER: 0,
-  REVIEWER: 1,
-  CONTRIBUTOR: 2,
-  ADMIN: 3,
+  CONTRIBUTOR: 1,
+  ADMIN: 2,
 };
 
 @Injectable()

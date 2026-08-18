@@ -3,6 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-08-16 (records decisions taken 2026-08-15)
 - **Applies to:** `apps/api/src/common/guards/`, `apps/api/src/modules/auth/`
+- **Amended 2026-08-17:** `REVIEWER` was removed from the role ladder. The
+  decision below — ranked roles rather than capabilities — is unchanged; the
+  ladder is three rungs instead of four. See the note in Consequences.
 
 ## Context
 
@@ -103,10 +106,13 @@ reason it is written down rather than left as an inference.
 
 ```
 USER         published content only
-REVIEWER     + read unpublished drafts
-CONTRIBUTOR  + create and edit content (needs draft access to do it)
+CONTRIBUTOR  + read, create and edit unpublished content
 ADMIN        + publish, manage users, destructive operations
 ```
+
+_Amended 2026-08-17 — this originally listed `REVIEWER` between USER and
+CONTRIBUTOR, holding read-only access to drafts. Draft reading folded into
+CONTRIBUTOR when REVIEWER was removed._
 
 `@Roles('CONTRIBUTOR')` therefore admits ADMIN without naming it, and ADMIN
 passes every check by construction rather than by special case — which is the
@@ -116,8 +122,8 @@ alongside another role, and forgetting to cannot lock admins out.
 **This holds only while the ladder does.** A future role that is not a strict
 superset of the one below — someone who edits translations but not lesson
 structure — breaks ranking outright, and the answer then is capabilities, not a
-fifth rank. Four linear roles is well inside where ranks are the simpler answer;
-the fifth role is the thing to watch for.
+fourth rank. Three linear roles is well inside where ranks are the simpler
+answer; the fourth role is the thing to watch for.
 
 Two failure modes are deliberate:
 
@@ -191,6 +197,24 @@ Three further properties of that endpoint follow from the same reasoning:
   because an unused enum value is inert, while removing a value from a
   PostgreSQL enum costs a type swap on a live table. Worth revisiting only if it
   is still empty when the admin panel exists.
+
+  **Resolved 2026-08-17 — removed.** Revisited earlier than this record
+  anticipated, because the question turned out not to need the admin panel to
+  answer it: anyone documenting real Nawat data would be a CONTRIBUTOR, so the
+  role has no population to wait for. Both halves of the argument above then
+  pointed the same way — the benefit of keeping it was gone, and the cost of
+  removing it was near zero with one row in the table and no index on the
+  column.
+
+  The type swap it warned about is real and cannot be avoided: PostgreSQL has
+  no `ALTER TYPE ... DROP VALUE`, so the migration renames the type, creates a
+  replacement, drops and restores the column default around the cast, and drops
+  the old type. The cast is deliberately left able to fail — a row still
+  holding `REVIEWER` aborts the migration rather than being silently rewritten.
+
+  Draft reading folded into CONTRIBUTOR. The ladder stays a strict superset
+  chain, so the ranking argument above is untouched.
+
 - `JwtClaimsSchema` is the single definition of the claim shape. It originally
   required `email` and `name`; those are ID token claims, held by the browser
   and never sent to the API, so every genuine access token failed validation

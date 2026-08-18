@@ -1,7 +1,7 @@
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
 
 // cdn-invalidation-consumer — creates CloudFront invalidations when
-// assets are replaced (PLAN §14). The only worker that needs internet
+// assets are replaced. The only worker that needs internet
 // access (CloudFront API via NAT gateway). Assets normally use
 // content-addressed keys (new upload = new URL), so invalidations are
 // the exception: explicit replacement of an existing key.
@@ -22,7 +22,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 };
 
 async function processRecord(record: SQSRecord): Promise<void> {
-  // TODO(PLAN §14): @aws-sdk/client-cloudfront CreateInvalidation for
+  // TODO: CloudFront CreateInvalidation for
   // the paths in record.body, against CDN_DISTRIBUTION_ID. Use the
   // record.messageId as CallerReference — CloudFront dedupes identical
   // CallerReferences, which makes retries idempotent for free.

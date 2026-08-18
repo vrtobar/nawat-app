@@ -25,10 +25,11 @@ variable "node_type" {
 
 variable "engine_version" {
   description = <<-EOT
-    Valkey engine version. PLAN §4 specified 7.2; 8.1 is the default here
-    because Valkey 8 brought substantial throughput gains and 7.2 is now two
-    majors behind. AWS also offers 9.x. The parameter group family is derived
-    from the major version, so changing this picks up the matching family.
+    Valkey engine version. The original design specified 7.2; 8.1 is the
+    default here because Valkey 8 brought substantial throughput gains and 7.2
+    is now two majors behind. AWS also offers 9.x. The parameter group family
+    is derived from the major version, so changing this picks up the matching
+    family.
   EOT
   type        = string
   default     = "8.1"

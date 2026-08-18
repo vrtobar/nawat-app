@@ -9,6 +9,6 @@ export const ROLES_KEY = 'roles';
 //   @Roles('ADMIN')         // ADMIN only
 //
 // Ordering is safe because each role is a strict superset of the one below it:
-// REVIEWER adds reading drafts, CONTRIBUTOR adds editing them, ADMIN adds
-// publishing and user management.
+// CONTRIBUTOR adds reading and editing drafts, ADMIN adds publishing and user
+// management.
 export const Roles = (minimum: Role) => SetMetadata(ROLES_KEY, minimum);

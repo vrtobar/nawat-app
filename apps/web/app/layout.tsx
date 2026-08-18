@@ -2,7 +2,7 @@ import './globals.css';
 
 import type { Metadata } from 'next';
 
-// TODO(PLAN §13): fonts (next/font), TanStack Query provider, and the
+// TODO: fonts (next/font), TanStack Query provider, and the
 // (public)/(app)/(admin) route-group shells land as features are built.
 export const metadata: Metadata = {
   title: {

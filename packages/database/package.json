@@ -18,10 +18,12 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:dev": "tsx prisma/seed.ts --dev",
     "db:studio": "prisma studio",
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "@nahuat/shared": "*",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "dotenv": "^17.4.2",

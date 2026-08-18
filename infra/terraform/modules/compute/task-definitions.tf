@@ -26,9 +26,9 @@ resource "aws_cloudwatch_log_group" "migrate" {
 # Shared database wiring
 #
 # The AWS-managed RDS secret contains ONLY username and password — verified
-# against the live secret, contradicting PLAN §7's six-key assumption. Host,
-# port, and database name are not sensitive and come from the data layer's
-# Terraform outputs as plain environment variables.
+# against the live secret, contradicting the original design's assumption that
+# it carried six keys. Host, port, and database name are not sensitive and come
+# from the data layer's Terraform outputs as plain environment variables.
 #
 # buildDatabaseUrl() in @nahuat/database assembles DATABASE_URL from exactly
 # these five, URL-encoding the credentials because AWS-generated passwords can

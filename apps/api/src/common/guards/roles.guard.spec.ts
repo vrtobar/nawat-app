@@ -28,8 +28,7 @@ describe('RolesGuard', () => {
 
   it.each<[Role, Role]>([
     ['USER', 'USER'],
-    ['REVIEWER', 'REVIEWER'],
-    ['REVIEWER', 'CONTRIBUTOR'],
+    ['USER', 'CONTRIBUTOR'],
     ['CONTRIBUTOR', 'CONTRIBUTOR'],
     ['CONTRIBUTOR', 'ADMIN'],
     ['ADMIN', 'ADMIN'],
@@ -38,11 +37,8 @@ describe('RolesGuard', () => {
   });
 
   it.each<[Role, Role]>([
-    ['REVIEWER', 'USER'],
     ['CONTRIBUTOR', 'USER'],
-    ['CONTRIBUTOR', 'REVIEWER'],
     ['ADMIN', 'USER'],
-    ['ADMIN', 'REVIEWER'],
     ['ADMIN', 'CONTRIBUTOR'],
   ])('rejects %s-or-above when the user is only %s', (required, role) => {
     expect(check(required, role)).toThrow(ForbiddenException);
@@ -51,7 +47,7 @@ describe('RolesGuard', () => {
   it('lets ADMIN through every check without listing it', () => {
     // The property the ladder exists for: no endpoint needs @Roles('ADMIN')
     // added alongside another role.
-    const roles: Role[] = ['USER', 'REVIEWER', 'CONTRIBUTOR', 'ADMIN'];
+    const roles: Role[] = ['USER', 'CONTRIBUTOR', 'ADMIN'];
     for (const required of roles) {
       expect(check(required, 'ADMIN')()).toBe(true);
     }
