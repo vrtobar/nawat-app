@@ -3,6 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-08-17
 - **Applies to:** the whole repository
+- **Amended 2026-08-18:** the repository and the project's written title move
+  to Nawat. The rule below is unchanged — what changed is where the boundary
+  falls, and one factual error about GitHub OIDC that made the repository look
+  impossible to rename. See the two amended sections under Decision.
 
 ## Context
 
@@ -37,10 +41,10 @@ The domain anchors the second half. Everything derived from `nahuat.com` keeps
 that spelling, because the alternative is infrastructure named differently from
 the domain it serves — a new inconsistency traded for the old one.
 
-|              | Spelling   | Examples                                                                                                                                                                                |
-| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The language | **Nawat**  | `Entry.nawatContent`, `Translation.exampleNawat`, the `Common Nawat` dialect, every user-facing string, all prose describing the language                                               |
-| The project  | **Nahuat** | `nahuat.com`, `nahuat-production-*`, ECR `nahuat-api` / `nahuat-web`, `nahuat/production/*` secrets, the Terraform state bucket, `@nahuat/*` packages, the `nahuat-platform` repository |
+|              | Spelling   | Examples                                                                                                                                                                                   |
+| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The language | **Nawat**  | `Entry.nawatContent`, `Translation.exampleNawat`, the `Common Nawat` dialect, every user-facing string, all prose describing the language, the project's title, the `nawat-app` repository |
+| The project  | **Nahuat** | `nahuat.com`, `nahuat-production-*`, ECR `nahuat-api` / `nahuat-web`, `nahuat/production/*` secrets, the Terraform state bucket, `@nahuat/*` packages                                      |
 
 Two consequences of the anchor worth stating explicitly, because both look like
 oversights:
@@ -51,18 +55,62 @@ than from the language. Changing it would mean updating the Post Login Action
 and `JwtStrategy` in lockstep and invalidating every token minted before the
 change, for no gain.
 
-**The repository slug stays `nahuat-platform`.** Beyond matching the domain,
-the GitHub OIDC trust policies condition on
-`repo:vrtobar/nahuat-platform`. Renaming the repository breaks CI's ability to
-assume any AWS role until those IAM conditions are updated — the role ARNs
-survive a rename, the trust conditions do not.
+**The repository is `nawat-app`.**
 
-### The human-readable title is "Nawat Platform"
+_Amended 2026-08-18 — this section originally read "the repository slug stays
+`nahuat-platform`", on two arguments. One was wrong and the other was
+outweighed._
+
+The wrong one: it claimed the OIDC trust policies condition on
+`repo:vrtobar/nahuat-platform` and that renaming the repository would break
+CI's ability to assume any AWS role. They do not. The condition is the
+immutable-ID form —
+
+    repo:vrtobar@4165944/nahuat-platform@1330083450
+
+— documented at `infra/terraform/global/variables.tf`, whose own comment says
+the IDs exist precisely so the claim survives renaming the user or the
+repository. This record restated an understanding that the infrastructure had
+already superseded. **Renaming is free. Migrating to a different repository is
+not**, because the repository ID changes with it and `github_subject` must be
+updated and the global stack re-applied.
+
+The outweighed one: matching the domain. That still argues for `nahuat-`, and
+it loses to something this record never weighed — a repository slug is read by
+people, and the people who read this one are the linguistic and
+language-learning communities where `nawat` is the correct spelling. Being
+visibly right to them is not cosmetic for a preservation project asking
+speakers to contribute.
+
+So the boundary is sharper than "project versus language": **what people read
+takes Nawat; what machines derive from the domain stays Nahuat.** The
+repository, the title and the prose are read. The ECR repositories, task
+definition families, secret paths, state bucket and `@nahuat/*` package names
+are not, and they keep the domain's spelling for the reason given above.
+
+### The title is "Nawat — an interactive dictionary and learning companion"
+
+_Amended 2026-08-18 — this section originally gave the title as "Nawat
+Platform"._
 
 Written out, the project's name uses the language's name, so it takes the
-language's spelling. The machine identifier derived from the domain —
-`nahuat-platform` — does not. That asymmetry is the rule working, not an
-exception to it.
+language's spelling. "Platform" is dropped: it entered in the first README
+commit before the scaffold existed, was never revisited, and is inaccurate —
+a platform is something other people build on, which this is not and will not
+be.
+
+The bare word carries a claim the subtitle has to disclaim. Naming the project
+exactly the language positions it as _the_ Nawat thing, which is the same
+failure the `common` dialect description guards against: presenting one form
+as the correct one is how the others quietly become wrong. "**A**n interactive
+dictionary" rather than "the" leaves room for the print dictionaries, the
+classes, and the people already teaching this language. "Companion" says the
+same thing about the classes specifically — this accompanies that teaching
+rather than replacing it.
+
+"Interactive" modifies _dictionary_ and not the product, where it would say
+nothing. Against the existing print and PDF dictionaries for Nawat, search,
+audio and tap-to-define are the actual distinction.
 
 ## Consequences
 
