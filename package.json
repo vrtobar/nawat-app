@@ -26,6 +26,7 @@
     "dev:infra:down": "docker compose down",
     "db:migrate": "npm run db:migrate --workspace=@nahuat/database",
     "db:seed": "npm run db:seed --workspace=@nahuat/database",
+    "db:seed:dev": "npm run db:seed:dev --workspace=@nahuat/database",
     "db:studio": "npm run db:studio --workspace=@nahuat/database"
   },
   "devDependencies": {

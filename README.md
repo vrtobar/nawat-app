@@ -26,6 +26,14 @@ names. The rule and the reasoning behind it are in
 | Infrastructure | AWS, Terraform                      |
 | Auth           | Auth0                               |
 
+## Development
+
+Setup and the local gotchas worth knowing are in
+[docs/local-development.md](docs/local-development.md).
+
+Architecture decisions — what was chosen, what was rejected, and why — are in
+[docs/adr/](docs/adr/README.md).
+
 ## Status
 
 🚧 Under active development
