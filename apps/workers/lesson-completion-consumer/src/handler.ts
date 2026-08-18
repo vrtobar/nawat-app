@@ -3,7 +3,13 @@ import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
 
 // lesson-completion-consumer — post-completion side effects that don't
 // belong in the request path: SRS card seeding from LessonVocabulary,
-// UserActivity logging, streak/XP recalculation (PLAN §14).
+// UserActivity logging, streak/XP recalculation.
+//
+// STAYS TYPESCRIPT while the other three consumers move to Python — see
+// docs/adr/0011-polyglot-workers-and-packaging.md. This one owns domain state:
+// it reads LessonVocabulary and seeds FSRS defaults, so in Python it would need
+// a duplicated schema layer and a second FSRS implementation. A divergence
+// between two FSRS implementations does not throw; it schedules reviews wrongly.
 
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
   const failures: { itemIdentifier: string }[] = [];
@@ -21,7 +27,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 };
 
 async function processRecord(record: SQSRecord): Promise<void> {
-  // TODO(PLAN §14): seed UserCardProgress for the lesson's vocabulary.
+  // TODO: seed UserCardProgress for the lesson's vocabulary.
   // Idempotency pattern — upsert with empty update inside a transaction,
   // so retries never clobber existing SRS state:
   //

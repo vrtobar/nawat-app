@@ -2,7 +2,12 @@ import { prisma } from '@nahuat/database';
 import type { SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
 
 // audit-consumer — writes AuditLog rows from audit events published by
-// the NestJS AuditModule (PLAN §14).
+// the NestJS AuditModule.
+//
+// MOVING TO PYTHON — see docs/adr/0011-polyglot-workers-and-packaging.md before
+// implementing. This consumer appends one fixed-shape row and never reads the
+// model, so it does not need the Prisma client; raw psycopg is the honest
+// description of the job. Packaging is a container image, not a zip.
 //
 // ReportBatchItemFailures is enabled on the event source mapping: only
 // failed records return to the queue, the rest of the batch is deleted.
@@ -23,7 +28,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 };
 
 async function processRecord(record: SQSRecord): Promise<void> {
-  // TODO(PLAN §14): parse the audit event from record.body and upsert —
+  // TODO: parse the audit event from record.body and upsert —
   // AuditLog.sqsMessageId is @unique, which makes retries idempotent:
   //
   //   await prisma.auditLog.upsert({
