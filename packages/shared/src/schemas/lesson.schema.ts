@@ -13,7 +13,9 @@ import { ExerciseDetailSchema } from './exercise.schema';
 
 export const CreateCourseSchema = z.object({
   titleEs: z.string().min(1).max(200),
+  titleEn: z.string().min(1).max(200).optional(),
   descriptionEs: z.string().optional(),
+  descriptionEn: z.string().optional(),
   order: z.number().int().min(1),
 });
 
@@ -31,7 +33,9 @@ export type UpdateCourse = z.infer<typeof UpdateCourseSchema>;
 export const UnitListItemSchema = z.object({
   id: z.string(),
   titleEs: z.string(),
+  titleEn: z.string().nullable(),
   descriptionEs: z.string().nullable(),
+  descriptionEn: z.string().nullable(),
   order: z.number().int(),
   isPublished: z.boolean(),
   lessonCount: z.number().int(), // total published lessons in unit
@@ -50,7 +54,9 @@ export type UnitDetail = z.infer<typeof UnitDetailSchema>;
 // Shallow nesting: POST /courses/:courseId/units — parent from path.
 export const CreateUnitSchema = z.object({
   titleEs: z.string().min(1).max(200),
+  titleEn: z.string().min(1).max(200).optional(),
   descriptionEs: z.string().optional(),
+  descriptionEn: z.string().optional(),
   order: z.number().int().min(1),
 });
 
@@ -94,7 +100,9 @@ export const LessonListItemSchema = z.object({
   id: z.string(),
   unitId: z.string(),
   titleEs: z.string(),
+  titleEn: z.string().nullable(),
   descriptionEs: z.string().nullable(),
+  descriptionEn: z.string().nullable(),
   order: z.number().int(),
   xpReward: z.number().int(),
   isPublished: z.boolean(),
@@ -121,6 +129,7 @@ export type LessonDetail = z.infer<typeof LessonDetailSchema>;
 export const LessonSessionSchema = z.object({
   id: z.string(),
   titleEs: z.string(),
+  titleEn: z.string().nullable(),
   xpReward: z.number().int(),
   exercises: z.array(ExerciseDetailSchema), // ordered by order asc
 });
@@ -130,7 +139,9 @@ export type LessonSession = z.infer<typeof LessonSessionSchema>;
 // Shallow nesting: POST /units/:unitId/lessons — parent from path.
 export const CreateLessonSchema = z.object({
   titleEs: z.string().min(1).max(200),
+  titleEn: z.string().min(1).max(200).optional(),
   descriptionEs: z.string().optional(),
+  descriptionEn: z.string().optional(),
   order: z.number().int().min(1),
   xpReward: z.number().int().min(0).default(10),
 });

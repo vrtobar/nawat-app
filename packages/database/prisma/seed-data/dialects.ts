@@ -29,15 +29,18 @@ export const DIALECTS: CreateDialect[] = [
   {
     code: 'common',
     nameEs: 'Nawat común',
-    // User-facing: this string reaches dictionary filters and translation
-    // responses via DialectSchema, so it is written for a learner rather than
-    // a maintainer. The reasoning above stays here.
+    nameEn: 'Common Nawat',
+    // User-facing: these strings reach dictionary filters and translation
+    // responses via DialectSchema, so they are written for a learner rather
+    // than a maintainer. The reasoning above stays here.
     //
-    // Spanish only for now. The English half arrives with descriptionEn in
-    // the migration that adds the second locale — writing English into a
-    // column named _es to avoid an empty field is how a locale column stops
-    // meaning anything.
+    // Both languages are required on Dialect, unlike everywhere else. These
+    // rows are authored by the project rather than contributed, so the rule
+    // that keeps English optional — never block a Nawat speaker on an English
+    // gloss — has nobody to protect here.
     descriptionEs:
       'Formas de uso amplio entre los hablantes de nawat, sin ser propias de una sola comunidad. Se muestra cuando una entrada no tiene distinción regional.',
+    descriptionEn:
+      'Forms in broad use among Nawat speakers rather than specific to one community. Shown when an entry has no regional distinction.',
   },
 ];

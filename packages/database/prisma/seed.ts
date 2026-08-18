@@ -45,7 +45,12 @@ async function seedReference(): Promise<void> {
     await prisma.dialect.upsert({
       where: { code: dialect.code },
       create: dialect,
-      update: { nameEs: dialect.nameEs, descriptionEs: dialect.descriptionEs ?? null },
+      update: {
+        nameEs: dialect.nameEs,
+        nameEn: dialect.nameEn,
+        descriptionEs: dialect.descriptionEs,
+        descriptionEn: dialect.descriptionEn,
+      },
     });
   }
 

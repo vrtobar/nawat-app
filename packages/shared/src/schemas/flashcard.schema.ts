@@ -10,8 +10,10 @@ import { EntryTypeSchema } from './entry.schema';
 // cardCount helps user see set size before opening it.
 export const FlashcardSetListItemSchema = z.object({
   id: z.string(),
-  nameEs: z.string(),
+  nameEs: z.string().nullable(),
+  nameEn: z.string().nullable(),
   descriptionEs: z.string().nullable(),
+  descriptionEn: z.string().nullable(),
   isOfficial: z.boolean(),
   isFeatured: z.boolean(),
   cardCount: z.number().int(),
@@ -36,6 +38,7 @@ export const FlashcardCardSchema = z.object({
     audioUrl: z.url().nullable(),
     exampleNawat: z.string().nullable(),
     exampleEs: z.string().nullable(),
+    exampleEn: z.string().nullable(),
     dialectCode: z.string(),
   }),
   entry: z.object({

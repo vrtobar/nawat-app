@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { LocaleSchema } from './locale.schema';
+
 // -----------------------------------------------------------------------------
 // ENUMS
 // -----------------------------------------------------------------------------
@@ -22,6 +24,11 @@ export const UserProfileSchema = z.object({
   email: z.email(),
   name: z.string(),
   role: RoleSchema,
+  // Which language this user reads content in. Defaults to 'es' on signup and
+  // there is deliberately no DTO to change it yet: nothing serves localized
+  // content, so a write path would join PublicUserProfileSchema in the set of
+  // shapes nothing renders. Add it with the endpoint that needs it.
+  locale: LocaleSchema,
   username: z.string().nullable(),
   pictureUrl: z.url().nullable(),
   xp: z.number().int(),

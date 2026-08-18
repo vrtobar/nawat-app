@@ -38,6 +38,7 @@ export const TranslationDetailSchema = z.object({
   partOfSpeech: PartOfSpeechSchema.nullable(),
   exampleNawat: z.string().nullable(),
   exampleEs: z.string().nullable(),
+  exampleEn: z.string().nullable(),
   audioUrl: z.url().nullable(),
   priority: z.number().int(),
   isPublished: z.boolean(),
@@ -66,6 +67,7 @@ export const CreateTranslationSchema = z.object({
   partOfSpeech: PartOfSpeechSchema.optional(),
   exampleNawat: z.string().optional(),
   exampleEs: z.string().optional(),
+  exampleEn: z.string().optional(),
   audioUrl: z.url().optional(),
   priority: z.number().int().min(1).optional(),
 });
