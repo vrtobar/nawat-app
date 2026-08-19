@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PaginationParamsSchema } from './api-response.schema';
+import { LocaleSchema } from './locale.schema';
 import { PartOfSpeechSchema, TranslationDetailSchema } from './translation.schema';
 
 // -----------------------------------------------------------------------------
@@ -18,12 +19,17 @@ export type EntryType = z.infer<typeof EntryTypeSchema>;
 // among speakers rather than specific to one community. Well-defined thanks
 // to the (entryId, dialectCode, priority) unique constraint in schema.prisma.
 // Full translation data available in DictionaryEntryDetail.
+//
+// `content` is resolved to one locale server-side (ADR 0015 §4), never both
+// languages — see TranslationDetailSchema for the reasoning. Non-null because
+// entries lacking the resolved locale are filtered out of the list. `locale`
+// echoes which language was served.
 // -----------------------------------------------------------------------------
 
 const PrimaryTranslationSchema = z.object({
   id: z.string(),
-  contentEs: z.string(),
-  contentEn: z.string().nullable(),
+  content: z.string(),
+  locale: LocaleSchema,
   partOfSpeech: PartOfSpeechSchema.nullable(),
   audioUrl: z.url().nullable(),
   phonetic: z.string().nullable(),
