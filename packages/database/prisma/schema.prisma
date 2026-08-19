@@ -171,13 +171,13 @@ enum EntryType {
 
 model Dialect {
   id            String @id @default(cuid())
-  code          String @unique // e.g. "common"; regional variants added when data justifies them
+  code          String @unique // lowercase slug, e.g. "common" or a town like "izalco" — see seed-data/dialects.ts
   // Required in both languages, unlike every other localized model. Dialects
   // are reference data authored by the project rather than contributed
   // content, so the "English required to publish, not to create" rule in
   // ADR 15 has nothing to protect here — there is no contributor to unblock.
-  nameEs        String @unique @map("name_es") // e.g. "Nawat común", "Nawat occidental"
-  nameEn        String @unique @map("name_en") // e.g. "Common Nawat", "Western Nawat"
+  nameEs        String @unique @map("name_es") // e.g. "Nawat común", "Nawat de Izalco"
+  nameEn        String @unique @map("name_en") // e.g. "Common Nawat", "Izalco Nawat"
   descriptionEs String @map("description_es")
   descriptionEn String @map("description_en")
 
