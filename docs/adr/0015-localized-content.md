@@ -101,6 +101,26 @@ for an English learner; if that filtering happens client-side, page one shows
 twelve of twenty results and the total count is wrong. Filtering has to be
 server-side, so resolution may as well be.
 
+**`User.locale` is delivered on the access token, not read per request**
+(added 2026-08-19). The resolution chain names `User.locale`, but the token
+deliberately carries no database state — `role` and `userId` come from claims so
+authorization costs no query. Rather than reintroduce a per-request read for the
+locale step, the Post Login Action embeds `User.locale` as a
+`https://nahuat.com/locale` claim alongside the other two, and `@ContentLocale()`
+reads it from `request.user`.
+
+The cost of a claim is staleness: it is a login-time snapshot, so a locale change
+does not reach the token until it next refreshes. That is acceptable here only
+because the explicit `?locale=` override sits _above_ the claim in the chain — a
+user who changes the setting has the frontend send the new value immediately, and
+the token default catches up on its own. So no session revocation and no forced
+re-login, unlike a `role` change. The claim is optional and fails soft: a token
+predating it, or carrying a malformed value, resolves to no stored preference and
+falls through to `Accept-Language`, never rejecting the token. Putting locale in
+the token was chosen over a per-request `User.locale` read because the first
+consumer — the public dictionary — has no user at all, so a read would buy
+nothing on the path that matters.
+
 ### 5. Field renames carried in the same migration
 
 | From             | To                                                                                          |

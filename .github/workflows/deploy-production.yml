@@ -184,6 +184,47 @@ jobs:
             exit 1
           fi
 
+      # Reference data (the dialect rows) after migrations, before services
+      # roll. Reuses the revision registered above — same prod-{sha} image — with
+      # the command overridden to db:seed. Every Translation.dialectCode is an FK
+      # with onDelete: Restrict, so without these rows no translation can be
+      # written at all; this is what makes content authorable in production.
+      #
+      # Safe on every deploy: db:seed loads reference data only and upserts on
+      # each row's natural key, so re-running converges rather than duplicating.
+      # db:seed:dev, which loads placeholder content, is a different command and
+      # is never reachable from here.
+      - name: Run reference seed
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          TASK_DEF: ${{ steps.register_migrate.outputs.arn }}
+          SUBNETS: ${{ steps.out.outputs.subnets }}
+          SG: ${{ steps.out.outputs.security_group }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["npm","run","db:seed","--workspace=@nahuat/database"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+
+          # Same as the migration step: exitCode null means the task never
+          # started, so only an explicit 0 counts as success.
+          read -r exit_code reason < <(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
+
+          echo "exitCode=$exit_code reason=$reason"
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::Reference seed task did not exit cleanly. Check /ecs/nahuat-production/migrate."
+            exit 1
+          fi
+
       # Terraform owns the task definition shape; this copies its newest
       # revision and substitutes only the image, so Terraform's environment,
       # secret and sizing changes still reach production by way of the revision
