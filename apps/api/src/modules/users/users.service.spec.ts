@@ -1,4 +1,5 @@
 import { prisma } from '@nahuat/database';
+import { UserProfileSchema } from '@nahuat/shared';
 import { UnauthorizedException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +11,12 @@ vi.mock('@nahuat/database', () => ({
 
 const findUnique = vi.mocked(prisma.user.findUnique);
 
+// The Prisma mock is cast to `never`: findUnique's return type is an elaborate
+// overload no hand-written fixture satisfies, and typing it is not worth the
+// noise. The cost is that TypeScript then checks nothing about what the service
+// returns — a required field mapped to undefined, or a Date left unserialised,
+// slips straight through toMatchObject, which ignores absent keys. getProfile
+// closes that by parsing the response through the shared schema.
 const row = (overrides: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   email: 'victor@example.com',
@@ -27,55 +34,53 @@ const row = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// Mocks the row, runs findProfile, and asserts the result IS the contract it
+// declares. Strict, so a leaked internal field fails exactly as a missing
+// required one does, and the schema's ISO-string dates reject a Date that
+// escaped serialisation. UserProfileSchema is the single source of truth for
+// that shape, so this assertion cannot drift from it — which is the check the
+// `as never` mock otherwise removes. Returns the raw service output so each
+// test can pin specific values.
+const getProfile = async (overrides: Record<string, unknown> = {}) => {
+  findUnique.mockResolvedValue(row(overrides) as never);
+  const profile = await new UsersService().findProfile('usr_1');
+  UserProfileSchema.strict().parse(profile);
+  return profile;
+};
+
 describe('UsersService', () => {
   beforeEach(() => vi.resetAllMocks());
 
   it('returns the profile for a live user', async () => {
-    findUnique.mockResolvedValue(row() as never);
-
-    await expect(new UsersService().findProfile('usr_1')).resolves.toMatchObject({
-      id: 'usr_1',
-      role: 'USER',
-      xp: 40,
-    });
+    await expect(getProfile()).resolves.toMatchObject({ id: 'usr_1', role: 'USER', xp: 40 });
   });
 
   it('maps the locale enum to its wire format', async () => {
-    // The column is ES/EN and the contract is es/en. The mock is cast to
-    // `never`, so nothing about this crosses the type checker — without an
-    // assertion the service can return undefined here and every other test in
-    // this file still passes.
-    findUnique.mockResolvedValue(row({ locale: 'EN' }) as never);
-
-    await expect(new UsersService().findProfile('usr_1')).resolves.toMatchObject({
-      locale: 'en',
-    });
+    // The column is ES/EN and the contract is es/en. getProfile's schema parse
+    // is what makes this real: without it the mapping could return undefined and
+    // every other test in this file would still pass.
+    await expect(getProfile({ locale: 'EN' })).resolves.toMatchObject({ locale: 'en' });
   });
 
   it('serialises dates as ISO strings', async () => {
-    // UserProfileSchema declares ISO strings; Prisma hands back Date objects,
-    // and the frontend parses with the same schema it types against.
-    findUnique.mockResolvedValue(row() as never);
-
-    const profile = await new UsersService().findProfile('usr_1');
+    // UserProfileSchema declares ISO strings; Prisma hands back Date objects.
+    // getProfile's parse already rejects an unserialised Date; these pin the
+    // exact values.
+    const profile = await getProfile();
 
     expect(profile.createdAt).toBe('2026-08-01T09:00:00.000Z');
     expect(profile.lastActiveAt).toBe('2026-08-15T10:00:00.000Z');
   });
 
   it('keeps a null lastActiveAt null', async () => {
-    findUnique.mockResolvedValue(row({ lastActiveAt: null }) as never);
-
-    await expect(new UsersService().findProfile('usr_1')).resolves.toMatchObject({
-      lastActiveAt: null,
-    });
+    await expect(getProfile({ lastActiveAt: null })).resolves.toMatchObject({ lastActiveAt: null });
   });
 
-  it('never returns deletedAt or isActive', async () => {
-    // They are selected in order to decide, not to disclose.
-    findUnique.mockResolvedValue(row() as never);
-
-    const profile = await new UsersService().findProfile('usr_1');
+  it('never returns deletedAt, isActive, or auth0Id', async () => {
+    // Selected in order to decide, not to disclose. getProfile's strict parse
+    // would already reject any of these; the explicit checks name the fields
+    // that must never reach a client.
+    const profile = await getProfile();
 
     expect(profile).not.toHaveProperty('deletedAt');
     expect(profile).not.toHaveProperty('isActive');
