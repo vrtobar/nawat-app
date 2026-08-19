@@ -70,10 +70,20 @@ export const SyncUserSchema = z.object({
 
 export type SyncUser = z.infer<typeof SyncUserSchema>;
 
-// What the Action embeds into the access token as namespaced claims.
+// What /auth/role returns and the Post Login Action embeds into the access
+// token as namespaced claims (https://nahuat.com/{userId,role,locale}).
+//
+// locale rides the token so content resolution costs no per-request lookup —
+// it is a login-time snapshot of User.locale. Staleness is a non-issue: an
+// explicit ?locale= overrides it (ADR 0015 §4), so when a user changes the
+// setting the effect is instant and the token default catches up on the next
+// natural refresh — no forced re-login. Required here because the row always
+// has it (User.locale defaults to ES); optional only on the token side, where
+// an older session may predate this claim.
 export const AuthRoleSchema = z.object({
   userId: z.string(),
   role: RoleSchema,
+  locale: LocaleSchema,
 });
 
 export type AuthRole = z.infer<typeof AuthRoleSchema>;
@@ -94,6 +104,16 @@ export const JwtClaimsSchema = z.object({
   sub: z.string(), // Auth0 user id, e.g. google-oauth2|1038929...
   role: RoleSchema, // https://nahuat.com/role
   userId: z.string(), // https://nahuat.com/userId — the Nahuat platform id
+  // https://nahuat.com/locale — the user's content language, a login-time
+  // snapshot embedded by the Post Login Action. optional().catch(undefined) on
+  // purpose: a token minted before the Action added this claim (an existing
+  // session, or before the Action is updated) simply lacks it, and even a
+  // malformed value degrades to undefined rather than rejecting the token.
+  // locale is a resolution input, never an authorization fact, so it must not
+  // be able to lock a user out; absent → resolution falls through to
+  // Accept-Language. Requiring an absent claim rejected every genuine token
+  // once already — see email and name above.
+  locale: LocaleSchema.optional().catch(undefined),
 });
 
 export type JwtClaims = z.infer<typeof JwtClaimsSchema>;

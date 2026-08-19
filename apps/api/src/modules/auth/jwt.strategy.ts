@@ -12,6 +12,7 @@ import type { Env } from '../../config/env.validation';
 const CLAIM_NAMESPACE = 'https://nahuat.com';
 const ROLE_CLAIM = `${CLAIM_NAMESPACE}/role`;
 const USER_ID_CLAIM = `${CLAIM_NAMESPACE}/userId`;
+const LOCALE_CLAIM = `${CLAIM_NAMESPACE}/locale`;
 
 // Verifies Auth0 access tokens.
 //
@@ -64,6 +65,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       sub: payload.sub,
       role: payload[ROLE_CLAIM],
       userId: payload[USER_ID_CLAIM],
+      // Optional in the schema, and .catch there means an older token that
+      // predates this claim (or carries a malformed one) parses to undefined
+      // rather than failing — a missing locale must not reject an otherwise
+      // valid token. Resolution falls through to Accept-Language instead.
+      locale: payload[LOCALE_CLAIM],
     });
 
     if (!result.success) {

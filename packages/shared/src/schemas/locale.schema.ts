@@ -22,7 +22,8 @@ import { z } from 'zod';
 //                 it sits mid-identifier.
 //
 // This file owns the first and the third. The second is mapped in the API,
-// where Prisma types are in scope — this package never imports them.
+// in common/locale.ts, where Prisma types are in scope — this package never
+// imports them.
 // -----------------------------------------------------------------------------
 
 export const LocaleSchema = z.enum(['es', 'en']);

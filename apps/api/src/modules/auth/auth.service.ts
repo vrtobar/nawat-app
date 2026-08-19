@@ -2,6 +2,8 @@ import { prisma } from '@nahuat/database';
 import type { AuthRole, SyncUser } from '@nahuat/shared';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 
+import { LOCALE_TO_WIRE } from '../../common/locale';
+
 // Prisma's unique-constraint violation.
 const UNIQUE_VIOLATION = 'P2002';
 
@@ -41,10 +43,10 @@ export class AuthService {
           name: input.name,
           pictureUrl: input.pictureUrl ?? null,
         },
-        select: { id: true, role: true },
+        select: { id: true, role: true, locale: true },
       });
 
-      return { userId: updated.id, role: updated.role };
+      return { userId: updated.id, role: updated.role, locale: LOCALE_TO_WIRE[updated.locale] };
     }
 
     return this.create(input);
@@ -59,10 +61,10 @@ export class AuthService {
           name: input.name,
           pictureUrl: input.pictureUrl ?? null,
         },
-        select: { id: true, role: true },
+        select: { id: true, role: true, locale: true },
       });
 
-      return { userId: created.id, role: created.role };
+      return { userId: created.id, role: created.role, locale: LOCALE_TO_WIRE[created.locale] };
     } catch (error) {
       // Two logins for the same new account can both find nothing and both
       // insert. The loser gets P2002; re-reading is correct because the winner
@@ -70,10 +72,10 @@ export class AuthService {
       if (isUniqueViolation(error)) {
         const raced = await prisma.user.findUniqueOrThrow({
           where: { auth0Id: input.auth0Id },
-          select: { id: true, role: true },
+          select: { id: true, role: true, locale: true },
         });
 
-        return { userId: raced.id, role: raced.role };
+        return { userId: raced.id, role: raced.role, locale: LOCALE_TO_WIRE[raced.locale] };
       }
 
       throw error;
