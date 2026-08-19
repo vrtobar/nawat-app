@@ -83,10 +83,10 @@ you changed it deliberately.
 
 ### Seeding is two commands on purpose
 
-| Command               | What it does                                                                  |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `npm run db:seed`     | Reference data only. Safe in any environment; this is what the ECS task runs. |
-| `npm run db:seed:dev` | Reference data plus placeholder content, for local work.                      |
+| Command               | What it does                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| `npm run db:seed`     | Reference data only. Safe in any environment; the production deploy runs it after migrations. |
+| `npm run db:seed:dev` | Reference data plus placeholder content, for local work.                                      |
 
 The split is structural rather than a flag because the seed task's command is
 overridden at run time, and a flag would put one typo between production and a
