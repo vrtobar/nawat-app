@@ -13,17 +13,26 @@ export type EntryType = z.infer<typeof EntryTypeSchema>;
 
 // -----------------------------------------------------------------------------
 // PRIMARY TRANSLATION INLINE
-// Lean shape embedded in list items — just enough to render a search result
-// row with its meaning, audio button, and part of speech badge.
-// Always the priority=1 `common` dialect translation — forms in broad use
-// among speakers rather than specific to one community. Well-defined thanks
-// to the (entryId, dialectCode, priority) unique constraint in schema.prisma.
-// Full translation data available in DictionaryEntryDetail.
+// Lean shape embedded in list items — just enough to render a dictionary row
+// with its meaning, audio button, and part of speech badge. Full translation
+// data available in DictionaryEntryDetail.
+//
+// Which translation this is depends on the request. Default browse shows the
+// whole dictionary and picks a representative form per entry: the `common`
+// dialect if the entry has one (the form in broad use rather than specific to a
+// town), otherwise the lowest-priority translation of whatever dialect does
+// exist — so a word attested only in, say, Izalco still appears, labelled with
+// its dialect rather than hidden for lacking a common form. A `?dialectCode=`
+// filter narrows to that dialect and the primary becomes its lowest-priority
+// translation. `dialectCode` on this shape names which it turned out to be;
+// ties between equal-priority dialects break alphabetically, a deliberate and
+// revisitable default — no dialect outranks another yet.
 //
 // `content` is resolved to one locale server-side (ADR 0015 §4), never both
 // languages — see TranslationDetailSchema for the reasoning. Non-null because
-// entries lacking the resolved locale are filtered out of the list. `locale`
-// echoes which language was served.
+// entries with no renderable translation in the resolved locale are filtered
+// out of the list — only reachable for English, since Spanish content is
+// mandatory on every translation. `locale` echoes which language was served.
 // -----------------------------------------------------------------------------
 
 const PrimaryTranslationSchema = z.object({
@@ -89,9 +98,10 @@ export type DictionaryEntryDetail = z.infer<typeof DictionaryEntryDetailSchema>;
 
 // -----------------------------------------------------------------------------
 // QUERY PARAMS
-// Two endpoints, two contracts (see api-reference.md):
-//   GET /dictionary/entries        — structured browsing, no fuzzy search
-//   GET /dictionary/entries/search — pg_trgm fuzzy search, q required
+// Two endpoints, two contracts (see api-reference.md). Routes are flat — no
+// module prefix (ADR 0008):
+//   GET /entries        — structured browsing, no fuzzy search
+//   GET /entries/search — pg_trgm fuzzy search, q required
 //
 // isPublished uses z.stringbool() — z.coerce.boolean() would turn the query
 // string "false" into true (Boolean('false') === true). CONTRIBUTOR+ only;

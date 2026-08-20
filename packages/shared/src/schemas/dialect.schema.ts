@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+// The dialect code a request falls back to when it pins none: the form in broad
+// use rather than any one town's. A preference, not a guarantee — an entry may
+// have no `common` translation (a word attested only regionally), which the
+// read services handle by falling back to its lowest-priority form. Defined
+// here, in the contract package, so the seed that CREATES this row and the API
+// that RESOLVES against it share one literal and cannot drift; the web dialect
+// filter reads it as its default selection too. Parallels DEFAULT_LOCALE.
+export const DEFAULT_DIALECT_CODE = 'common';
+
 // -----------------------------------------------------------------------------
 // DIALECT
 // No list/detail split needed — dialect is a simple reference entity.

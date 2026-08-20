@@ -1,4 +1,4 @@
-import type { CreateDialect } from '@nahuat/shared';
+import { type CreateDialect, DEFAULT_DIALECT_CODE } from '@nahuat/shared';
 
 // REFERENCE DATA — seeded in every environment, including production.
 //
@@ -38,7 +38,7 @@ import type { CreateDialect } from '@nahuat/shared';
 // forward by default.
 export const DIALECTS: CreateDialect[] = [
   {
-    code: 'common',
+    code: DEFAULT_DIALECT_CODE,
     nameEs: 'Nawat común',
     nameEn: 'Common Nawat',
     // User-facing: these strings reach dictionary filters and translation
