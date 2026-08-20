@@ -7,9 +7,7 @@ import {
 } from '@nahuat/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
-// Prisma error codes handled here.
-const UNIQUE_VIOLATION = 'P2002'; // code, nameEs or nameEn already taken
-const RECORD_NOT_FOUND = 'P2025'; // update targeted a row that does not exist
+import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 
 // The columns that make up the Dialect contract, listed once. Selected
 // explicitly rather than returning the row, the same discipline as
@@ -47,7 +45,7 @@ export class DialectsService {
       // CONFLICT rather than a dialect-specific code: the client cannot act on
       // which of the three collided, and naming it would disclose which values
       // already exist. The admin form edits one dialect at a time.
-      if (isPrismaError(error, UNIQUE_VIOLATION)) throw conflict();
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw conflict();
       throw error;
     }
   }
@@ -64,8 +62,8 @@ export class DialectsService {
       // DIALECT_NOT_FOUND rather than the bare 404 the router would produce for
       // an unmatched route, so the client can tell "no such dialect" from "no
       // such endpoint".
-      if (isPrismaError(error, RECORD_NOT_FOUND)) throw notFound();
-      if (isPrismaError(error, UNIQUE_VIOLATION)) throw conflict();
+      if (isPrismaError(error, PRISMA_ERROR.RECORD_NOT_FOUND)) throw notFound();
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw conflict();
       throw error;
     }
   }
@@ -113,13 +111,4 @@ function dialectInUse(count: number): ConflictException {
     code: API_ERROR_CODES.DIALECT_IN_USE,
     message: `Dialect is referenced by ${count} translation${count === 1 ? '' : 's'}`,
   });
-}
-
-function isPrismaError(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code: unknown }).code === code
-  );
 }

@@ -13,9 +13,7 @@ import {
 } from '@nahuat/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
-// nawatContent carries a unique constraint; a create or update that collides
-// with an existing headword raises this.
-const UNIQUE_VIOLATION = 'P2002';
+import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 
 // Columns needed to render a list row's primaryTranslation and to resolve its
 // content to one locale. contentEs and contentEn are both selected so the
@@ -331,7 +329,7 @@ export class EntriesService {
       // nawatContent is unique — a duplicate headword collides. Generic
       // CONFLICT: the client knows the word already exists without the response
       // disclosing which id holds it.
-      if (isPrismaError(error, UNIQUE_VIOLATION)) throw entryConflict();
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
       throw error;
     }
   }
@@ -354,7 +352,7 @@ export class EntriesService {
         data: { ...input, updaterId: userId },
       });
     } catch (error) {
-      if (isPrismaError(error, UNIQUE_VIOLATION)) throw entryConflict();
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
       throw error;
     }
     if (result.count === 0) throw entryNotFound();
@@ -440,15 +438,6 @@ function entryConflict(): ConflictException {
     code: API_ERROR_CODES.CONFLICT,
     message: 'An entry with that Nawat content already exists',
   });
-}
-
-function isPrismaError(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code: unknown }).code === code
-  );
 }
 
 // Maps a browse/search row to a list item, resolving its primary translation
