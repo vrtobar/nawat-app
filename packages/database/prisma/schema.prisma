@@ -154,12 +154,14 @@ model Entry {
 
   translations Translation[]
 
-  // Substring search (ILIKE '%foo%'). A btree index cannot serve a leading
-  // wildcard; a trigram GIN index can. Depends on the pg_trgm extension,
-  // created by 20260815155000_enable_pg_trgm — Prisma does not model
-  // extensions, so nothing here can declare that dependency. Regenerating
-  // the init migration is safe; that one must not be deleted.
-  @@index([nawatContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "entries_nawat_content_trgm_idx")
+  // Trigram search index NOT declared here. GET /entries/search matches on
+  // immutable_unaccent(nawat_content), so it is accent-insensitive ("takat"
+  // finds "tàkat"), and Prisma cannot model a functional index expression.
+  // The GIN trigram index therefore lives in
+  // 20260820163000_accent_insensitive_trigram_search, not here — which also
+  // dropped the raw-column index this replaced (entries_nawat_content_trgm_idx),
+  // since search was its only caller and now wraps the column in unaccent.
+  //
   // NOT THE FULL INDEX SET. entries_live_idx is a partial index defined in
   // 20260815160500_partial_live_indexes — Prisma cannot express a WHERE
   // clause, so it is invisible here. Check that migration before adding an
@@ -244,11 +246,13 @@ model Translation {
 
   @@unique([entryId, dialectCode, priority])
   @@index([dialectCode])
-  // Substring search — see note on Entry's trigram index above. Separate
-  // indexes rather than one multi-column GIN: searches hit either language
-  // alone, and the planner can BitmapOr the two when a query spans both.
-  @@index([contentEs(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_es_trgm_idx")
-  @@index([contentEn(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_en_trgm_idx")
+  // Trigram search indexes NOT declared here — see the note on Entry. Both
+  // content columns are indexed as immutable_unaccent(col) gin_trgm_ops in
+  // 20260820163000_accent_insensitive_trigram_search (functional expressions
+  // Prisma cannot model). Separate per-language indexes, not one composite: a
+  // search hits either language alone and the planner BitmapOrs the two. The
+  // raw-column indexes they replaced were dropped in that same migration.
+  //
   // See note on Entry: translations_live_idx is partial and lives in the
   // migration, not here.
   @@map("translations")
