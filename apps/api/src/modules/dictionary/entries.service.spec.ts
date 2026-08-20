@@ -1,6 +1,6 @@
 import { prisma } from '@nahuat/database';
 import { DictionaryEntryDetailSchema, DictionaryEntryListItemSchema } from '@nahuat/shared';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EntriesService } from './entries.service';
@@ -20,6 +20,8 @@ vi.mock('@nahuat/database', () => ({
       count: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
     },
     $queryRaw: vi.fn(),
   },
@@ -323,6 +325,85 @@ describe('EntriesService', () => {
 
       // 45 matches at 20/page → 3 pages.
       expect(result.meta).toEqual({ total: 45, page: 2, limit: 20, totalPages: 3 });
+    });
+  });
+
+  describe('create', () => {
+    it('creates a draft and returns it in the detail shape', async () => {
+      entry.create.mockResolvedValue(detailRow({ isPublished: false, translations: [] }) as never);
+
+      const result = await service.create({ nawatContent: 'takat', type: 'WORD' }, 'usr_1', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ nawatContent: 'takat', isPublished: false, translations: [] });
+    });
+
+    it('stamps attribution from the caller, not the body', async () => {
+      entry.create.mockResolvedValue(detailRow({ isPublished: false, translations: [] }) as never);
+
+      await service.create({ nawatContent: 'takat', type: 'WORD' }, 'usr_1', 'es');
+
+      // creatorId and updaterId come from the token argument; the body has no
+      // say in who a row is attributed to.
+      expect(entry.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ creatorId: 'usr_1', updaterId: 'usr_1' }),
+        }),
+      );
+    });
+
+    it('maps a duplicate nawatContent to CONFLICT', async () => {
+      entry.create.mockRejectedValue({ code: 'P2002' } as never);
+
+      const rejection = service.create({ nawatContent: 'takat', type: 'WORD' }, 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'CONFLICT' });
+      });
+    });
+  });
+
+  describe('update', () => {
+    it('updates a live entry and returns the detail shape', async () => {
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.update('ent_1', { nawatContent: 'tak+' }, 'usr_1', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ creator: { name: 'Victor' } });
+    });
+
+    it('re-stamps updaterId and guards on deletedAt', async () => {
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      await service.update('ent_1', { nawatContent: 'x' }, 'usr_9', 'es');
+
+      expect(entry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ent_1', deletedAt: null },
+          data: expect.objectContaining({ updaterId: 'usr_9' }),
+        }),
+      );
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live row matches, without reading back', async () => {
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update('nope', { nawatContent: 'x' }, 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+      expect(entry.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('maps a duplicate nawatContent to CONFLICT', async () => {
+      entry.updateMany.mockRejectedValue({ code: 'P2002' } as never);
+
+      const rejection = service.update('ent_1', { nawatContent: 'dupe' }, 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

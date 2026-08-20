@@ -1,17 +1,24 @@
 import {
+  type CreateEntry,
+  CreateEntrySchema,
   type DictionaryBrowseParams,
   DictionaryBrowseParamsSchema,
   type DictionaryEntryDetail,
   type DictionaryEntryListItem,
   type DictionarySearchParams,
   DictionarySearchParamsSchema,
+  type JwtClaims,
   type Locale,
   type PaginationMeta,
+  type UpdateEntry,
+  UpdateEntrySchema,
 } from '@nahuat/shared';
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { ContentLocale } from '../../common/decorators/content-locale.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { EntriesService } from './entries.service';
 
@@ -50,5 +57,30 @@ export class EntriesController {
   @Get(':id')
   detail(@Param('id') id: string, @ContentLocale() locale: Locale): Promise<DictionaryEntryDetail> {
     return this.entriesService.findById(id, locale);
+  }
+
+  // CONTRIBUTOR write paths. No @Public, so the global JwtAuthGuard requires a
+  // token and RolesGuard the rank; @CurrentUser is the verified claim set.
+  // Attribution is stamped from user.userId in the service, never the body.
+  // Both create a draft — publishing is a separate ADMIN action (a later slice).
+  @Roles('CONTRIBUTOR')
+  @Post()
+  create(
+    @Body(new ZodValidationPipe(CreateEntrySchema)) body: CreateEntry,
+    @CurrentUser() user: JwtClaims,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.create(body, user.userId, locale);
+  }
+
+  @Roles('CONTRIBUTOR')
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateEntrySchema)) body: UpdateEntry,
+    @CurrentUser() user: JwtClaims,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.update(id, body, user.userId, locale);
   }
 }
