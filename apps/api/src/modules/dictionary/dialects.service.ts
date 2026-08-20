@@ -5,9 +5,10 @@ import {
   type Dialect,
   type UpdateDialect,
 } from '@nahuat/shared';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
+import { dialectNotFound } from './dictionary-errors';
 
 // The columns that make up the Dialect contract, listed once. Selected
 // explicitly rather than returning the row, the same discipline as
@@ -22,6 +23,7 @@ const DIALECT_SELECT = {
   nameEn: true,
   descriptionEs: true,
   descriptionEn: true,
+  precedence: true,
 } as const;
 
 @Injectable()
@@ -62,7 +64,7 @@ export class DialectsService {
       // DIALECT_NOT_FOUND rather than the bare 404 the router would produce for
       // an unmatched route, so the client can tell "no such dialect" from "no
       // such endpoint".
-      if (isPrismaError(error, PRISMA_ERROR.RECORD_NOT_FOUND)) throw notFound();
+      if (isPrismaError(error, PRISMA_ERROR.RECORD_NOT_FOUND)) throw dialectNotFound();
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw conflict();
       throw error;
     }
@@ -78,7 +80,7 @@ export class DialectsService {
       where: { id },
       select: { code: true },
     });
-    if (!dialect) throw notFound();
+    if (!dialect) throw dialectNotFound();
 
     // Translation.dialect is onDelete: Restrict, so the database would refuse
     // this regardless. The pre-check turns that raw constraint error into
@@ -90,13 +92,6 @@ export class DialectsService {
 
     await prisma.dialect.delete({ where: { id } });
   }
-}
-
-function notFound(): NotFoundException {
-  return new NotFoundException({
-    code: API_ERROR_CODES.DIALECT_NOT_FOUND,
-    message: 'Dialect not found',
-  });
 }
 
 function conflict(): ConflictException {

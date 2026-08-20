@@ -1,6 +1,8 @@
 import {
   type CreateEntry,
   CreateEntrySchema,
+  type CreateFullEntry,
+  CreateFullEntrySchema,
   type DictionaryBrowseParams,
   DictionaryBrowseParamsSchema,
   type DictionaryEntryDetail,
@@ -22,13 +24,14 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { EntriesService } from './entries.service';
 
-// Top-level `/entries` (ADR 0008). All routes are @Public — the dictionary is
+// Top-level `/entries` (ADR 0008). The reads are @Public — the dictionary is
 // readable without a token — and @ContentLocale resolves which language the
-// content comes back in (?locale= → user token → Accept-Language → es).
+// content comes back in (?locale= → user token → Accept-Language → es). The
+// writes are CONTRIBUTOR.
 //
-// Route order is load-bearing: `search` is declared before `:id`, or Nest
-// matches "search" as an :id and every search 404s looking up an entry with
-// that id. The literal segment must win.
+// Route order is load-bearing: literal segments (`search`, `full`) are declared
+// before the `:id` param, or Nest matches them as an id — a search or a full
+// create would 404 looking up an entry with that literal as its id.
 @Controller('entries')
 export class EntriesController {
   constructor(private readonly entriesService: EntriesService) {}
@@ -71,6 +74,18 @@ export class EntriesController {
     @ContentLocale() locale: Locale,
   ): Promise<DictionaryEntryDetail> {
     return this.entriesService.create(body, user.userId, locale);
+  }
+
+  // Entry plus its first translations in one atomic request. A literal segment,
+  // so declared before `:id` (see the class note).
+  @Roles('CONTRIBUTOR')
+  @Post('full')
+  createFull(
+    @Body(new ZodValidationPipe(CreateFullEntrySchema)) body: CreateFullEntry,
+    @CurrentUser() user: JwtClaims,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.createFull(body, user.userId, locale);
   }
 
   @Roles('CONTRIBUTOR')

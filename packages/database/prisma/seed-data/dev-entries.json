@@ -12,7 +12,7 @@
     "real is the one that eventually gets copied somewhere it shouldn't.",
     "Real vocabulary does not belong in this file — it goes in through the",
     "API once the dictionary module exists, so it inherits validation,",
-    "priority resolution, audit logging and attribution to a real person.",
+    "audit logging and attribution to a real person.",
     "",
     "Shape is validated at load against CreateEntrySchema and",
     "CreateTranslationSchema from @nahuat/shared, so this file cannot drift",
@@ -25,18 +25,10 @@
       "translations": [
         {
           "dialectCode": "common",
-          "contentEs": "marcador de posición uno",
-          "contentEn": "placeholder one",
+          "contentEs": "marcador de posición uno | segundo sentido de prueba",
+          "contentEn": "placeholder one | second test sense",
           "partOfSpeech": "NOUN",
-          "phonetic": "[placeholder]",
-          "priority": 1
-        },
-        {
-          "dialectCode": "common",
-          "contentEs": "segundo sentido de prueba",
-          "contentEn": "second test sense",
-          "partOfSpeech": "NOUN",
-          "priority": 2
+          "phonetic": "[placeholder]"
         }
       ]
     },
@@ -50,8 +42,7 @@
           "contentEn": "placeholder two",
           "partOfSpeech": "VERB",
           "exampleNawat": "zzz-placeholder-two example sentence",
-          "exampleEs": "oración de ejemplo",
-          "priority": 1
+          "exampleEs": "oración de ejemplo"
         }
       ]
     },
@@ -63,8 +54,7 @@
           "dialectCode": "common",
           "contentEs": "frase de marcador de posición",
           "contentEn": "placeholder phrase",
-          "partOfSpeech": "PHRASE",
-          "priority": 1
+          "partOfSpeech": "PHRASE"
         }
       ]
     }

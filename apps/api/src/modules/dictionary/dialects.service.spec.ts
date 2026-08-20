@@ -35,6 +35,7 @@ const row = (overrides: Record<string, unknown> = {}) => ({
   nameEn: 'Izalco Nawat',
   descriptionEs: 'La variedad hablada en Izalco.',
   descriptionEn: 'The variety spoken in Izalco.',
+  precedence: 20,
   ...overrides,
 });
 

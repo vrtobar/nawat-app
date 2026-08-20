@@ -2,7 +2,7 @@ import { Prisma, prisma } from '@nahuat/database';
 import {
   API_ERROR_CODES,
   type CreateEntry,
-  DEFAULT_DIALECT_CODE,
+  type CreateFullEntry,
   type DictionaryBrowseParams,
   type DictionaryEntryDetail,
   type DictionaryEntryListItem,
@@ -11,9 +11,15 @@ import {
   type PaginationMeta,
   type UpdateEntry,
 } from '@nahuat/shared';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
+import { dialectNotFound, entryNotFound } from './dictionary-errors';
+import {
+  resolveContent,
+  toTranslationDetail,
+  TRANSLATION_DETAIL_SELECT,
+} from './translation-detail';
 
 // Columns needed to render a list row's primaryTranslation and to resolve its
 // content to one locale. contentEs and contentEn are both selected so the
@@ -21,7 +27,6 @@ import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 const PRIMARY_SELECT = {
   id: true,
   dialectCode: true,
-  priority: true,
   partOfSpeech: true,
   phonetic: true,
   audioUrl: true,
@@ -45,38 +50,8 @@ type ListEntryRow = Prisma.EntryGetPayload<{
   };
 }>;
 
-// The full translation shape for an entry detail page — every field
-// TranslationDetail declares, plus its dialect inline so the client needs no
-// second lookup. Paired content/example columns are selected and resolved to
-// one locale below; the S3 keys (audioKey, imageKey) are deliberately absent.
-const DETAIL_TRANSLATION_SELECT = {
-  id: true,
-  contentEs: true,
-  contentEn: true,
-  exampleNawat: true,
-  exampleEs: true,
-  exampleEn: true,
-  phonetic: true,
-  partOfSpeech: true,
-  audioUrl: true,
-  priority: true,
-  isPublished: true,
-  createdAt: true,
-  updatedAt: true,
-  dialect: {
-    select: {
-      id: true,
-      code: true,
-      nameEs: true,
-      nameEn: true,
-      descriptionEs: true,
-      descriptionEn: true,
-    },
-  },
-} satisfies Prisma.TranslationSelect;
-
 // An entry detail row: the columns DictionaryEntryDetail needs plus creator and
-// its translations projected through DETAIL_TRANSLATION_SELECT. Derived from
+// its translations projected through TRANSLATION_DETAIL_SELECT. Derived from
 // that const so the row type cannot drift from the query. The nested
 // where/orderBy do not affect this shape, so the public read (findById,
 // published-only) and the write responses (create/update, drafts included)
@@ -91,7 +66,7 @@ type EntryDetailRow = Prisma.EntryGetPayload<{
     createdAt: true;
     updatedAt: true;
     creator: { select: { name: true } };
-    translations: { select: typeof DETAIL_TRANSLATION_SELECT };
+    translations: { select: typeof TRANSLATION_DETAIL_SELECT };
   };
 }>;
 
@@ -146,11 +121,11 @@ export class EntriesService {
           isPublished: true,
           createdAt: true,
           // Same predicate as the semi-join, so a matched entry always carries
-          // at least one candidate. Ordered priority-then-dialect: priority is
-          // the primary tiebreak; dialect makes equal priorities deterministic.
+          // at least one candidate. Ordered by dialect precedence, so [0] is the
+          // headword; dialectCode makes any shared precedence deterministic.
           translations: {
             where: renderable,
-            orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
+            orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
             select: PRIMARY_SELECT,
           },
         },
@@ -261,7 +236,7 @@ export class EntriesService {
         createdAt: true,
         translations: {
           where: renderable,
-          orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
+          orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
           select: PRIMARY_SELECT,
         },
       },
@@ -302,8 +277,8 @@ export class EntriesService {
             deletedAt: null,
             ...(locale === 'en' ? { contentEn: { not: null } } : {}),
           },
-          orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
-          select: DETAIL_TRANSLATION_SELECT,
+          orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
+          select: TRANSLATION_DETAIL_SELECT,
         },
       },
     });
@@ -366,6 +341,43 @@ export class EntriesService {
     if (!entry) throw entryNotFound();
     return toEntryDetail(entry, locale);
   }
+
+  // Create an entry and its first translations in one request (CONTRIBUTOR).
+  // Prisma's nested `create` runs the entry and every translation in a single
+  // transaction, so a bad translation (a repeated dialect, an unknown dialect)
+  // rolls the whole thing back — an entry never lands half-populated.
+  async createFull(
+    input: CreateFullEntry,
+    userId: string,
+    locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    const { translations, ...entry } = input;
+    const translationData = translations.map((t) => ({
+      ...t,
+      creatorId: userId,
+      updaterId: userId,
+    }));
+
+    try {
+      const created = await prisma.entry.create({
+        data: {
+          ...entry,
+          creatorId: userId,
+          updaterId: userId,
+          translations: { create: translationData },
+        },
+        select: writeDetailSelect(locale),
+      });
+      return toEntryDetail(created, locale);
+    } catch (error) {
+      // UNIQUE_VIOLATION is either a duplicate nawatContent or two batch
+      // translations sharing a dialect (one translation per dialect per entry);
+      // both are a client conflict. A FK failure is an unknown dialectCode.
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
+      if (isPrismaError(error, PRISMA_ERROR.FK_CONSTRAINT)) throw dialectNotFound();
+      throw error;
+    }
+  }
 }
 
 // The entry detail select for write responses. Unlike the public read it does
@@ -389,8 +401,8 @@ function writeDetailSelect(locale: Locale) {
         deletedAt: null,
         ...(locale === 'en' ? { contentEn: { not: null } } : {}),
       },
-      orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
-      select: DETAIL_TRANSLATION_SELECT,
+      orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
+      select: TRANSLATION_DETAIL_SELECT,
     },
   } satisfies Prisma.EntrySelect;
 }
@@ -406,31 +418,10 @@ function toEntryDetail(entry: EntryDetailRow, locale: Locale): DictionaryEntryDe
     imageUrl: entry.imageUrl,
     isPublished: entry.isPublished,
     creator: { name: entry.creator.name },
-    translations: entry.translations.map((t) => ({
-      id: t.id,
-      content: resolveContent(t, locale),
-      example: resolveExample(t, locale),
-      locale,
-      phonetic: t.phonetic,
-      partOfSpeech: t.partOfSpeech,
-      exampleNawat: t.exampleNawat,
-      audioUrl: t.audioUrl,
-      priority: t.priority,
-      isPublished: t.isPublished,
-      dialect: t.dialect,
-      createdAt: t.createdAt.toISOString(),
-      updatedAt: t.updatedAt.toISOString(),
-    })),
+    translations: entry.translations.map((t) => toTranslationDetail(t, locale)),
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString(),
   };
-}
-
-function entryNotFound(): NotFoundException {
-  return new NotFoundException({
-    code: API_ERROR_CODES.ENTRY_NOT_FOUND,
-    message: 'Entry not found',
-  });
 }
 
 function entryConflict(): ConflictException {
@@ -464,15 +455,13 @@ function toListItem(entry: ListEntryRow, locale: Locale): DictionaryEntryListIte
   };
 }
 
-// Prefer the common form when the entry has one, whatever its priority —
-// otherwise the lowest-priority translation of whatever dialect does exist, so
-// a town-only word still gets a headword rather than being dropped. The array
-// is pre-ordered by (priority, dialect), so [0] is that lowest-priority form and
-// the first common match is the lowest-priority common one. Callers only reach
-// here for entries the query already proved have a candidate, so [0] exists.
-function pickPrimary<T extends { dialectCode: string }>(translations: T[]): T {
-  const primary =
-    translations.find((t) => t.dialectCode === DEFAULT_DIALECT_CODE) ?? translations[0];
+// The headword: the translation whose dialect has the lowest precedence, so the
+// common form leads when present and a town-only word still gets a headword
+// rather than being dropped. The array is pre-ordered by (dialect precedence,
+// dialectCode), so that is simply [0]. Callers only reach here for entries the
+// query already proved have a candidate, so [0] exists.
+function pickPrimary<T>(translations: T[]): T {
+  const primary = translations[0];
   if (primary === undefined) {
     // Unreachable: callers only reach here for entries the semi-join proved
     // have a candidate. A throw rather than a silent gap keeps the type honest
@@ -480,29 +469,4 @@ function pickPrimary<T extends { dialectCode: string }>(translations: T[]): T {
     throw new Error('entry matched the browse query but has no candidate translation');
   }
   return primary;
-}
-
-// Spanish is mandatory on every translation; English is optional and the read
-// queries filter out rows lacking it in the resolved locale. So by the time a
-// row reaches here its locale content is present — a null means the query and
-// this resolver have drifted apart, surfaced as a 500 rather than smuggled to
-// the client as an empty string.
-function resolveContent(
-  t: { contentEs: string; contentEn: string | null },
-  locale: Locale,
-): string {
-  const value = locale === 'en' ? t.contentEn : t.contentEs;
-  if (value === null) {
-    throw new Error(`translation missing ${locale} content despite the renderable filter`);
-  }
-  return value;
-}
-
-// The usage example is optional in both languages, so absence is normal and
-// stays null rather than throwing.
-function resolveExample(
-  t: { exampleEs: string | null; exampleEn: string | null },
-  locale: Locale,
-): string | null {
-  return (locale === 'en' ? t.exampleEn : t.exampleEs) ?? null;
 }
