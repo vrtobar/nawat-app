@@ -4,6 +4,7 @@ import {
   type DictionaryBrowseParams,
   type DictionaryEntryDetail,
   type DictionaryEntryListItem,
+  type DictionarySearchParams,
   type Locale,
   type PaginationMeta,
 } from '@nahuat/shared';
@@ -22,6 +23,22 @@ const PRIMARY_SELECT = {
   contentEs: true,
   contentEn: true,
 } satisfies Prisma.TranslationSelect;
+
+// A browse/search row: the entry columns a list item needs plus its candidate
+// translations projected through PRIMARY_SELECT. Derived from that const so the
+// row type and the query select cannot drift. The nested where/orderBy do not
+// affect this shape, so browse and search share it despite differing filters.
+type ListEntryRow = Prisma.EntryGetPayload<{
+  select: {
+    id: true;
+    type: true;
+    nawatContent: true;
+    imageUrl: true;
+    isPublished: true;
+    createdAt: true;
+    translations: { select: typeof PRIMARY_SELECT };
+  };
+}>;
 
 // The full translation shape for an entry detail page — every field
 // TranslationDetail declares, plus its dialect inline so the client needs no
@@ -115,31 +132,126 @@ export class EntriesService {
       }),
     ]);
 
-    const data = rows.map((entry): DictionaryEntryListItem => {
-      const primary = pickPrimary(entry.translations);
-      return {
-        id: entry.id,
-        type: entry.type,
-        nawatContent: entry.nawatContent,
-        imageUrl: entry.imageUrl,
-        isPublished: entry.isPublished,
-        createdAt: entry.createdAt.toISOString(),
-        primaryTranslation: {
-          id: primary.id,
-          content: resolveContent(primary, locale),
-          locale,
-          partOfSpeech: primary.partOfSpeech,
-          audioUrl: primary.audioUrl,
-          phonetic: primary.phonetic,
-          dialectCode: primary.dialectCode,
-        },
-      };
-    });
-
     return {
-      data,
+      data: rows.map((entry) => toListItem(entry, locale)),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  // Public fuzzy search. pg_trgm similarity ranking has no expression in
+  // Prisma's query builder — no `%` operator, no ORDER BY similarity() — so the
+  // ranking is raw SQL. Every column is wrapped in immutable_unaccent() so the
+  // match is accent-insensitive ("takat" finds "tàkat") and uses the functional
+  // GIN indexes from 20260820163000_accent_insensitive_trigram_search. The raw
+  // query returns ranked ids only; the rows are hydrated through Prisma with the
+  // same select and renderable filter as browse, so both endpoints resolve a
+  // primary identically and share toListItem.
+  async search(
+    params: DictionarySearchParams,
+    locale: Locale,
+  ): Promise<{ data: DictionaryEntryListItem[]; meta: PaginationMeta }> {
+    const { q, page, limit } = params;
+    const offset = (page - 1) * limit;
+
+    // FROM/WHERE shared by the ranking query and its count, so the page total
+    // matches the rows. immutable_unaccent wraps both sides of every match,
+    // which folds accents and lets the planner use the functional indexes.
+    const enOnly = locale === 'en' ? Prisma.sql`AND t.content_en IS NOT NULL` : Prisma.empty;
+    const dialectFilter = params.dialectCode
+      ? Prisma.sql`AND t.dialect_code = ${params.dialectCode}`
+      : Prisma.empty;
+    // The enum column will not compare against a bare text parameter — Postgres
+    // needs the cast to the generated "EntryType" type.
+    const typeFilter = params.type
+      ? Prisma.sql`AND e.type = ${params.type}::"EntryType"`
+      : Prisma.empty;
+
+    const matches = Prisma.sql`
+      FROM entries e
+      JOIN translations t
+        ON t.entry_id = e.id
+       AND t.is_published = true
+       AND t.deleted_at IS NULL
+       ${enOnly}
+       ${dialectFilter}
+      WHERE e.is_published = true
+        AND e.deleted_at IS NULL
+        ${typeFilter}
+        AND (
+          immutable_unaccent(e.nawat_content) % immutable_unaccent(${q})
+          OR immutable_unaccent(t.content_es) % immutable_unaccent(${q})
+          OR (t.content_en IS NOT NULL
+              AND immutable_unaccent(t.content_en) % immutable_unaccent(${q}))
+        )
+    `;
+
+    const [ranked, countRows] = await Promise.all([
+      // score is the entry's best match across its headword and any renderable
+      // translation, in either language; GREATEST/COALESCE keep a null contentEn
+      // from voiding the row. Ordered by score, then headword for a stable tie.
+      prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT e.id AS id,
+               MAX(GREATEST(
+                 similarity(immutable_unaccent(e.nawat_content), immutable_unaccent(${q})),
+                 similarity(immutable_unaccent(t.content_es), immutable_unaccent(${q})),
+                 COALESCE(similarity(immutable_unaccent(t.content_en), immutable_unaccent(${q})), 0)
+               )) AS score
+        ${matches}
+        GROUP BY e.id
+        ORDER BY score DESC, e.nawat_content ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `),
+      prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+        SELECT COUNT(DISTINCT e.id) AS count ${matches}
+      `),
+    ]);
+
+    const total = Number(countRows[0]?.count ?? 0);
+    const meta: PaginationMeta = { total, page, limit, totalPages: Math.ceil(total / limit) };
+
+    if (ranked.length === 0) {
+      return { data: [], meta };
+    }
+
+    // Hydrate the ranked ids. findMany does not preserve `IN (...)` order, so
+    // the rows are re-sorted back to the ranking below. The renderable filter
+    // mirrors browse (minus partOfSpeech, which search does not take), so the
+    // primary is picked from the same candidates the ranking searched.
+    const ids = ranked.map((r) => r.id);
+    const renderable: Prisma.TranslationWhereInput = {
+      isPublished: true,
+      deletedAt: null,
+      ...(locale === 'en' ? { contentEn: { not: null } } : {}),
+      ...(params.dialectCode ? { dialectCode: params.dialectCode } : {}),
+    };
+
+    const rows = await prisma.entry.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        type: true,
+        nawatContent: true,
+        imageUrl: true,
+        isPublished: true,
+        createdAt: true,
+        translations: {
+          where: renderable,
+          orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
+          select: PRIMARY_SELECT,
+        },
+      },
+    });
+
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const data = ids.flatMap((id): DictionaryEntryListItem[] => {
+      const entry = byId.get(id);
+      // An id ranked by the raw query but absent here would mean the raw match
+      // and the Prisma renderable filter disagree; skip rather than emit a
+      // malformed row. Not expected — the two encode the same predicate.
+      return entry ? [toListItem(entry, locale)] : [];
+    });
+
+    return { data, meta };
   }
 
   // Public entry detail. All renderable translations, every dialect, ordered by
@@ -204,6 +316,30 @@ export class EntriesService {
       updatedAt: entry.updatedAt.toISOString(),
     };
   }
+}
+
+// Maps a browse/search row to a list item, resolving its primary translation
+// to one locale. Shared by both endpoints so the headword rule and the
+// content resolution live in one place.
+function toListItem(entry: ListEntryRow, locale: Locale): DictionaryEntryListItem {
+  const primary = pickPrimary(entry.translations);
+  return {
+    id: entry.id,
+    type: entry.type,
+    nawatContent: entry.nawatContent,
+    imageUrl: entry.imageUrl,
+    isPublished: entry.isPublished,
+    createdAt: entry.createdAt.toISOString(),
+    primaryTranslation: {
+      id: primary.id,
+      content: resolveContent(primary, locale),
+      locale,
+      partOfSpeech: primary.partOfSpeech,
+      audioUrl: primary.audioUrl,
+      phonetic: primary.phonetic,
+      dialectCode: primary.dialectCode,
+    },
+  };
 }
 
 // Prefer the common form when the entry has one, whatever its priority —

@@ -6,19 +6,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntriesService } from './entries.service';
 
 vi.mock('@nahuat/database', () => ({
-  // The service imports the Prisma namespace for its where-input types only;
-  // those are erased at runtime, so the mock needs the client alone.
-  Prisma: {},
+  // The service uses the Prisma namespace for where-input types (erased at
+  // runtime) and for `Prisma.sql`/`Prisma.empty` when composing the raw search
+  // query (present at runtime). $queryRaw is mocked to ignore its argument, so
+  // the SQL fragments only need to exist, not be real — these tests assert the
+  // mapping of the returned rows, not the SQL, which needs a live Postgres.
+  Prisma: {
+    sql: () => ({}),
+    empty: {},
+  },
   prisma: {
     entry: {
       count: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
 const entry = vi.mocked(prisma.entry);
+const queryRaw = vi.mocked(prisma.$queryRaw);
 
 // As in users/dialects specs: the Prisma mock is cast to `never`, so TypeScript
 // checks nothing about the row shapes fed in or the response shape out. Parsing
@@ -255,6 +263,66 @@ describe('EntriesService', () => {
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
       });
+    });
+  });
+
+  // $queryRaw is called twice, in Promise.all order: [0] ranks the ids, [1]
+  // counts distinct matches. entry.findMany then hydrates. The SQL itself
+  // (accent folding, similarity threshold, index use) is beyond a unit test and
+  // needs a live Postgres; these cover the ordering, hydration and meta.
+  describe('search', () => {
+    it('hydrates in the ranking order, not alphabetically, in the contract shape', async () => {
+      queryRaw
+        .mockResolvedValueOnce([{ id: 'ent_b' }, { id: 'ent_a' }] as never)
+        .mockResolvedValueOnce([{ count: 2n }] as never);
+      // Returned in the opposite (alphabetical) order to prove the re-sort back
+      // to the ranking rather than to whatever order the IN clause yields.
+      entry.findMany.mockResolvedValue([
+        entryRow({ id: 'ent_a', nawatContent: 'aaa' }),
+        entryRow({ id: 'ent_b', nawatContent: 'bbb' }),
+      ] as never);
+
+      const result = await service.search({ q: 'takat', page: 1, limit: 20 }, 'es');
+
+      result.data.forEach((item) => DictionaryEntryListItemSchema.strict().parse(item));
+      expect(result.data.map((d) => d.id)).toEqual(['ent_b', 'ent_a']);
+      expect(result.meta).toEqual({ total: 2, page: 1, limit: 20, totalPages: 1 });
+    });
+
+    it('resolves each hydrated row to the requested locale', async () => {
+      queryRaw
+        .mockResolvedValueOnce([{ id: 'ent_1' }] as never)
+        .mockResolvedValueOnce([{ count: 1n }] as never);
+      entry.findMany.mockResolvedValue([entryRow()] as never);
+
+      const result = await service.search({ q: 'man', page: 1, limit: 20 }, 'en');
+
+      expect(result.data[0]).toMatchObject({
+        primaryTranslation: { content: 'man', locale: 'en' },
+      });
+    });
+
+    it('returns empty data with zeroed meta and skips hydration on no match', async () => {
+      queryRaw.mockResolvedValueOnce([] as never).mockResolvedValueOnce([{ count: 0n }] as never);
+
+      const result = await service.search({ q: 'zzz', page: 1, limit: 20 }, 'es');
+
+      expect(result.data).toEqual([]);
+      expect(result.meta).toEqual({ total: 0, page: 1, limit: 20, totalPages: 0 });
+      // No ids to hydrate — the second round trip must not run.
+      expect(entry.findMany).not.toHaveBeenCalled();
+    });
+
+    it('derives totalPages from the distinct match count', async () => {
+      queryRaw
+        .mockResolvedValueOnce([{ id: 'ent_1' }] as never)
+        .mockResolvedValueOnce([{ count: 45n }] as never);
+      entry.findMany.mockResolvedValue([entryRow()] as never);
+
+      const result = await service.search({ q: 'takat', page: 2, limit: 20 }, 'es');
+
+      // 45 matches at 20/page → 3 pages.
+      expect(result.meta).toEqual({ total: 45, page: 2, limit: 20, totalPages: 3 });
     });
   });
 });
