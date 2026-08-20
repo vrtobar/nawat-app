@@ -1,5 +1,7 @@
 import { Prisma, prisma } from '@nahuat/database';
 import {
+  API_ERROR_CODES,
+  type CreateEntry,
   DEFAULT_DIALECT_CODE,
   type DictionaryBrowseParams,
   type DictionaryEntryDetail,
@@ -7,8 +9,13 @@ import {
   type DictionarySearchParams,
   type Locale,
   type PaginationMeta,
+  type UpdateEntry,
 } from '@nahuat/shared';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+
+// nawatContent carries a unique constraint; a create or update that collides
+// with an existing headword raises this.
+const UNIQUE_VIOLATION = 'P2002';
 
 // Columns needed to render a list row's primaryTranslation and to resolve its
 // content to one locale. contentEs and contentEn are both selected so the
@@ -69,6 +76,26 @@ const DETAIL_TRANSLATION_SELECT = {
     },
   },
 } satisfies Prisma.TranslationSelect;
+
+// An entry detail row: the columns DictionaryEntryDetail needs plus creator and
+// its translations projected through DETAIL_TRANSLATION_SELECT. Derived from
+// that const so the row type cannot drift from the query. The nested
+// where/orderBy do not affect this shape, so the public read (findById,
+// published-only) and the write responses (create/update, drafts included)
+// share it despite differing filters.
+type EntryDetailRow = Prisma.EntryGetPayload<{
+  select: {
+    id: true;
+    type: true;
+    nawatContent: true;
+    imageUrl: true;
+    isPublished: true;
+    createdAt: true;
+    updatedAt: true;
+    creator: { select: { name: true } };
+    translations: { select: typeof DETAIL_TRANSLATION_SELECT };
+  };
+}>;
 
 @Injectable()
 export class EntriesService {
@@ -283,39 +310,145 @@ export class EntriesService {
       },
     });
 
-    if (!entry) {
-      throw new NotFoundException({
-        code: 'ENTRY_NOT_FOUND',
-        message: 'Entry not found',
-      });
-    }
+    if (!entry) throw entryNotFound();
 
-    return {
-      id: entry.id,
-      type: entry.type,
-      nawatContent: entry.nawatContent,
-      imageUrl: entry.imageUrl,
-      isPublished: entry.isPublished,
-      creator: { name: entry.creator.name },
-      translations: entry.translations.map((t) => ({
-        id: t.id,
-        content: resolveContent(t, locale),
-        example: resolveExample(t, locale),
-        locale,
-        phonetic: t.phonetic,
-        partOfSpeech: t.partOfSpeech,
-        exampleNawat: t.exampleNawat,
-        audioUrl: t.audioUrl,
-        priority: t.priority,
-        isPublished: t.isPublished,
-        dialect: t.dialect,
-        createdAt: t.createdAt.toISOString(),
-        updatedAt: t.updatedAt.toISOString(),
-      })),
-      createdAt: entry.createdAt.toISOString(),
-      updatedAt: entry.updatedAt.toISOString(),
-    };
+    return toEntryDetail(entry, locale);
   }
+
+  // Create a draft entry (CONTRIBUTOR). isPublished stays at its schema default
+  // of false — publishing is a separate ADMIN action. creatorId and updaterId
+  // are stamped from the caller's token, never the body, so attribution cannot
+  // be spoofed. Returns the created entry in the same detail shape a read does,
+  // resolved to the caller's locale; a fresh shell has no translations yet.
+  async create(input: CreateEntry, userId: string, locale: Locale): Promise<DictionaryEntryDetail> {
+    try {
+      const entry = await prisma.entry.create({
+        data: { ...input, creatorId: userId, updaterId: userId },
+        select: writeDetailSelect(locale),
+      });
+      return toEntryDetail(entry, locale);
+    } catch (error) {
+      // nawatContent is unique — a duplicate headword collides. Generic
+      // CONFLICT: the client knows the word already exists without the response
+      // disclosing which id holds it.
+      if (isPrismaError(error, UNIQUE_VIOLATION)) throw entryConflict();
+      throw error;
+    }
+  }
+
+  // Update an entry's own fields (CONTRIBUTOR). updateMany, not update, because
+  // the guard `deletedAt: null` is a non-unique predicate and update's where
+  // accepts only unique fields — this way a soft-deleted entry reads as not
+  // found rather than being silently resurrected. updaterId is re-stamped from
+  // the token; the row is then read back in the detail shape.
+  async update(
+    id: string,
+    input: UpdateEntry,
+    userId: string,
+    locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    let result;
+    try {
+      result = await prisma.entry.updateMany({
+        where: { id, deletedAt: null },
+        data: { ...input, updaterId: userId },
+      });
+    } catch (error) {
+      if (isPrismaError(error, UNIQUE_VIOLATION)) throw entryConflict();
+      throw error;
+    }
+    if (result.count === 0) throw entryNotFound();
+
+    const entry = await prisma.entry.findFirst({
+      where: { id },
+      select: writeDetailSelect(locale),
+    });
+    // Unreachable: the row was just updated. The guard keeps the type honest
+    // rather than asserting non-null on a nullable findFirst.
+    if (!entry) throw entryNotFound();
+    return toEntryDetail(entry, locale);
+  }
+}
+
+// The entry detail select for write responses. Unlike the public read it does
+// not restrict the entry to published rows — a contributor gets their draft
+// back — and it includes draft translations (deletedAt: null only), so a
+// translation added but not yet published still shows. The locale clause drops
+// translations lacking content in the resolved language, as the reads do, so
+// the resolver below never meets a null.
+function writeDetailSelect(locale: Locale) {
+  return {
+    id: true,
+    type: true,
+    nawatContent: true,
+    imageUrl: true,
+    isPublished: true,
+    createdAt: true,
+    updatedAt: true,
+    creator: { select: { name: true } },
+    translations: {
+      where: {
+        deletedAt: null,
+        ...(locale === 'en' ? { contentEn: { not: null } } : {}),
+      },
+      orderBy: [{ priority: 'asc' }, { dialectCode: 'asc' }],
+      select: DETAIL_TRANSLATION_SELECT,
+    },
+  } satisfies Prisma.EntrySelect;
+}
+
+// Maps an entry detail row to the response shape, resolving every translation
+// to one locale. Shared by findById and the write paths so the detail contract
+// lives in one place.
+function toEntryDetail(entry: EntryDetailRow, locale: Locale): DictionaryEntryDetail {
+  return {
+    id: entry.id,
+    type: entry.type,
+    nawatContent: entry.nawatContent,
+    imageUrl: entry.imageUrl,
+    isPublished: entry.isPublished,
+    creator: { name: entry.creator.name },
+    translations: entry.translations.map((t) => ({
+      id: t.id,
+      content: resolveContent(t, locale),
+      example: resolveExample(t, locale),
+      locale,
+      phonetic: t.phonetic,
+      partOfSpeech: t.partOfSpeech,
+      exampleNawat: t.exampleNawat,
+      audioUrl: t.audioUrl,
+      priority: t.priority,
+      isPublished: t.isPublished,
+      dialect: t.dialect,
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString(),
+    })),
+    createdAt: entry.createdAt.toISOString(),
+    updatedAt: entry.updatedAt.toISOString(),
+  };
+}
+
+function entryNotFound(): NotFoundException {
+  return new NotFoundException({
+    code: API_ERROR_CODES.ENTRY_NOT_FOUND,
+    message: 'Entry not found',
+  });
+}
+
+function entryConflict(): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.CONFLICT,
+    message: 'An entry with that Nawat content already exists',
+  });
+}
+
+function isPrismaError(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === code
+  );
 }
 
 // Maps a browse/search row to a list item, resolving its primary translation
