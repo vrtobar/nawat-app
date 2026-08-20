@@ -22,6 +22,11 @@ export const DialectSchema = z.object({
   nameEn: z.string(),
   descriptionEs: z.string(),
   descriptionEn: z.string(),
+  // Display order across dialects: lower comes first. `common` is 0, so the
+  // broadly-used form leads; towns follow in a chosen order. This is the single
+  // ordering for an entry's translations and the basis of its headword pick,
+  // now that a dialect has at most one translation per entry.
+  precedence: z.number().int(),
 });
 
 export const CreateDialectSchema = z.object({
@@ -33,6 +38,9 @@ export const CreateDialectSchema = z.object({
   nameEn: z.string().min(1).max(100),
   descriptionEs: z.string().min(1),
   descriptionEn: z.string().min(1),
+  // Optional — omitted, a new dialect defaults to sorting last (schema default
+  // 100) until an admin places it. Not unique; ties break on code.
+  precedence: z.number().int().optional(),
 });
 
 export const UpdateDialectSchema = CreateDialectSchema.partial();

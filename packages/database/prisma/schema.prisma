@@ -186,6 +186,15 @@ model Dialect {
   descriptionEs String @map("description_es")
   descriptionEn String @map("description_en")
 
+  // Display order across dialects, lower first. `common` is 0 so it leads;
+  // towns follow in a chosen order. This is the whole ordering for an entry's
+  // translations and the basis of its headword — a dialect has at most one
+  // translation per entry (see Translation @@unique), so nothing orders within
+  // a dialect. Not unique: a new dialect defaults to 100 (sorts last) until
+  // placed, and ties break on code. Provisional values, re-decided at teardown
+  // like the codes themselves.
+  precedence Int @default(100)
+
   translations Translation[]
 
   @@map("dialects")
@@ -207,19 +216,6 @@ model Translation {
 
   audioUrl String? @map("audio_url")
   audioKey String? @map("audio_key") // S3 key
-
-  // Display priority when an entry has multiple translations.
-  // Applies across both dialect variants AND multiple definitions of the same word.
-  // Lower number = higher priority (1 = primary/most common meaning).
-  // e.g. "takat": priority 1 = "hombre" (most common), priority 2 = "persona"
-  //
-  // Unique per (entry, dialect) — this is what makes "the priority=1 common
-  // dialect translation" in DictionaryEntryListItem.primaryTranslation
-  // (see packages/shared entry.schema.ts) a well-defined, single row instead
-  // of an arbitrary pick among ties. Service layer must resolve the next
-  // free priority when adding a translation rather than relying on the
-  // schema default.
-  priority Int @default(1)
 
   // Draft by default — only ADMIN can publish.
   // Hard delete allowed for unpublished translations.
@@ -244,7 +240,11 @@ model Translation {
   lessonVocabulary     LessonVocabulary[]
   userCardProgress     UserCardProgress[]
 
-  @@unique([entryId, dialectCode, priority])
+  // One translation per dialect per entry. A word with several senses is one
+  // row with a pipe-separated gloss, not several rows (see CreateTranslation in
+  // packages/shared). Dialect precedence orders an entry's translations; there
+  // is nothing to order within a dialect.
+  @@unique([entryId, dialectCode])
   @@index([dialectCode])
   // Trigram search indexes NOT declared here — see the note on Entry. Both
   // content columns are indexed as immutable_unaccent(col) gin_trgm_ops in

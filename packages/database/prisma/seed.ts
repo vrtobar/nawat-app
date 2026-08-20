@@ -146,26 +146,19 @@ async function seedDevContent(): Promise<void> {
     });
     entryCount += 1;
 
-    for (const [index, t] of entry.translations.entries()) {
-      // priority is explicit in the file rather than resolved here. The
-      // service layer owns "next free priority per (entry, dialect)" once the
-      // dictionary module exists; duplicating that rule in the seed would be
-      // a second implementation of it, and the two would drift. Falling back
-      // to file order keeps this honest about not being that logic.
-      const priority = t.priority ?? index + 1;
-
+    for (const t of entry.translations) {
+      // One translation per (entry, dialect) — the upsert key. Several senses of
+      // a word live in a pipe-separated gloss on this row, not separate rows.
       await prisma.translation.upsert({
         where: {
-          entryId_dialectCode_priority: {
+          entryId_dialectCode: {
             entryId: record.id,
             dialectCode: t.dialectCode,
-            priority,
           },
         },
         create: {
           entryId: record.id,
           dialectCode: t.dialectCode,
-          priority,
           contentEs: t.contentEs,
           contentEn: t.contentEn ?? null,
           phonetic: t.phonetic ?? null,

@@ -39,7 +39,6 @@ const queryRaw = vi.mocked(prisma.$queryRaw);
 const translation = (overrides: Record<string, unknown> = {}) => ({
   id: 'tra_1',
   dialectCode: 'common',
-  priority: 1,
   partOfSpeech: 'NOUN',
   phonetic: 'ˈta.kat',
   audioUrl: null,
@@ -70,7 +69,6 @@ const detailTranslation = (overrides: Record<string, unknown> = {}) => ({
   phonetic: 'ˈta.kat',
   partOfSpeech: 'NOUN',
   audioUrl: null,
-  priority: 1,
   isPublished: true,
   createdAt: new Date('2026-08-01T09:00:00.000Z'),
   updatedAt: new Date('2026-08-02T09:00:00.000Z'),
@@ -81,6 +79,7 @@ const detailTranslation = (overrides: Record<string, unknown> = {}) => ({
     nameEn: 'Common Nawat',
     descriptionEs: 'La forma de uso amplio.',
     descriptionEn: 'The broadly used form.',
+    precedence: 0,
   },
   ...overrides,
 });
@@ -131,16 +130,16 @@ describe('EntriesService', () => {
       expect(entry.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 20 }));
     });
 
-    it('prefers the common form over a lower-priority dialect', async () => {
-      // Pre-ordered by (priority, dialect) as the query returns them: an Izalco
-      // form at priority 1 sits before the common form at priority 2. The common
-      // one must still win — it is the headword whatever its priority.
+    it('orders the nested translations by dialect precedence and picks the first as primary', async () => {
+      // The query orders translations by dialect precedence, so [0] is the
+      // headword. The mock returns them already ordered (common leads); the
+      // service must pick that first row and must ask for the precedence order.
       entry.count.mockResolvedValue(1 as never);
       entry.findMany.mockResolvedValue([
         entryRow({
           translations: [
-            translation({ id: 'tra_iz', dialectCode: 'izalco', priority: 1 }),
-            translation({ id: 'tra_co', dialectCode: 'common', priority: 2 }),
+            translation({ id: 'tra_co', dialectCode: 'common' }),
+            translation({ id: 'tra_iz', dialectCode: 'izalco', contentEs: 'takat izalco' }),
           ],
         }),
       ] as never);
@@ -150,22 +149,27 @@ describe('EntriesService', () => {
       expect(result.data[0]).toMatchObject({
         primaryTranslation: { id: 'tra_co', dialectCode: 'common' },
       });
+      expect(entry.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            translations: expect.objectContaining({
+              orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
+            }),
+          }),
+        }),
+      );
     });
 
-    it('falls back to the lowest-priority dialect when no common form exists', async () => {
-      // A town-only word: no common translation, so the first (lowest-priority)
-      // candidate becomes the primary rather than the entry being dropped.
+    it('gives a town-only entry a headword — the first present dialect', async () => {
+      // No common form. Ordered by precedence, the highest-precedence dialect the
+      // entry does have leads, so the entry still gets a headword rather than
+      // being dropped.
       entry.count.mockResolvedValue(1 as never);
       entry.findMany.mockResolvedValue([
         entryRow({
           translations: [
-            translation({
-              id: 'tra_iz',
-              dialectCode: 'izalco',
-              priority: 1,
-              contentEs: 'takat izalco',
-            }),
-            translation({ id: 'tra_sd', dialectCode: 'santo-domingo', priority: 2 }),
+            translation({ id: 'tra_iz', dialectCode: 'izalco', contentEs: 'takat izalco' }),
+            translation({ id: 'tra_sd', dialectCode: 'santo-domingo' }),
           ],
         }),
       ] as never);
@@ -404,6 +408,84 @@ describe('EntriesService', () => {
 
       const rejection = service.update('ent_1', { nawatContent: 'dupe' }, 'usr_1', 'es');
       await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('createFull', () => {
+    const fullInput = (translations: Array<Record<string, unknown>>) => ({
+      nawatContent: 'takat',
+      type: 'WORD' as const,
+      translations: translations as never,
+    });
+
+    it('nests the translations, each attributed to the caller', async () => {
+      entry.create.mockResolvedValue(detailRow() as never);
+
+      await service.createFull(
+        fullInput([
+          { dialectCode: 'common', contentEs: 'a' },
+          { dialectCode: 'izalco', contentEs: 'b' },
+        ]),
+        'usr_1',
+        'es',
+      );
+
+      expect(entry.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            creatorId: 'usr_1',
+            updaterId: 'usr_1',
+            translations: {
+              create: [
+                expect.objectContaining({
+                  dialectCode: 'common',
+                  creatorId: 'usr_1',
+                  updaterId: 'usr_1',
+                }),
+                expect.objectContaining({ dialectCode: 'izalco', creatorId: 'usr_1' }),
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('returns the created entry in the detail shape', async () => {
+      entry.create.mockResolvedValue(detailRow() as never);
+
+      const result = await service.createFull(
+        fullInput([{ dialectCode: 'common', contentEs: 'a' }]),
+        'usr_1',
+        'es',
+      );
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ nawatContent: 'takat', creator: { name: 'Victor' } });
+    });
+
+    it('maps a unique violation (duplicate headword or repeated dialect) to CONFLICT', async () => {
+      entry.create.mockRejectedValue({ code: 'P2002' } as never);
+
+      const rejection = service.createFull(
+        fullInput([{ dialectCode: 'common', contentEs: 'a' }]),
+        'usr_1',
+        'es',
+      );
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('maps an unknown dialect (FK failure) to DIALECT_NOT_FOUND', async () => {
+      entry.create.mockRejectedValue({ code: 'P2003' } as never);
+
+      const rejection = service.createFull(
+        fullInput([{ dialectCode: 'nope', contentEs: 'a' }]),
+        'usr_1',
+        'es',
+      );
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'DIALECT_NOT_FOUND' });
+      });
     });
   });
 });

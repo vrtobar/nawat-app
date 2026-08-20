@@ -53,7 +53,6 @@ export const TranslationDetailSchema = z.object({
   partOfSpeech: PartOfSpeechSchema.nullable(),
   exampleNawat: z.string().nullable(),
   audioUrl: z.url().nullable(),
-  priority: z.number().int(),
   isPublished: z.boolean(),
   dialect: DialectSchema,
   createdAt: z.iso.datetime(),
@@ -66,14 +65,18 @@ export type TranslationDetail = z.infer<typeof TranslationDetailSchema>;
 // CREATE / UPDATE DTOs
 // No entryId in the body — shallow nesting: POST /entries/:entryId/translations,
 // the parent entry comes from the path. dialectCode stays in the body (chosen
-// at creation, immutable after).
-// priority has no default here — the service resolves the next free
-// priority per (entry, dialect); the DB enforces uniqueness on that
-// triple (see schema.prisma Translation model).
+// at creation, immutable after) and is unique per entry: a dialect has at most
+// one translation of a word.
+//
+// A word with several senses is ONE translation with a pipe-separated gloss —
+// "hombre | persona" — not several rows. The dictionary backs a learner's
+// recall, so a card prompts the whole word; splitting senses into rows would
+// make "takat → ?" ambiguous to grade and buys nothing the gloss does not.
 // -----------------------------------------------------------------------------
 
 export const CreateTranslationSchema = z.object({
   dialectCode: z.string(),
+  // Spanish gloss; multiple senses pipe-separated, e.g. "hombre | persona".
   contentEs: z.string().min(1),
   contentEn: z.string().optional(),
   phonetic: z.string().optional(),
@@ -82,7 +85,6 @@ export const CreateTranslationSchema = z.object({
   exampleEs: z.string().optional(),
   exampleEn: z.string().optional(),
   audioUrl: z.url().optional(),
-  priority: z.number().int().min(1).optional(),
 });
 
 // PATCH — all fields optional; dialect is immutable after creation
