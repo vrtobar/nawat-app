@@ -9,13 +9,14 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
+import { DictionaryModule } from './modules/dictionary/dictionary.module';
 import { HealthModule } from './modules/health/health.module';
 import { UsersModule } from './modules/users/users.module';
 
 // TODO: feature modules land here as they're implemented. Still to come —
-// DictionaryModule, LessonsModule, ProgressModule, FlashcardsModule,
-// ReviewModule, UploadsModule, AuditModule (@Global), CacheModule, SqsModule.
-// Auth, Health and Users are already below.
+// LessonsModule, ProgressModule, FlashcardsModule, ReviewModule, UploadsModule,
+// AuditModule (@Global), CacheModule, SqsModule. Auth, Health, Users and
+// Dictionary (dialects only so far) are already below.
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -27,6 +28,7 @@ import { UsersModule } from './modules/users/users.module';
       ignoreEnvFile: true,
     }),
     AuthModule,
+    DictionaryModule,
     HealthModule,
     UsersModule,
   ],
