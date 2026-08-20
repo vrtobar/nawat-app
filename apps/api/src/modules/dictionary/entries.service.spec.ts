@@ -1,0 +1,260 @@
+import { prisma } from '@nahuat/database';
+import { DictionaryEntryDetailSchema, DictionaryEntryListItemSchema } from '@nahuat/shared';
+import { NotFoundException } from '@nestjs/common';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { EntriesService } from './entries.service';
+
+vi.mock('@nahuat/database', () => ({
+  // The service imports the Prisma namespace for its where-input types only;
+  // those are erased at runtime, so the mock needs the client alone.
+  Prisma: {},
+  prisma: {
+    entry: {
+      count: vi.fn(),
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+    },
+  },
+}));
+
+const entry = vi.mocked(prisma.entry);
+
+// As in users/dialects specs: the Prisma mock is cast to `never`, so TypeScript
+// checks nothing about the row shapes fed in or the response shape out. Parsing
+// every response through the shared schema's .strict() is what makes the
+// resolution and mapping real — a leaked field, a Date left unserialised, or a
+// primary picked from the wrong dialect fails the parse rather than passing a
+// looser toMatchObject.
+const translation = (overrides: Record<string, unknown> = {}) => ({
+  id: 'tra_1',
+  dialectCode: 'common',
+  priority: 1,
+  partOfSpeech: 'NOUN',
+  phonetic: 'ˈta.kat',
+  audioUrl: null,
+  contentEs: 'hombre',
+  contentEn: 'man',
+  ...overrides,
+});
+
+const entryRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'ent_1',
+  type: 'WORD',
+  nawatContent: 'takat',
+  imageUrl: null,
+  isPublished: true,
+  createdAt: new Date('2026-08-01T09:00:00.000Z'),
+  translations: [translation()],
+  ...overrides,
+});
+
+// Detail rows carry the fuller translation shape plus the inline dialect.
+const detailTranslation = (overrides: Record<string, unknown> = {}) => ({
+  id: 'tra_1',
+  contentEs: 'hombre',
+  contentEn: 'man',
+  exampleNawat: 'ne takat',
+  exampleEs: 'el hombre',
+  exampleEn: 'the man',
+  phonetic: 'ˈta.kat',
+  partOfSpeech: 'NOUN',
+  audioUrl: null,
+  priority: 1,
+  isPublished: true,
+  createdAt: new Date('2026-08-01T09:00:00.000Z'),
+  updatedAt: new Date('2026-08-02T09:00:00.000Z'),
+  dialect: {
+    id: 'dia_1',
+    code: 'common',
+    nameEs: 'Nawat común',
+    nameEn: 'Common Nawat',
+    descriptionEs: 'La forma de uso amplio.',
+    descriptionEn: 'The broadly used form.',
+  },
+  ...overrides,
+});
+
+const detailRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'ent_1',
+  type: 'WORD',
+  nawatContent: 'takat',
+  imageUrl: null,
+  isPublished: true,
+  createdAt: new Date('2026-08-01T09:00:00.000Z'),
+  updatedAt: new Date('2026-08-02T09:00:00.000Z'),
+  creator: { name: 'Victor' },
+  translations: [detailTranslation()],
+  ...overrides,
+});
+
+describe('EntriesService', () => {
+  const service = new EntriesService();
+
+  beforeEach(() => vi.resetAllMocks());
+
+  describe('browse', () => {
+    it('returns list items in the contract shape with resolved Spanish content', async () => {
+      entry.count.mockResolvedValue(1 as never);
+      entry.findMany.mockResolvedValue([entryRow()] as never);
+
+      const result = await service.browse({ page: 1, limit: 20 }, 'es');
+
+      result.data.forEach((item) => DictionaryEntryListItemSchema.strict().parse(item));
+      expect(result.data[0]).toMatchObject({
+        primaryTranslation: { content: 'hombre', locale: 'es', dialectCode: 'common' },
+      });
+      expect(result.meta).toEqual({ total: 1, page: 1, limit: 20, totalPages: 1 });
+    });
+
+    it('resolves English content and derives totalPages from the count', async () => {
+      entry.count.mockResolvedValue(45 as never);
+      entry.findMany.mockResolvedValue([entryRow()] as never);
+
+      const result = await service.browse({ page: 2, limit: 20 }, 'en');
+
+      expect(result.data[0]).toMatchObject({
+        primaryTranslation: { content: 'man', locale: 'en' },
+      });
+      // Page 2 of 45 at 20/page → 3 pages, offset 20.
+      expect(result.meta).toEqual({ total: 45, page: 2, limit: 20, totalPages: 3 });
+      expect(entry.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 20 }));
+    });
+
+    it('prefers the common form over a lower-priority dialect', async () => {
+      // Pre-ordered by (priority, dialect) as the query returns them: an Izalco
+      // form at priority 1 sits before the common form at priority 2. The common
+      // one must still win — it is the headword whatever its priority.
+      entry.count.mockResolvedValue(1 as never);
+      entry.findMany.mockResolvedValue([
+        entryRow({
+          translations: [
+            translation({ id: 'tra_iz', dialectCode: 'izalco', priority: 1 }),
+            translation({ id: 'tra_co', dialectCode: 'common', priority: 2 }),
+          ],
+        }),
+      ] as never);
+
+      const result = await service.browse({ page: 1, limit: 20 }, 'es');
+
+      expect(result.data[0]).toMatchObject({
+        primaryTranslation: { id: 'tra_co', dialectCode: 'common' },
+      });
+    });
+
+    it('falls back to the lowest-priority dialect when no common form exists', async () => {
+      // A town-only word: no common translation, so the first (lowest-priority)
+      // candidate becomes the primary rather than the entry being dropped.
+      entry.count.mockResolvedValue(1 as never);
+      entry.findMany.mockResolvedValue([
+        entryRow({
+          translations: [
+            translation({
+              id: 'tra_iz',
+              dialectCode: 'izalco',
+              priority: 1,
+              contentEs: 'takat izalco',
+            }),
+            translation({ id: 'tra_sd', dialectCode: 'santo-domingo', priority: 2 }),
+          ],
+        }),
+      ] as never);
+
+      const result = await service.browse({ page: 1, limit: 20 }, 'es');
+
+      expect(result.data[0]).toMatchObject({
+        primaryTranslation: { id: 'tra_iz', dialectCode: 'izalco', content: 'takat izalco' },
+      });
+    });
+
+    it('requires English content in the query when the locale is English', async () => {
+      entry.count.mockResolvedValue(0 as never);
+      entry.findMany.mockResolvedValue([] as never);
+
+      await service.browse({ page: 1, limit: 20 }, 'en');
+
+      // The renderable filter must exclude translations without an English form;
+      // for Spanish it must not, since contentEs is mandatory.
+      expect(entry.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            translations: { some: expect.objectContaining({ contentEn: { not: null } }) },
+          }),
+        }),
+      );
+    });
+
+    it('narrows visibility and the primary pick by dialect and part of speech', async () => {
+      entry.count.mockResolvedValue(0 as never);
+      entry.findMany.mockResolvedValue([] as never);
+
+      await service.browse(
+        { page: 1, limit: 20, dialectCode: 'izalco', partOfSpeech: 'VERB', type: 'WORD' },
+        'es',
+      );
+
+      expect(entry.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            type: 'WORD',
+            translations: {
+              some: expect.objectContaining({ dialectCode: 'izalco', partOfSpeech: 'VERB' }),
+            },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('findById', () => {
+    it('returns the entry detail in the contract shape', async () => {
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.findById('ent_1', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({
+        nawatContent: 'takat',
+        creator: { name: 'Victor' },
+      });
+      expect(result.translations[0]).toMatchObject({
+        content: 'hombre',
+        example: 'el hombre',
+        exampleNawat: 'ne takat',
+        locale: 'es',
+      });
+    });
+
+    it('resolves each translation to English, example included', async () => {
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.findById('ent_1', 'en');
+
+      expect(result.translations[0]).toMatchObject({
+        content: 'man',
+        example: 'the man',
+        locale: 'en',
+      });
+    });
+
+    it('keeps a missing example null', async () => {
+      entry.findFirst.mockResolvedValue(
+        detailRow({ translations: [detailTranslation({ exampleEs: null })] }) as never,
+      );
+
+      const result = await service.findById('ent_1', 'es');
+
+      expect(result.translations[0]?.example).toBeNull();
+    });
+
+    it('404s ENTRY_NOT_FOUND when nothing live matches the id', async () => {
+      entry.findFirst.mockResolvedValue(null as never);
+
+      const rejection = service.findById('nope', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+    });
+  });
+});
