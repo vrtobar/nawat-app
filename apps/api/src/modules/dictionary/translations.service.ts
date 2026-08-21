@@ -2,6 +2,7 @@ import { prisma } from '@nahuat/database';
 import {
   API_ERROR_CODES,
   type CreateTranslation,
+  type JwtClaims,
   type Locale,
   type TranslationDetail,
   type UpdateTranslation,
@@ -12,6 +13,7 @@ import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 import {
   dialectNotFound,
   entryNotFound,
+  publishedEditForbidden,
   translationInUse,
   translationNotFound,
 } from './dictionary-errors';
@@ -62,20 +64,31 @@ export class TranslationsService {
     id: string,
     input: UpdateTranslation,
     userId: string,
+    role: JwtClaims['role'],
     locale: Locale,
   ): Promise<TranslationDetail> {
-    const result = await prisma.translation.updateMany({
+    // CONTRIBUTOR may edit only drafts — a published translation is refused so
+    // live content is not changed without review; ADMIN edits published
+    // directly. Read first to decide that and to tell a genuine not-found from a
+    // gated-published one; a soft-deleted row is not found.
+    const existing = await prisma.translation.findFirst({
+      where: { id, deletedAt: null },
+      select: { isPublished: true },
+    });
+    if (!existing) throw translationNotFound();
+    if (existing.isPublished && role !== 'ADMIN') throw publishedEditForbidden();
+
+    await prisma.translation.updateMany({
       where: { id, deletedAt: null },
       data: { ...input, updaterId: userId },
     });
-    if (result.count === 0) throw translationNotFound();
 
     const translation = await prisma.translation.findFirst({
       where: { id },
       select: TRANSLATION_DETAIL_SELECT,
     });
-    // Unreachable: the row was just updated. The guard keeps the type honest
-    // rather than asserting non-null on a nullable findFirst.
+    // Unreachable barring a delete raced between the two reads; the guard keeps
+    // the type honest rather than asserting non-null on a nullable findFirst.
     if (!translation) throw translationNotFound();
     return toTranslationDetail(translation, locale);
   }

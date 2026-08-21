@@ -7,6 +7,7 @@ import {
   type DictionaryEntryDetail,
   type DictionaryEntryListItem,
   type DictionarySearchParams,
+  type JwtClaims,
   type Locale,
   type PaginationMeta,
   type UpdateEntry,
@@ -14,7 +15,12 @@ import {
 import { ConflictException, Injectable } from '@nestjs/common';
 
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
-import { dialectNotFound, entryNotFound, translationInUse } from './dictionary-errors';
+import {
+  dialectNotFound,
+  entryNotFound,
+  publishedEditForbidden,
+  translationInUse,
+} from './dictionary-errors';
 import {
   resolveContent,
   toTranslationDetail,
@@ -309,20 +315,27 @@ export class EntriesService {
     }
   }
 
-  // Update an entry's own fields (CONTRIBUTOR). updateMany, not update, because
-  // the guard `deletedAt: null` is a non-unique predicate and update's where
-  // accepts only unique fields — this way a soft-deleted entry reads as not
-  // found rather than being silently resurrected. updaterId is re-stamped from
-  // the token; the row is then read back in the detail shape.
+  // Update an entry's own fields. CONTRIBUTOR may edit only drafts — a published
+  // entry is refused (publishedEditForbidden) so live content is not changed
+  // without review; ADMIN edits published directly. The row is read first to
+  // decide that and to tell a genuine not-found from a gated-published one; a
+  // soft-deleted row is not found. updaterId is re-stamped from the token.
   async update(
     id: string,
     input: UpdateEntry,
     userId: string,
+    role: JwtClaims['role'],
     locale: Locale,
   ): Promise<DictionaryEntryDetail> {
-    let result;
+    const existing = await prisma.entry.findFirst({
+      where: { id, deletedAt: null },
+      select: { isPublished: true },
+    });
+    if (!existing) throw entryNotFound();
+    if (existing.isPublished && role !== 'ADMIN') throw publishedEditForbidden();
+
     try {
-      result = await prisma.entry.updateMany({
+      await prisma.entry.updateMany({
         where: { id, deletedAt: null },
         data: { ...input, updaterId: userId },
       });
@@ -330,14 +343,13 @@ export class EntriesService {
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
       throw error;
     }
-    if (result.count === 0) throw entryNotFound();
 
     const entry = await prisma.entry.findFirst({
       where: { id },
       select: writeDetailSelect(locale),
     });
-    // Unreachable: the row was just updated. The guard keeps the type honest
-    // rather than asserting non-null on a nullable findFirst.
+    // Unreachable barring a delete raced between the two reads; the guard keeps
+    // the type honest rather than asserting non-null on a nullable findFirst.
     if (!entry) throw entryNotFound();
     return toEntryDetail(entry, locale);
   }

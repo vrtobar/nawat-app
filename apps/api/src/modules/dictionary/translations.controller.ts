@@ -43,7 +43,7 @@ export class TranslationsController {
     @CurrentUser() user: JwtClaims,
     @ContentLocale() locale: Locale,
   ): Promise<TranslationDetail> {
-    return this.translationsService.update(id, body, user.userId, locale);
+    return this.translationsService.update(id, body, user.userId, user.role, locale);
   }
 
   // ADMIN. Removes a single translation from an entry. There is no per-
