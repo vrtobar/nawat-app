@@ -12,7 +12,11 @@ import {
 // ENUMS
 // -----------------------------------------------------------------------------
 
-export const EntryTypeSchema = z.enum(['WORD', 'PHRASE']);
+// WORD and EXPRESSION are dictionary headwords — a single word vs. a multi-word
+// lexical unit (idiom, fixed/common expression, collocation). PHRASE is a full
+// teaching utterance that lives in lessons, not the dictionary browse; the
+// public dictionary reads restrict to WORD/EXPRESSION.
+export const EntryTypeSchema = z.enum(['WORD', 'EXPRESSION', 'PHRASE']);
 export type EntryType = z.infer<typeof EntryTypeSchema>;
 
 // -----------------------------------------------------------------------------
