@@ -5,29 +5,40 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EntriesService } from './entries.service';
 
-vi.mock('@nahuat/database', () => ({
+vi.mock('@nahuat/database', () => {
   // The service uses the Prisma namespace for where-input types (erased at
   // runtime) and for `Prisma.sql`/`Prisma.empty` when composing the raw search
   // query (present at runtime). $queryRaw is mocked to ignore its argument, so
   // the SQL fragments only need to exist, not be real — these tests assert the
   // mapping of the returned rows, not the SQL, which needs a live Postgres.
-  Prisma: {
-    sql: () => ({}),
-    empty: {},
-  },
-  prisma: {
+  const client = {
     entry: {
       count: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
       updateMany: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    },
+    translation: {
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
     },
     $queryRaw: vi.fn(),
-  },
-}));
+  };
+  return {
+    Prisma: { sql: () => ({}), empty: {} },
+    // $transaction runs the callback against the same mocked client, so tx.entry
+    // is the same spy as prisma.entry — a rollback is not modelled, but these
+    // tests assert which writes ran, not durability.
+    prisma: { ...client, $transaction: (cb: (tx: typeof client) => unknown) => cb(client) },
+  };
+});
 
 const entry = vi.mocked(prisma.entry);
+const translationTable = vi.mocked(prisma.translation);
 const queryRaw = vi.mocked(prisma.$queryRaw);
 
 // As in users/dialects specs: the Prisma mock is cast to `never`, so TypeScript
@@ -485,6 +496,130 @@ describe('EntriesService', () => {
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'DIALECT_NOT_FOUND' });
+      });
+    });
+  });
+
+  describe('publish', () => {
+    it('publishes the entry and its draft translations, returning the detail shape', async () => {
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+      translationTable.updateMany.mockResolvedValue({ count: 2 } as never);
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.publish('ent_1', 'usr_9', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(entry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ent_1', deletedAt: null },
+          data: expect.objectContaining({ isPublished: true, updaterId: 'usr_9' }),
+        }),
+      );
+      // Cascades to the entry's own draft translations only.
+      expect(translationTable.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { entryId: 'ent_1', deletedAt: null, isPublished: false },
+          data: expect.objectContaining({ isPublished: true, updaterId: 'usr_9' }),
+        }),
+      );
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live row matches, cascading to nothing', async () => {
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.publish('nope', 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(entry.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('delete', () => {
+    // A translation.findMany row as the cascade selects it: id, isPublished, and
+    // the _count of Restrict children.
+    const ref = (id: string, isPublished: boolean, counts: Record<string, number> = {}) => ({
+      id,
+      isPublished,
+      _count: {
+        flashcards: 0,
+        lessonVocabulary: 0,
+        exerciseTranslations: 0,
+        userCardProgress: 0,
+        ...counts,
+      },
+    });
+
+    it('soft-deletes a published entry and its published translations', async () => {
+      entry.findFirst.mockResolvedValue({ isPublished: true } as never);
+      translationTable.findMany.mockResolvedValue([ref('tra_1', true)] as never);
+
+      await service.delete('ent_1', 'usr_1');
+
+      expect(translationTable.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['tra_1'] } },
+          data: expect.objectContaining({ deletedAt: expect.any(Date), updaterId: 'usr_1' }),
+        }),
+      );
+      expect(entry.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ent_1' } }),
+      );
+      expect(translationTable.deleteMany).not.toHaveBeenCalled();
+      expect(entry.delete).not.toHaveBeenCalled();
+    });
+
+    it('hard-deletes a draft entry and its draft translations', async () => {
+      entry.findFirst.mockResolvedValue({ isPublished: false } as never);
+      translationTable.findMany.mockResolvedValue([ref('tra_1', false)] as never);
+
+      await service.delete('ent_1', 'usr_1');
+
+      expect(translationTable.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['tra_1'] } },
+      });
+      expect(entry.delete).toHaveBeenCalledWith({ where: { id: 'ent_1' } });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(entry.update).not.toHaveBeenCalled();
+    });
+
+    it('409s TRANSLATION_IN_USE and removes nothing when a translation is referenced', async () => {
+      entry.findFirst.mockResolvedValue({ isPublished: true } as never);
+      translationTable.findMany.mockResolvedValue([
+        ref('tra_1', true, { exerciseTranslations: 2 }),
+      ] as never);
+
+      const rejection = service.delete('ent_1', 'usr_1');
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_IN_USE' });
+      });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(translationTable.deleteMany).not.toHaveBeenCalled();
+      expect(entry.update).not.toHaveBeenCalled();
+      expect(entry.delete).not.toHaveBeenCalled();
+    });
+
+    it('hard-deletes an entry with no translations', async () => {
+      entry.findFirst.mockResolvedValue({ isPublished: false } as never);
+      translationTable.findMany.mockResolvedValue([] as never);
+
+      await service.delete('ent_1', 'usr_1');
+
+      expect(entry.delete).toHaveBeenCalledWith({ where: { id: 'ent_1' } });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(translationTable.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live row matches', async () => {
+      entry.findFirst.mockResolvedValue(null as never);
+
+      const rejection = service.delete('nope', 'usr_1');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
       });
     });
   });

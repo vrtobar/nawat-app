@@ -17,9 +17,23 @@ vi.mock('@nahuat/database', () => ({
       create: vi.fn(),
       updateMany: vi.fn(),
       findFirst: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
     },
   },
 }));
+
+// The delete path selects isPublished plus a _count of the Restrict children.
+const deleteRow = (isPublished: boolean, counts: Record<string, number> = {}) => ({
+  isPublished,
+  _count: {
+    flashcards: 0,
+    lessonVocabulary: 0,
+    exerciseTranslations: 0,
+    userCardProgress: 0,
+    ...counts,
+  },
+});
 
 const entry = vi.mocked(prisma.entry);
 const translation = vi.mocked(prisma.translation);
@@ -154,6 +168,55 @@ describe('TranslationsService', () => {
         expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
       });
       expect(translation.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('delete', () => {
+    it('soft-deletes a published translation with no references', async () => {
+      translation.findFirst.mockResolvedValue(deleteRow(true) as never);
+
+      await service.delete('tra_1', 'usr_1');
+
+      expect(translation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tra_1' },
+          data: expect.objectContaining({ deletedAt: expect.any(Date), updaterId: 'usr_1' }),
+        }),
+      );
+      expect(translation.delete).not.toHaveBeenCalled();
+    });
+
+    it('hard-deletes a draft translation with no references', async () => {
+      translation.findFirst.mockResolvedValue(deleteRow(false) as never);
+
+      await service.delete('tra_1', 'usr_1');
+
+      expect(translation.delete).toHaveBeenCalledWith({ where: { id: 'tra_1' } });
+      expect(translation.update).not.toHaveBeenCalled();
+    });
+
+    it('409s TRANSLATION_IN_USE and removes nothing when a reference exists', async () => {
+      translation.findFirst.mockResolvedValue(
+        deleteRow(true, { exerciseTranslations: 2 }) as never,
+      );
+
+      const rejection = service.delete('tra_1', 'usr_1');
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_IN_USE' });
+      });
+      expect(translation.update).not.toHaveBeenCalled();
+      expect(translation.delete).not.toHaveBeenCalled();
+    });
+
+    it('404s TRANSLATION_NOT_FOUND when no live row matches', async () => {
+      translation.findFirst.mockResolvedValue(null as never);
+
+      const rejection = service.delete('nope', 'usr_1');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
+      });
     });
   });
 });

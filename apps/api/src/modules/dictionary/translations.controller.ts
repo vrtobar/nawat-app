@@ -7,7 +7,7 @@ import {
   type UpdateTranslation,
   UpdateTranslationSchema,
 } from '@nahuat/shared';
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Patch, Post } from '@nestjs/common';
 
 import { ContentLocale } from '../../common/decorators/content-locale.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -44,5 +44,16 @@ export class TranslationsController {
     @ContentLocale() locale: Locale,
   ): Promise<TranslationDetail> {
     return this.translationsService.update(id, body, user.userId, locale);
+  }
+
+  // ADMIN. Removes a single translation from an entry. There is no per-
+  // translation publish — publishing is entry-level (PATCH /entries/:id/publish
+  // cascades) — but removing one wrong translation without touching the rest is
+  // a real need, so delete stays granular. No @HttpCode(204): the void return
+  // becomes { success: true, data: null } at 200 through TransformInterceptor.
+  @Roles('ADMIN')
+  @Delete('translations/:id')
+  remove(@Param('id') id: string, @CurrentUser() user: JwtClaims): Promise<void> {
+    return this.translationsService.delete(id, user.userId);
   }
 }

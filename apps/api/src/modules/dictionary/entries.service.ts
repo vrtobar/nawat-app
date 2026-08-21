@@ -14,7 +14,7 @@ import {
 import { ConflictException, Injectable } from '@nestjs/common';
 
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
-import { dialectNotFound, entryNotFound } from './dictionary-errors';
+import { dialectNotFound, entryNotFound, translationInUse } from './dictionary-errors';
 import {
   resolveContent,
   toTranslationDetail,
@@ -377,6 +377,101 @@ export class EntriesService {
       if (isPrismaError(error, PRISMA_ERROR.FK_CONSTRAINT)) throw dialectNotFound();
       throw error;
     }
+  }
+
+  // Publish an entry and its draft translations in one action (ADMIN). Publish
+  // is entry-level: there is no standalone "publish one translation", so this is
+  // the single button that takes an entry live. Unconditional — ADR 15 exempts
+  // the dictionary from the publish gate lessons carry, so an entry is
+  // publishable with Spanish alone. Idempotent (re-running it publishes any
+  // translation added since), transactional, and guarded on deletedAt.
+  async publish(id: string, userId: string, locale: Locale): Promise<DictionaryEntryDetail> {
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.entry.updateMany({
+        where: { id, deletedAt: null },
+        data: { isPublished: true, updaterId: userId },
+      });
+      if (result.count === 0) throw entryNotFound();
+      // Only the drafts, so already-published rows are not needlessly re-stamped.
+      await tx.translation.updateMany({
+        where: { entryId: id, deletedAt: null, isPublished: false },
+        data: { isPublished: true, updaterId: userId },
+      });
+    });
+
+    const entry = await prisma.entry.findFirst({
+      where: { id },
+      select: writeDetailSelect(locale),
+    });
+    if (!entry) throw entryNotFound();
+    return toEntryDetail(entry, locale);
+  }
+
+  // Delete an entry and its translations in one transaction (ADMIN). An entry
+  // owns its translations — meaningless without it — so removing the entry
+  // removes them, all-or-nothing: a failure mid-cascade rolls the whole thing
+  // back rather than leaving an entry stripped of some translations. Any
+  // translation still referenced by learning content blocks the delete
+  // (TRANSLATION_IN_USE). Soft delete keeps published rows for history, hard
+  // delete removes drafts; the entry follows its own published/draft rule. A
+  // draft entry can only hold draft translations — nothing publishes a
+  // translation but the entry publish — so its hard delete never strands a row.
+  async delete(id: string, userId: string): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      const entry = await tx.entry.findFirst({
+        where: { id, deletedAt: null },
+        select: { isPublished: true },
+      });
+      if (!entry) throw entryNotFound();
+
+      const translations = await tx.translation.findMany({
+        where: { entryId: id, deletedAt: null },
+        select: {
+          id: true,
+          isPublished: true,
+          _count: {
+            select: {
+              flashcards: true,
+              lessonVocabulary: true,
+              exerciseTranslations: true,
+              userCardProgress: true,
+            },
+          },
+        },
+      });
+
+      const references = translations.reduce(
+        (sum, t) =>
+          sum +
+          t._count.flashcards +
+          t._count.lessonVocabulary +
+          t._count.exerciseTranslations +
+          t._count.userCardProgress,
+        0,
+      );
+      if (references > 0) throw translationInUse(references);
+
+      const publishedIds = translations.filter((t) => t.isPublished).map((t) => t.id);
+      const draftIds = translations.filter((t) => !t.isPublished).map((t) => t.id);
+      if (publishedIds.length > 0) {
+        await tx.translation.updateMany({
+          where: { id: { in: publishedIds } },
+          data: { deletedAt: new Date(), updaterId: userId },
+        });
+      }
+      if (draftIds.length > 0) {
+        await tx.translation.deleteMany({ where: { id: { in: draftIds } } });
+      }
+
+      if (entry.isPublished) {
+        await tx.entry.update({
+          where: { id },
+          data: { deletedAt: new Date(), updaterId: userId },
+        });
+      } else {
+        await tx.entry.delete({ where: { id } });
+      }
+    });
   }
 }
 
