@@ -130,6 +130,11 @@ model Entry {
   id           String    @id @default(cuid())
   type         EntryType @default(WORD)
   nawatContent String    @unique @map("nawat_content")
+  // Canonical public URL identifier, derived from nawatContent by slugifyNawat
+  // (@nahuat/shared) on write. @unique so two distinct headwords that fold to
+  // the same slug fail loudly (ENTRY_SLUG_CONFLICT) instead of colliding
+  // silently. See docs/adr/0016-dictionary-entry-slugs.
+  slug         String    @unique
   imageUrl     String?   @map("image_url")
   imageKey     String?   @map("image_key") // S3 key — source of truth for file location
 

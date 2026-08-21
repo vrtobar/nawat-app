@@ -3,7 +3,7 @@ import 'dotenv/config'; // db:seed runs tsx directly — nothing else loads .env
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CreateEntrySchema, CreateTranslationSchema } from '@nahuat/shared';
+import { CreateEntrySchema, CreateTranslationSchema, slugifyNawat } from '@nahuat/shared';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { z } from 'zod';
 
@@ -136,6 +136,7 @@ async function seedDevContent(): Promise<void> {
       where: { nawatContent: entry.nawatContent },
       create: {
         nawatContent: entry.nawatContent,
+        slug: slugifyNawat(entry.nawatContent),
         type: entry.type,
         isPublished: true,
         creatorId: author.id,
