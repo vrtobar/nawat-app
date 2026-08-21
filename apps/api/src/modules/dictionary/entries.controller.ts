@@ -56,6 +56,18 @@ export class EntriesController {
     return this.entriesService.search(query, locale);
   }
 
+  // The dictionary's canonical detail path — /dictionary/[slug] resolves here.
+  // A literal first segment, so declared before `:id` (see the class note), or
+  // `by-slug` would be matched as an entry id.
+  @Public()
+  @Get('by-slug/:slug')
+  detailBySlug(
+    @Param('slug') slug: string,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.findBySlug(slug, locale);
+  }
+
   @Public()
   @Get(':id')
   detail(@Param('id') id: string, @ContentLocale() locale: Locale): Promise<DictionaryEntryDetail> {
