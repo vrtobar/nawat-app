@@ -1,6 +1,6 @@
 import { prisma } from '@nahuat/database';
 import { TranslationDetailSchema } from '@nahuat/shared';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TranslationsService } from './translations.service';
@@ -135,22 +135,21 @@ describe('TranslationsService', () => {
   });
 
   describe('update', () => {
-    it('updates a live translation and returns the detail shape', async () => {
+    it('updates a draft translation (CONTRIBUTOR), re-stamping the editor', async () => {
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never) // existence + gate check
+        .mockResolvedValueOnce(detailRow() as never); // read-back
       translation.updateMany.mockResolvedValue({ count: 1 } as never);
-      translation.findFirst.mockResolvedValue(detailRow() as never);
 
-      const result = await service.update('tra_1', { contentEs: 'varón' }, 'usr_1', 'es');
+      const result = await service.update(
+        'tra_1',
+        { contentEs: 'varón' },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
 
       TranslationDetailSchema.strict().parse(result);
-      expect(result).toMatchObject({ id: 'tra_1', locale: 'es' });
-    });
-
-    it('re-stamps updaterId and guards on deletedAt', async () => {
-      translation.updateMany.mockResolvedValue({ count: 1 } as never);
-      translation.findFirst.mockResolvedValue(detailRow() as never);
-
-      await service.update('tra_1', { phonetic: 'x' }, 'usr_9', 'es');
-
       expect(translation.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'tra_1', deletedAt: null },
@@ -159,15 +158,38 @@ describe('TranslationsService', () => {
       );
     });
 
-    it('404s TRANSLATION_NOT_FOUND when no live row matches, without reading back', async () => {
-      translation.updateMany.mockResolvedValue({ count: 0 } as never);
+    it('refuses a CONTRIBUTOR editing a published translation (FORBIDDEN), without writing', async () => {
+      translation.findFirst.mockResolvedValueOnce({ isPublished: true } as never);
 
-      const rejection = service.update('nope', { phonetic: 'x' }, 'usr_1', 'es');
+      const rejection = service.update('tra_1', { contentEs: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(ForbiddenException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'FORBIDDEN' });
+      });
+      expect(translation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('lets an ADMIN edit a published translation', async () => {
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: true } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.update('tra_1', { contentEs: 'x' }, 'adm_1', 'ADMIN', 'es');
+
+      TranslationDetailSchema.strict().parse(result);
+      expect(translation.updateMany).toHaveBeenCalled();
+    });
+
+    it('404s TRANSLATION_NOT_FOUND when no live row matches, without writing', async () => {
+      translation.findFirst.mockResolvedValueOnce(null as never);
+
+      const rejection = service.update('nope', { phonetic: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
       });
-      expect(translation.findFirst).not.toHaveBeenCalled();
+      expect(translation.updateMany).not.toHaveBeenCalled();
     });
   });
 

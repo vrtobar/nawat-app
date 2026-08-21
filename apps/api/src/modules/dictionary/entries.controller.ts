@@ -96,7 +96,7 @@ export class EntriesController {
     @CurrentUser() user: JwtClaims,
     @ContentLocale() locale: Locale,
   ): Promise<DictionaryEntryDetail> {
-    return this.entriesService.update(id, body, user.userId, locale);
+    return this.entriesService.update(id, body, user.userId, user.role, locale);
   }
 
   // ADMIN lifecycle. `:id/publish` is more specific than `:id`, so it does not

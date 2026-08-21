@@ -1,5 +1,5 @@
 import { API_ERROR_CODES } from '@nahuat/shared';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
 // Factories shared across the dictionary services. The not-found ones map to
 // their resource's *_NOT_FOUND code so a client can tell "no such entry" from
@@ -31,6 +31,18 @@ export function dialectNotFound(): NotFoundException {
   return new NotFoundException({
     code: API_ERROR_CODES.DIALECT_NOT_FOUND,
     message: 'Dialect not found',
+  });
+}
+
+// A CONTRIBUTOR may edit only draft content — a published translation or entry
+// is refused, so live content is not changed without an admin's review. ADMIN
+// edits published content directly. Interim gate for the editorial-review module
+// (see BACKLOG): once that exists, a contributor's edit becomes a proposal
+// rather than a refusal. Raised by both entry and translation update.
+export function publishedEditForbidden(): ForbiddenException {
+  return new ForbiddenException({
+    code: API_ERROR_CODES.FORBIDDEN,
+    message: 'Published content can only be edited by an admin',
   });
 }
 
