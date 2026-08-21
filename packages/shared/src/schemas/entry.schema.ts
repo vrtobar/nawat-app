@@ -19,6 +19,14 @@ import {
 export const EntryTypeSchema = z.enum(['WORD', 'EXPRESSION', 'PHRASE']);
 export type EntryType = z.infer<typeof EntryTypeSchema>;
 
+// The dictionary-visible subset. PHRASE is lesson content, so the public browse
+// and search neither accept it as a ?type= filter nor return it. Derived from
+// EntryTypeSchema with .exclude so it tracks the enum as it grows;
+// DICTIONARY_ENTRY_TYPES feeds the service's baseline `type IN (...)` fence.
+export const DictionaryEntryTypeSchema = EntryTypeSchema.exclude(['PHRASE']);
+export type DictionaryEntryType = z.infer<typeof DictionaryEntryTypeSchema>;
+export const DICTIONARY_ENTRY_TYPES = DictionaryEntryTypeSchema.options;
+
 // -----------------------------------------------------------------------------
 // PRIMARY TRANSLATION INLINE
 // Lean shape embedded in list items — just enough to render a dictionary row
@@ -116,7 +124,7 @@ export type DictionaryEntryDetail = z.infer<typeof DictionaryEntryDetailSchema>;
 // -----------------------------------------------------------------------------
 
 export const DictionaryBrowseParamsSchema = PaginationParamsSchema.extend({
-  type: EntryTypeSchema.optional(),
+  type: DictionaryEntryTypeSchema.optional(),
   partOfSpeech: PartOfSpeechSchema.optional(),
   dialectCode: z.string().optional(),
   isPublished: z.stringbool().optional(),
@@ -124,7 +132,7 @@ export const DictionaryBrowseParamsSchema = PaginationParamsSchema.extend({
 
 export const DictionarySearchParamsSchema = PaginationParamsSchema.extend({
   q: z.string().min(1), // required — endpoint 400s without it
-  type: EntryTypeSchema.optional(),
+  type: DictionaryEntryTypeSchema.optional(),
   dialectCode: z.string().optional(),
 });
 

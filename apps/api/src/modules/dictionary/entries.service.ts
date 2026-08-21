@@ -3,6 +3,7 @@ import {
   API_ERROR_CODES,
   type CreateEntry,
   type CreateFullEntry,
+  DICTIONARY_ENTRY_TYPES,
   type DictionaryBrowseParams,
   type DictionaryEntryDetail,
   type DictionaryEntryListItem,
@@ -103,7 +104,11 @@ export class EntriesService {
     const where: Prisma.EntryWhereInput = {
       isPublished: true,
       deletedAt: null,
-      ...(params.type ? { type: params.type } : {}),
+      // PHRASE is lesson-only. Fence the public dictionary to WORD/EXPRESSION; a
+      // ?type= (constrained to that subset by DictionaryBrowseParamsSchema)
+      // narrows within it. Hardcoded like isPublished above — a privileged
+      // browse that shows every type lands with the authenticated admin paths.
+      type: params.type ?? { in: [...DICTIONARY_ENTRY_TYPES] },
       // Semi-join, not a JS filter: an entry with no renderable translation is
       // excluded in SQL so the page counts stay correct. Matches entries_live_idx
       // (WHERE is_published AND deleted_at IS NULL, ordered by nawat_content).
@@ -171,6 +176,11 @@ export class EntriesService {
     const typeFilter = params.type
       ? Prisma.sql`AND e.type = ${params.type}::"EntryType"`
       : Prisma.empty;
+    // PHRASE is lesson-only — fence search to the dictionary subset, same rule
+    // as browse. A ?type= (already within the subset) narrows further above.
+    const dictionaryTypeFilter = Prisma.sql`AND e.type IN (${Prisma.join(
+      DICTIONARY_ENTRY_TYPES.map((t) => Prisma.sql`${t}::"EntryType"`),
+    )})`;
 
     const matches = Prisma.sql`
       FROM entries e
@@ -182,6 +192,7 @@ export class EntriesService {
        ${dialectFilter}
       WHERE e.is_published = true
         AND e.deleted_at IS NULL
+        ${dictionaryTypeFilter}
         ${typeFilter}
         AND (
           immutable_unaccent(e.nawat_content) % immutable_unaccent(${q})
