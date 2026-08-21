@@ -17,6 +17,7 @@ export * from './schemas/user.schema';
 export * from './schemas/dialect.schema';
 export * from './schemas/translation.schema';
 export * from './schemas/entry.schema';
+export * from './slugify';
 
 // Flashcards
 export * from './schemas/flashcard.schema';
