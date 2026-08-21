@@ -1,5 +1,10 @@
 import { prisma } from '@nahuat/database';
-import { DictionaryEntryDetailSchema, DictionaryEntryListItemSchema } from '@nahuat/shared';
+import {
+  DictionaryBrowseParamsSchema,
+  DictionaryEntryDetailSchema,
+  DictionaryEntryListItemSchema,
+  DictionarySearchParamsSchema,
+} from '@nahuat/shared';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +34,7 @@ vi.mock('@nahuat/database', () => {
     $queryRaw: vi.fn(),
   };
   return {
-    Prisma: { sql: () => ({}), empty: {} },
+    Prisma: { sql: () => ({}), join: () => ({}), empty: {} },
     // $transaction runs the callback against the same mocked client, so tx.entry
     // is the same spy as prisma.entry — a rollback is not modelled, but these
     // tests assert which writes ran, not durability.
@@ -226,6 +231,21 @@ describe('EntriesService', () => {
               some: expect.objectContaining({ dialectCode: 'izalco', partOfSpeech: 'VERB' }),
             },
           }),
+        }),
+      );
+    });
+
+    it('fences the public dictionary to WORD and EXPRESSION when no type is given', async () => {
+      entry.count.mockResolvedValue(0 as never);
+      entry.findMany.mockResolvedValue([] as never);
+
+      // PHRASE is lesson-only, so an unfiltered browse must exclude it rather
+      // than return every type.
+      await service.browse({ page: 1, limit: 20 }, 'es');
+
+      expect(entry.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ type: { in: ['WORD', 'EXPRESSION'] } }),
         }),
       );
     });
@@ -657,5 +677,28 @@ describe('EntriesService', () => {
         expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
       });
     });
+  });
+});
+
+describe('dictionary type params', () => {
+  // The service fences results to the WORD/EXPRESSION subset, but that fence is
+  // only load-bearing because the query params refuse PHRASE at the boundary —
+  // a PHRASE ?type= would otherwise select lesson content straight through.
+  it('reject PHRASE and accept the WORD/EXPRESSION subset', () => {
+    expect(
+      DictionaryBrowseParamsSchema.safeParse({ page: 1, limit: 20, type: 'PHRASE' }).success,
+    ).toBe(false);
+    expect(
+      DictionaryBrowseParamsSchema.safeParse({ page: 1, limit: 20, type: 'EXPRESSION' }).success,
+    ).toBe(true);
+
+    expect(
+      DictionarySearchParamsSchema.safeParse({ q: 'ne', page: 1, limit: 20, type: 'PHRASE' })
+        .success,
+    ).toBe(false);
+    expect(
+      DictionarySearchParamsSchema.safeParse({ q: 'ne', page: 1, limit: 20, type: 'EXPRESSION' })
+        .success,
+    ).toBe(true);
   });
 });
