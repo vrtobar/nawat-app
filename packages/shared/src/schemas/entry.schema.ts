@@ -77,6 +77,7 @@ export const DictionaryEntryListItemSchema = z.object({
   id: z.string(),
   type: EntryTypeSchema,
   nawatContent: z.string(),
+  slug: z.string(), // canonical URL identifier — /dictionary/[slug]
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   primaryTranslation: PrimaryTranslationSchema,
@@ -99,6 +100,7 @@ export const DictionaryEntryDetailSchema = z.object({
   id: z.string(),
   type: EntryTypeSchema,
   nawatContent: z.string(),
+  slug: z.string(), // canonical URL identifier — /dictionary/[slug]
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   creator: z.object({

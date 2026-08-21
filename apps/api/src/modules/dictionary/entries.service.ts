@@ -11,11 +11,12 @@ import {
   type JwtClaims,
   type Locale,
   type PaginationMeta,
+  slugifyNawat,
   type UpdateEntry,
 } from '@nahuat/shared';
 import { ConflictException, Injectable } from '@nestjs/common';
 
-import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
+import { isPrismaError, PRISMA_ERROR, uniqueViolationFields } from '../../common/prisma-error';
 import {
   dialectNotFound,
   entryNotFound,
@@ -50,6 +51,7 @@ type ListEntryRow = Prisma.EntryGetPayload<{
     id: true;
     type: true;
     nawatContent: true;
+    slug: true;
     imageUrl: true;
     isPublished: true;
     createdAt: true;
@@ -68,6 +70,7 @@ type EntryDetailRow = Prisma.EntryGetPayload<{
     id: true;
     type: true;
     nawatContent: true;
+    slug: true;
     imageUrl: true;
     isPublished: true;
     createdAt: true;
@@ -128,6 +131,7 @@ export class EntriesService {
           id: true,
           type: true,
           nawatContent: true,
+          slug: true,
           imageUrl: true,
           isPublished: true,
           createdAt: true,
@@ -248,6 +252,7 @@ export class EntriesService {
         id: true,
         type: true,
         nawatContent: true,
+        slug: true,
         imageUrl: true,
         isPublished: true,
         createdAt: true,
@@ -279,25 +284,24 @@ export class EntriesService {
   async findById(id: string, locale: Locale): Promise<DictionaryEntryDetail> {
     const entry = await prisma.entry.findFirst({
       where: { id, isPublished: true, deletedAt: null },
-      select: {
-        id: true,
-        type: true,
-        nawatContent: true,
-        imageUrl: true,
-        isPublished: true,
-        createdAt: true,
-        updatedAt: true,
-        creator: { select: { name: true } },
-        translations: {
-          where: {
-            isPublished: true,
-            deletedAt: null,
-            ...(locale === 'en' ? { contentEn: { not: null } } : {}),
-          },
-          orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
-          select: TRANSLATION_DETAIL_SELECT,
-        },
-      },
+      select: readDetailSelect(locale),
+    });
+
+    if (!entry) throw entryNotFound();
+
+    return toEntryDetail(entry, locale);
+  }
+
+  // Public entry detail by slug — the dictionary's canonical URL path
+  // (/dictionary/[slug]). Same visibility predicate and shape as findById: an
+  // unpublished, soft-deleted, or non-existent slug is reported as not found, so
+  // the two ways into the same page behave identically. No type filter, matching
+  // findById — a slug is only surfaced by browse/search, which already exclude
+  // PHRASE, so the dictionary UI never hands out a lesson-phrase slug.
+  async findBySlug(slug: string, locale: Locale): Promise<DictionaryEntryDetail> {
+    const entry = await prisma.entry.findFirst({
+      where: { slug, isPublished: true, deletedAt: null },
+      select: readDetailSelect(locale),
     });
 
     if (!entry) throw entryNotFound();
@@ -313,11 +317,19 @@ export class EntriesService {
   async create(input: CreateEntry, userId: string, locale: Locale): Promise<DictionaryEntryDetail> {
     try {
       const entry = await prisma.entry.create({
-        data: { ...input, creatorId: userId, updaterId: userId },
+        data: {
+          ...input,
+          slug: slugifyNawat(input.nawatContent),
+          creatorId: userId,
+          updaterId: userId,
+        },
         select: writeDetailSelect(locale),
       });
       return toEntryDetail(entry, locale);
     } catch (error) {
+      // slug is unique too — two headwords that fold to the same slug collide
+      // there, not on nawatContent, and want the clearer message. Checked first.
+      if (uniqueViolationFields(error).includes('slug')) throw entrySlugConflict();
       // nawatContent is unique — a duplicate headword collides. Generic
       // CONFLICT: the client knows the word already exists without the response
       // disclosing which id holds it.
@@ -348,9 +360,16 @@ export class EntriesService {
     try {
       await prisma.entry.updateMany({
         where: { id, deletedAt: null },
-        data: { ...input, updaterId: userId },
+        data: {
+          ...input,
+          // Regenerate the slug only when the headword changes; a rename can
+          // collide with another entry's slug, same as a create.
+          ...(input.nawatContent !== undefined ? { slug: slugifyNawat(input.nawatContent) } : {}),
+          updaterId: userId,
+        },
       });
     } catch (error) {
+      if (uniqueViolationFields(error).includes('slug')) throw entrySlugConflict();
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
       throw error;
     }
@@ -385,6 +404,7 @@ export class EntriesService {
       const created = await prisma.entry.create({
         data: {
           ...entry,
+          slug: slugifyNawat(entry.nawatContent),
           creatorId: userId,
           updaterId: userId,
           translations: { create: translationData },
@@ -393,6 +413,8 @@ export class EntriesService {
       });
       return toEntryDetail(created, locale);
     } catch (error) {
+      // A slug collision is distinct from the others below and clearer named.
+      if (uniqueViolationFields(error).includes('slug')) throw entrySlugConflict();
       // UNIQUE_VIOLATION is either a duplicate nawatContent or two batch
       // translations sharing a dialect (one translation per dialect per entry);
       // both are a client conflict. A FK failure is an unknown dialectCode.
@@ -498,6 +520,32 @@ export class EntriesService {
   }
 }
 
+// The public entry-detail select: published, non-deleted translations only,
+// resolved to one locale. Shared by findById and findBySlug so the two paths to
+// the same page — by id and by the canonical slug — return an identical shape.
+function readDetailSelect(locale: Locale) {
+  return {
+    id: true,
+    type: true,
+    nawatContent: true,
+    slug: true,
+    imageUrl: true,
+    isPublished: true,
+    createdAt: true,
+    updatedAt: true,
+    creator: { select: { name: true } },
+    translations: {
+      where: {
+        isPublished: true,
+        deletedAt: null,
+        ...(locale === 'en' ? { contentEn: { not: null } } : {}),
+      },
+      orderBy: [{ dialect: { precedence: 'asc' } }, { dialectCode: 'asc' }],
+      select: TRANSLATION_DETAIL_SELECT,
+    },
+  } satisfies Prisma.EntrySelect;
+}
+
 // The entry detail select for write responses. Unlike the public read it does
 // not restrict the entry to published rows — a contributor gets their draft
 // back — and it includes draft translations (deletedAt: null only), so a
@@ -509,6 +557,7 @@ function writeDetailSelect(locale: Locale) {
     id: true,
     type: true,
     nawatContent: true,
+    slug: true,
     imageUrl: true,
     isPublished: true,
     createdAt: true,
@@ -533,6 +582,7 @@ function toEntryDetail(entry: EntryDetailRow, locale: Locale): DictionaryEntryDe
     id: entry.id,
     type: entry.type,
     nawatContent: entry.nawatContent,
+    slug: entry.slug,
     imageUrl: entry.imageUrl,
     isPublished: entry.isPublished,
     creator: { name: entry.creator.name },
@@ -549,6 +599,17 @@ function entryConflict(): ConflictException {
   });
 }
 
+// Distinct from entryConflict: the headword is not a duplicate (nawatContent is
+// unique and passed), but it slugifies to a value another entry already holds —
+// two distinct spellings folding together. Named separately so an admin sees a
+// slug collision to resolve, not a false "already exists".
+function entrySlugConflict(): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.ENTRY_SLUG_CONFLICT,
+    message: 'Another entry already uses the URL slug this Nawat content produces',
+  });
+}
+
 // Maps a browse/search row to a list item, resolving its primary translation
 // to one locale. Shared by both endpoints so the headword rule and the
 // content resolution live in one place.
@@ -558,6 +619,7 @@ function toListItem(entry: ListEntryRow, locale: Locale): DictionaryEntryListIte
     id: entry.id,
     type: entry.type,
     nawatContent: entry.nawatContent,
+    slug: entry.slug,
     imageUrl: entry.imageUrl,
     isPublished: entry.isPublished,
     createdAt: entry.createdAt.toISOString(),

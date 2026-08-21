@@ -27,3 +27,19 @@ export function isPrismaError(error: unknown, code: string): boolean {
     (error as { code: unknown }).code === code
   );
 }
+
+// The columns a P2002 unique violation was raised on, so a service can tell one
+// unique constraint from another (a slug collision vs. a duplicate headword).
+// Prisma's documented `meta.target` is undefined under the pg driver adapter
+// (verified against Prisma 7.9) — the columns live on the adapter's error cause
+// instead, at meta.driverAdapterError.cause.constraint.fields. This reaches into
+// that adapter-specific shape, so it is the one place coupled to it; it returns
+// [] on any other shape, so a field check falls through to the generic conflict
+// rather than throwing if a future Prisma version moves it.
+export function uniqueViolationFields(error: unknown): string[] {
+  if (!isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) return [];
+  const fields = (
+    error as { meta?: { driverAdapterError?: { cause?: { constraint?: { fields?: unknown } } } } }
+  ).meta?.driverAdapterError?.cause?.constraint?.fields;
+  return Array.isArray(fields) ? fields.filter((f): f is string => typeof f === 'string') : [];
+}

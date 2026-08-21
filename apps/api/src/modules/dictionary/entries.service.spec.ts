@@ -67,6 +67,7 @@ const entryRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'ent_1',
   type: 'WORD',
   nawatContent: 'takat',
+  slug: 'takat',
   imageUrl: null,
   isPublished: true,
   createdAt: new Date('2026-08-01T09:00:00.000Z'),
@@ -104,6 +105,7 @@ const detailRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'ent_1',
   type: 'WORD',
   nawatContent: 'takat',
+  slug: 'takat',
   imageUrl: null,
   isPublished: true,
   createdAt: new Date('2026-08-01T09:00:00.000Z'),
@@ -307,6 +309,30 @@ describe('EntriesService', () => {
   // counts distinct matches. entry.findMany then hydrates. The SQL itself
   // (accent folding, similarity threshold, index use) is beyond a unit test and
   // needs a live Postgres; these cover the ordering, hydration and meta.
+  describe('findBySlug', () => {
+    it('returns the entry detail for a published slug, in the contract shape', async () => {
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.findBySlug('takat', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ slug: 'takat', nawatContent: 'takat' });
+      expect(entry.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { slug: 'takat', isPublished: true, deletedAt: null } }),
+      );
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live entry has that slug', async () => {
+      entry.findFirst.mockResolvedValue(null as never);
+
+      const rejection = service.findBySlug('nope', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+    });
+  });
+
   describe('search', () => {
     it('hydrates in the ranking order, not alphabetically, in the contract shape', async () => {
       queryRaw
@@ -394,6 +420,31 @@ describe('EntriesService', () => {
       await expect(rejection).rejects.toBeInstanceOf(ConflictException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'CONFLICT' });
+      });
+    });
+
+    it('generates the slug from nawatContent', async () => {
+      entry.create.mockResolvedValue(detailRow({ isPublished: false, translations: [] }) as never);
+
+      await service.create({ nawatContent: 'Ken Tinemi', type: 'EXPRESSION' }, 'usr_1', 'es');
+
+      expect(entry.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ slug: 'ken-tinemi' }) }),
+      );
+    });
+
+    it('maps a slug collision to ENTRY_SLUG_CONFLICT, distinct from a duplicate headword', async () => {
+      // The pg driver adapter reports the violated columns on the error cause,
+      // not on meta.target — a fold-collision fires on the slug constraint.
+      entry.create.mockRejectedValue({
+        code: 'P2002',
+        meta: { driverAdapterError: { cause: { constraint: { fields: ['slug'] } } } },
+      } as never);
+
+      const rejection = service.create({ nawatContent: 'né', type: 'WORD' }, 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_SLUG_CONFLICT' });
       });
     });
   });
