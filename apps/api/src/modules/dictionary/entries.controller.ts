@@ -15,7 +15,7 @@ import {
   type UpdateEntry,
   UpdateEntrySchema,
 } from '@nahuat/shared';
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
 import { ContentLocale } from '../../common/decorators/content-locale.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -97,5 +97,26 @@ export class EntriesController {
     @ContentLocale() locale: Locale,
   ): Promise<DictionaryEntryDetail> {
     return this.entriesService.update(id, body, user.userId, locale);
+  }
+
+  // ADMIN lifecycle. `:id/publish` is more specific than `:id`, so it does not
+  // collide with the CONTRIBUTOR update above.
+  @Roles('ADMIN')
+  @Patch(':id/publish')
+  publish(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtClaims,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.publish(id, user.userId, locale);
+  }
+
+  // No @HttpCode(204): TransformInterceptor turns the void return into
+  // { success: true, data: null } at 200, which delete clients parse like any
+  // other response — a 204 would forbid that body.
+  @Roles('ADMIN')
+  @Delete(':id')
+  remove(@Param('id') id: string, @CurrentUser() user: JwtClaims): Promise<void> {
+    return this.entriesService.delete(id, user.userId);
   }
 }
