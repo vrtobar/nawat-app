@@ -8,11 +8,15 @@ region      = "us-east-1"
 # Networking
 nat_gateway_count = 1 # 2 for HA (~$32/month more)
 
-# Database — production settings: protected, snapshotted, week of backups
+# Database — DISPOSABLE during pre-launch (ADR 17). Deletion protection off and
+# no final snapshot, so the application layer can be torn down between sessions
+# without a manual unlock and without accumulating a snapshot per teardown.
+# Both revert to the protected/snapshotted values at launch, when the database
+# stops being disposable. See docs/production-lifecycle.md.
 rds_instance_class    = "db.t4g.micro" # Graviton: ~11% cheaper than t3
 rds_multi_az          = false
-deletion_protection   = true
-skip_final_snapshot   = false
+deletion_protection   = false # true at launch
+skip_final_snapshot   = true  # false at launch
 backup_retention_days = 7
 
 # Cache
