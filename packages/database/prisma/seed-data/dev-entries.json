@@ -1,18 +1,21 @@
 {
   "$comment": [
-    "PLACEHOLDER TEST DATA — NOT REAL NAWAT. DO NOT PUBLISH OR CITE.",
+    "SAMPLE VOCABULARY FOR TESTING — NOT authoritative Nawat. Do not cite.",
     "",
-    "Loaded only by `npm run db:seed:dev`, never by `db:seed`, so this cannot",
-    "reach production. It exists so the dictionary endpoints, the trigram",
-    "indexes and entries_live_idx have rows to work against before real",
-    "vocabulary is available.",
+    "Loaded only by `npm run db:seed:dev`, never by `db:seed`, so it cannot",
+    "reach production through the reference-data seed. This is a disposable",
+    "fixture: real headwords combined with FABRICATED data points — regional",
+    "dialect variants, phonetics, example sentences, part-of-speech tags and",
+    "placeholder audio URLs — generated to exercise every dimension of the",
+    "dictionary UI: browse, search, the type and part-of-speech facets, dialect",
+    "precedence ordering, the no-`common`-form primary-translation fallback,",
+    "examples, and the audio-available path. The fabricated parts are only",
+    "plausible, not verified, so nothing here should be treated as a source.",
     "",
-    "The entries below are structural fixtures with obviously fake content.",
-    "They are deliberately NOT plausible Nawat: a placeholder that looks",
-    "real is the one that eventually gets copied somewhere it shouldn't.",
-    "Real vocabulary does not belong in this file — it goes in through the",
-    "API once the dictionary module exists, so it inherits validation,",
-    "audit logging and attribution to a real person.",
+    "It lives in local dev and the throwaway staging/beta environment and is",
+    "wiped before the app goes truly live. Real vocabulary is entered later",
+    "through the API, per row, with validation, audit logging and attribution",
+    "to a real contributor.",
     "",
     "Shape is validated at load against CreateEntrySchema and",
     "CreateTranslationSchema from @nahuat/shared, so this file cannot drift",
@@ -20,41 +23,566 @@
   ],
   "entries": [
     {
-      "nawatContent": "zzz-placeholder-one",
+      "nawatContent": "takat",
       "type": "WORD",
       "translations": [
         {
           "dialectCode": "common",
-          "contentEs": "marcador de posición uno | segundo sentido de prueba",
-          "contentEn": "placeholder one | second test sense",
+          "contentEs": "hombre | persona",
+          "contentEn": "man | person",
           "partOfSpeech": "NOUN",
-          "phonetic": "[placeholder]"
+          "phonetic": "[ˈtakat]",
+          "exampleNawat": "Ne takat tekiti.",
+          "exampleEs": "El hombre trabaja.",
+          "exampleEn": "The man works.",
+          "audioUrl": "https://example.com/audio/nawat/takat.mp3"
+        },
+        {
+          "dialectCode": "nahuizalco",
+          "contentEs": "hombre | persona",
+          "contentEn": "man | person",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[taˈkat]"
+        },
+        {
+          "dialectCode": "izalco",
+          "contentEs": "hombre",
+          "contentEn": "man",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈtakaʔ]"
         }
       ]
     },
     {
-      "nawatContent": "zzz-placeholder-two",
+      "nawatContent": "siwat",
       "type": "WORD",
       "translations": [
         {
           "dialectCode": "common",
-          "contentEs": "marcador de posición dos",
-          "contentEn": "placeholder two",
-          "partOfSpeech": "VERB",
-          "exampleNawat": "zzz-placeholder-two example sentence",
-          "exampleEs": "oración de ejemplo"
+          "contentEs": "mujer",
+          "contentEn": "woman",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈsiwat]",
+          "exampleNawat": "Ne siwat taxkalua.",
+          "exampleEs": "La mujer hace tortillas.",
+          "exampleEn": "The woman makes tortillas.",
+          "audioUrl": "https://example.com/audio/nawat/siwat.mp3"
+        },
+        {
+          "dialectCode": "santo-domingo",
+          "contentEs": "mujer",
+          "contentEn": "woman",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈʃiwat]"
         }
       ]
     },
     {
-      "nawatContent": "zzz-placeholder-phrase one two",
-      "type": "PHRASE",
+      "nawatContent": "se",
+      "type": "WORD",
       "translations": [
         {
           "dialectCode": "common",
-          "contentEs": "frase de marcador de posición",
-          "contentEn": "placeholder phrase",
+          "contentEs": "uno | una | un",
+          "contentEn": "one",
+          "partOfSpeech": "OTHER"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ume",
+      "type": "WORD",
+      "translations": [
+        { "dialectCode": "common", "contentEs": "dos", "contentEn": "two", "partOfSpeech": "OTHER" }
+      ]
+    },
+    {
+      "nawatContent": "yey",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "tres",
+          "contentEn": "three",
+          "partOfSpeech": "OTHER"
+        }
+      ]
+    },
+    {
+      "nawatContent": "piltzin",
+      "type": "WORD",
+      "translations": [
+        { "dialectCode": "common", "contentEs": "niño", "contentEn": "boy", "partOfSpeech": "NOUN" }
+      ]
+    },
+    {
+      "nawatContent": "siwapiltzin",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "niña",
+          "contentEn": "girl",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "teut",
+      "type": "WORD",
+      "translations": [
+        { "dialectCode": "common", "contentEs": "dios", "contentEn": "god", "partOfSpeech": "NOUN" }
+      ]
+    },
+    {
+      "nawatContent": "tal",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "tierra",
+          "contentEn": "earth | land",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tumat",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "tomate",
+          "contentEn": "tomato",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "et",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "frijol",
+          "contentEn": "bean",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "awakat",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "aguacate",
+          "contentEn": "avocado",
+          "partOfSpeech": "NOUN",
+          "exampleNawat": "Nikwa se awakat.",
+          "exampleEs": "Como un aguacate.",
+          "exampleEn": "I eat an avocado."
+        }
+      ]
+    },
+    {
+      "nawatContent": "techan",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "pueblo",
+          "contentEn": "town | village",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ken",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "cómo",
+          "contentEn": "how",
+          "partOfSpeech": "ADVERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "naja",
+      "type": "WORD",
+      "translations": [
+        { "dialectCode": "common", "contentEs": "yo", "contentEn": "I", "partOfSpeech": "PRONOUN" }
+      ]
+    },
+    {
+      "nawatContent": "taja",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "tú | usted",
+          "contentEn": "you",
+          "partOfSpeech": "PRONOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yaja",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "él | ella | ellos | ellas",
+          "contentEn": "he | she | they",
+          "partOfSpeech": "PRONOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ken tinemi",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "cómo estás",
+          "contentEn": "how are you",
+          "partOfSpeech": "PHRASE",
+          "exampleNawat": "Ken tinemi, nuteku?",
+          "exampleEs": "¿Cómo estás, amigo?",
+          "exampleEn": "How are you, friend?"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ninemi yek",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "estoy bien",
+          "contentEn": "I'm well",
           "partOfSpeech": "PHRASE"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yek tayua",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "buenas noches",
+          "contentEn": "good night",
+          "partOfSpeech": "PHRASE"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yek peyna",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "buenos días",
+          "contentEn": "good morning",
+          "partOfSpeech": "PHRASE"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yek teutak",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "buenas tardes",
+          "contentEn": "good afternoon",
+          "partOfSpeech": "PHRASE"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yek tunal",
+      "type": "EXPRESSION",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "buen día",
+          "contentEn": "good day",
+          "partOfSpeech": "PHRASE"
+        }
+      ]
+    },
+    {
+      "nawatContent": "yek",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "bien",
+          "contentEn": "good | well",
+          "partOfSpeech": "ADVERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "mistun",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "gato",
+          "contentEn": "cat",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈmistun]",
+          "exampleNawat": "Ne mistun kochi.",
+          "exampleEs": "El gato duerme.",
+          "exampleEn": "The cat sleeps."
+        },
+        {
+          "dialectCode": "nahuizalco",
+          "contentEs": "gato",
+          "contentEn": "cat",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈmiston]"
+        }
+      ]
+    },
+    {
+      "nawatContent": "masat",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "cuisnahuat",
+          "contentEs": "venado",
+          "contentEn": "deer",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈmasat]"
+        },
+        {
+          "dialectCode": "santo-domingo",
+          "contentEs": "venado",
+          "contentEn": "deer",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[maˈsat]"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tijlan",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "gallina",
+          "contentEn": "hen | chicken",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tuchti",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "izalco",
+          "contentEs": "conejo",
+          "contentEn": "rabbit",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[ˈtutʃti]",
+          "exampleNawat": "Ne tuchti motalua.",
+          "exampleEs": "El conejo corre.",
+          "exampleEn": "The rabbit runs."
+        }
+      ]
+    },
+    {
+      "nawatContent": "wan",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "y",
+          "contentEn": "and",
+          "partOfSpeech": "CONJUNCTION"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ini",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "este | esta | esto",
+          "contentEn": "this",
+          "partOfSpeech": "PRONOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tamachtiani",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "profesor",
+          "contentEn": "teacher",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "nusan",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "también",
+          "contentEn": "also | too",
+          "partOfSpeech": "ADVERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "keski",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "cuánto",
+          "contentEn": "how much | how many",
+          "partOfSpeech": "ADVERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "shinechmaka",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "dame",
+          "contentEn": "give me",
+          "partOfSpeech": "VERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "elut",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "elote",
+          "contentEn": "corn",
+          "partOfSpeech": "NOUN",
+          "exampleNawat": "Ne elut welik.",
+          "exampleEs": "El elote es sabroso.",
+          "exampleEn": "The corn is tasty."
+        }
+      ]
+    },
+    {
+      "nawatContent": "pula",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "plátano",
+          "contentEn": "banana | plantain",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "chil",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "chile",
+          "contentEn": "chili",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "kal",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "casa",
+          "contentEn": "house",
+          "partOfSpeech": "NOUN",
+          "phonetic": "[kal]",
+          "exampleNawat": "Ini kal wey.",
+          "exampleEs": "Esta casa es grande.",
+          "exampleEn": "This house is big.",
+          "audioUrl": "https://example.com/audio/nawat/kal.mp3"
+        },
+        {
+          "dialectCode": "izalco",
+          "contentEs": "casa",
+          "contentEn": "house",
+          "partOfSpeech": "NOUN"
+        },
+        {
+          "dialectCode": "cuisnahuat",
+          "contentEs": "casa",
+          "contentEn": "house",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "kan",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "dónde",
+          "contentEn": "where",
+          "partOfSpeech": "ADVERB"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tik",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "en",
+          "contentEn": "in",
+          "partOfSpeech": "PREPOSITION"
+        }
+      ]
+    },
+    {
+      "nawatContent": "ujti",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "camino | calle",
+          "contentEn": "road | street",
+          "partOfSpeech": "NOUN"
+        }
+      ]
+    },
+    {
+      "nawatContent": "tay",
+      "type": "WORD",
+      "translations": [
+        {
+          "dialectCode": "common",
+          "contentEs": "qué",
+          "contentEn": "what",
+          "partOfSpeech": "PRONOUN"
         }
       ]
     }
