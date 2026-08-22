@@ -226,10 +226,16 @@ jobs:
   # the code currently on staging — with the command overridden. seed.ts's
   # main() runs seedReference() before dev content regardless, so this also
   # (re)seeds the dialect rows the entries' translations reference.
+  # always() is load-bearing, not defensive noise: on `seed` the images job is
+  # skipped, and a downstream job with a plain `if` is skipped by propagation
+  # when anything upstream in its needs chain skipped — even though infra itself
+  # succeeds via its own always(). The explicit infra result check restores the
+  # success() gate that naming an `if` otherwise removes. This is the same idiom
+  # the verify job uses, and for the same reason.
   seed:
     name: Seed dev data
     needs: infra
-    if: inputs.action == 'seed'
+    if: always() && inputs.action == 'seed' && needs.infra.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@v6
