@@ -5,6 +5,9 @@ import type { Metadata } from 'next';
 // imports the stylesheet. Next still requires a root layout to exist; this is
 // it, and it only sets the metadata defaults that apply across every locale.
 export const metadata: Metadata = {
+  // Absolute base for the canonical and hreflang URLs the dictionary pages emit;
+  // without it Next resolves relative alternates against localhost.
+  metadataBase: new URL(process.env.APP_BASE_URL ?? 'http://localhost:3000'),
   title: {
     default: 'Nahuat — Learn the Nawat language',
     template: '%s | Nahuat',
