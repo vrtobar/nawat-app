@@ -248,7 +248,6 @@
           "dialectCode": "common",
           "contentEs": "cómo estás",
           "contentEn": "how are you",
-          "partOfSpeech": "PHRASE",
           "exampleNawat": "Ken tinemi, nuteku?",
           "exampleEs": "¿Cómo estás, amigo?",
           "exampleEn": "How are you, friend?"
@@ -262,8 +261,7 @@
         {
           "dialectCode": "common",
           "contentEs": "estoy bien",
-          "contentEn": "I'm well",
-          "partOfSpeech": "PHRASE"
+          "contentEn": "I'm well"
         }
       ]
     },
@@ -274,8 +272,7 @@
         {
           "dialectCode": "common",
           "contentEs": "buenas noches",
-          "contentEn": "good night",
-          "partOfSpeech": "PHRASE"
+          "contentEn": "good night"
         }
       ]
     },
@@ -286,8 +283,7 @@
         {
           "dialectCode": "common",
           "contentEs": "buenos días",
-          "contentEn": "good morning",
-          "partOfSpeech": "PHRASE"
+          "contentEn": "good morning"
         }
       ]
     },
@@ -298,8 +294,7 @@
         {
           "dialectCode": "common",
           "contentEs": "buenas tardes",
-          "contentEn": "good afternoon",
-          "partOfSpeech": "PHRASE"
+          "contentEn": "good afternoon"
         }
       ]
     },
@@ -310,8 +305,7 @@
         {
           "dialectCode": "common",
           "contentEs": "buen día",
-          "contentEn": "good day",
-          "partOfSpeech": "PHRASE"
+          "contentEn": "good day"
         }
       ]
     },

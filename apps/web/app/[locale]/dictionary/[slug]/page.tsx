@@ -21,7 +21,6 @@ const POS_LABELS = {
     PARTICLE: 'partícula',
     PREPOSITION: 'preposición',
     CONJUNCTION: 'conjunción',
-    PHRASE: 'frase',
     OTHER: 'otro',
   },
   en: {
@@ -33,7 +32,6 @@ const POS_LABELS = {
     PARTICLE: 'particle',
     PREPOSITION: 'preposition',
     CONJUNCTION: 'conjunction',
-    PHRASE: 'phrase',
     OTHER: 'other',
   },
 } as const;
