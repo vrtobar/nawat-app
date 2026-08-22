@@ -33,3 +33,5 @@ alongside the date of the record.
 | [13](0013-authentication-and-authorization.md)              | Authentication and authorization model               | Accepted |
 | [14](0014-nawat-for-the-language-nahuat-for-the-project.md) | Nawat for the language, Nahuat for the project       | Accepted |
 | [15](0015-localized-content.md)                             | Localized content: storage, naming, resolution       | Accepted |
+| [16](0016-dictionary-entry-slugs.md)                        | Dictionary entry slugs                               | Accepted |
+| [17](0017-production-disposable-during-prelaunch.md)        | Production is disposable during pre-launch           | Accepted |

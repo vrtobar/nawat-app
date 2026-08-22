@@ -3,7 +3,7 @@ import 'dotenv/config'; // db:seed runs tsx directly — nothing else loads .env
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CreateEntrySchema, CreateTranslationSchema } from '@nahuat/shared';
+import { CreateEntrySchema, CreateTranslationSchema, slugifyNawat } from '@nahuat/shared';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { z } from 'zod';
 
@@ -20,14 +20,17 @@ const prisma = new PrismaClient({ adapter });
 //
 //   db:seed       reference data only — safe in every environment, and what
 //                 the one-off ECS task runs.
-//   db:seed:dev   reference data plus placeholder content, for local work.
+//   db:seed:dev   reference data plus a curated sample of real vocabulary, for
+//                 local work and the disposable staging environment.
 //
 // A flag would have been fewer lines. It is rejected because the seed task's
 // command is overridden at RunTask time, so an environment variable or an
 // argv typo is the only thing that would stand between production and a
-// dictionary full of fake Nawat. A language preservation project cannot
-// treat that as a low-severity mistake: wrong data that looks authoritative
-// is worse than an empty table, because it gets copied outward.
+// dictionary seeded from a fixture. The dev content is test data — real
+// headwords with some fabricated data points (regional variants, examples),
+// not authoritative Nawat (see dev-entries.json). Production content is not
+// meant to arrive this way at all: it enters through the API, per row, with
+// validation, audit logging and attribution to a real contributor.
 //
 // Anything reachable from `seedReference` must therefore be safe to apply to
 // production, every time, forever.
@@ -75,9 +78,12 @@ const SeedFileSchema = z.object({
   entries: z.array(SeedEntrySchema),
 });
 
-// Attribution for placeholder content. Entry.creatorId and updaterId are
+// Attribution for the sample test content. Entry.creatorId and updaterId are
 // non-null FKs with onDelete: Restrict, so seeded rows need a User to point
-// at — there is no anonymous content.
+// at — there is no anonymous content. This content is a disposable test
+// fixture applied in a batch, so it is attributed to this synthetic seeder;
+// real vocabulary is entered later through the API, which is what carries
+// individual authorship.
 //
 // Synthetic and unmistakable on purpose. `seed|` is not an Auth0 connection
 // prefix so it can never collide with a real `sub`, and `.invalid` is
@@ -86,7 +92,7 @@ const SeedFileSchema = z.object({
 const SEED_AUTHOR = {
   auth0Id: 'seed|dev-content',
   email: 'seed@nahuat.invalid',
-  name: 'Seed (placeholder content)',
+  name: 'Seed (sample content)',
   role: 'CONTRIBUTOR',
 } as const;
 
@@ -136,6 +142,7 @@ async function seedDevContent(): Promise<void> {
       where: { nawatContent: entry.nawatContent },
       create: {
         nawatContent: entry.nawatContent,
+        slug: slugifyNawat(entry.nawatContent),
         type: entry.type,
         isPublished: true,
         creatorId: author.id,
@@ -146,32 +153,26 @@ async function seedDevContent(): Promise<void> {
     });
     entryCount += 1;
 
-    for (const [index, t] of entry.translations.entries()) {
-      // priority is explicit in the file rather than resolved here. The
-      // service layer owns "next free priority per (entry, dialect)" once the
-      // dictionary module exists; duplicating that rule in the seed would be
-      // a second implementation of it, and the two would drift. Falling back
-      // to file order keeps this honest about not being that logic.
-      const priority = t.priority ?? index + 1;
-
+    for (const t of entry.translations) {
+      // One translation per (entry, dialect) — the upsert key. Several senses of
+      // a word live in a pipe-separated gloss on this row, not separate rows.
       await prisma.translation.upsert({
         where: {
-          entryId_dialectCode_priority: {
+          entryId_dialectCode: {
             entryId: record.id,
             dialectCode: t.dialectCode,
-            priority,
           },
         },
         create: {
           entryId: record.id,
           dialectCode: t.dialectCode,
-          priority,
           contentEs: t.contentEs,
           contentEn: t.contentEn ?? null,
           phonetic: t.phonetic ?? null,
           partOfSpeech: t.partOfSpeech ?? null,
           exampleNawat: t.exampleNawat ?? null,
           exampleEs: t.exampleEs ?? null,
+          exampleEn: t.exampleEn ?? null,
           audioUrl: t.audioUrl ?? null,
           isPublished: true,
           creatorId: author.id,
@@ -189,7 +190,7 @@ async function seedDevContent(): Promise<void> {
 
   console.log(
     `dev content: ${entryCount} entries, ${translationCount} translations ` +
-      `(PLACEHOLDER — not real Nawat)`,
+      `(sample test data — dev/staging only)`,
   );
 }
 

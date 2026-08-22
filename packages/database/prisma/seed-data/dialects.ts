@@ -1,4 +1,4 @@
-import type { CreateDialect } from '@nahuat/shared';
+import { type CreateDialect, DEFAULT_DIALECT_CODE } from '@nahuat/shared';
 
 // REFERENCE DATA — seeded in every environment, including production.
 //
@@ -14,7 +14,8 @@ import type { CreateDialect } from '@nahuat/shared';
 // quietly become wrong. Regional forms are equally valid and carry their own
 // dialect code; `common` is what a learner sees when they have not chosen a
 // region, which is what makes DictionaryEntryListItem.primaryTranslation — the
-// priority=1 translation in this dialect — well defined.
+// translation whose dialect has the lowest precedence, and `common` is 0 — well
+// defined.
 //
 // `common`'s description is deliberately not geographic. Nawat predates every
 // political boundary that could be used to place it, so framing the language
@@ -28,7 +29,7 @@ import type { CreateDialect } from '@nahuat/shared';
 // into an FK that every translation points at — but that cost assumed permanent
 // data. The beta is disposable: it is torn down and relaunched with definitive
 // data, so a guessed model thrown away is cheap. Their purpose is to exercise
-// the dialect dimension during the beta — per-dialect priority scoping, dialect
+// the dialect dimension during the beta — precedence ordering, dialect
 // filtering, and the open question of what primaryTranslation is for an entry
 // with no `common` translation — none of which `common` alone can test.
 //
@@ -38,7 +39,11 @@ import type { CreateDialect } from '@nahuat/shared';
 // forward by default.
 export const DIALECTS: CreateDialect[] = [
   {
-    code: 'common',
+    code: DEFAULT_DIALECT_CODE,
+    // Precedence 0 — the broadly-used form leads every entry's translation list
+    // and is its default headword. Towns follow at 10/20/…, gapped so a variety
+    // can be inserted between two without renumbering. Provisional, like the set.
+    precedence: 0,
     nameEs: 'Nawat común',
     nameEn: 'Common Nawat',
     // User-facing: these strings reach dictionary filters and translation
@@ -56,6 +61,7 @@ export const DIALECTS: CreateDialect[] = [
   },
   {
     code: 'nahuizalco',
+    precedence: 10,
     nameEs: 'Nawat de Nahuizalco',
     nameEn: 'Nahuizalco Nawat',
     descriptionEs: 'Variedad del nawat hablada en la comunidad de Nahuizalco.',
@@ -63,6 +69,7 @@ export const DIALECTS: CreateDialect[] = [
   },
   {
     code: 'izalco',
+    precedence: 20,
     nameEs: 'Nawat de Izalco',
     nameEn: 'Izalco Nawat',
     descriptionEs: 'Variedad del nawat hablada en la comunidad de Izalco.',
@@ -70,6 +77,7 @@ export const DIALECTS: CreateDialect[] = [
   },
   {
     code: 'cuisnahuat',
+    precedence: 30,
     nameEs: 'Nawat de Cuisnahuat',
     nameEn: 'Cuisnahuat Nawat',
     descriptionEs: 'Variedad del nawat hablada en la comunidad de Cuisnahuat.',
@@ -77,6 +85,7 @@ export const DIALECTS: CreateDialect[] = [
   },
   {
     code: 'santo-domingo',
+    precedence: 40,
     nameEs: 'Nawat de Santo Domingo de Guzmán',
     nameEn: 'Santo Domingo de Guzmán Nawat',
     descriptionEs: 'Variedad del nawat hablada en la comunidad de Santo Domingo de Guzmán.',

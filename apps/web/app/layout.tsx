@@ -1,10 +1,13 @@
-import './globals.css';
-
 import type { Metadata } from 'next';
 
-// TODO: fonts (next/font), TanStack Query provider, and the
-// (public)/(app)/(admin) route-group shells land as features are built.
+// Pass-through root. The <html lang> carries the request's locale, which is only
+// known inside [locale], so app/[locale]/layout.tsx renders <html>/<body> and
+// imports the stylesheet. Next still requires a root layout to exist; this is
+// it, and it only sets the metadata defaults that apply across every locale.
 export const metadata: Metadata = {
+  // Absolute base for the canonical and hreflang URLs the dictionary pages emit;
+  // without it Next resolves relative alternates against localhost.
+  metadataBase: new URL(process.env.APP_BASE_URL ?? 'http://localhost:3000'),
   title: {
     default: 'Nahuat — Learn the Nawat language',
     template: '%s | Nahuat',
@@ -14,9 +17,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
+  return children;
 }

@@ -130,11 +130,19 @@ model Entry {
   id           String    @id @default(cuid())
   type         EntryType @default(WORD)
   nawatContent String    @unique @map("nawat_content")
+  // Canonical public URL identifier, derived from nawatContent by slugifyNawat
+  // (@nahuat/shared) on write. @unique so two distinct headwords that fold to
+  // the same slug fail loudly (ENTRY_SLUG_CONFLICT) instead of colliding
+  // silently. See docs/adr/0016-dictionary-entry-slugs.
+  slug         String    @unique
   imageUrl     String?   @map("image_url")
   imageKey     String?   @map("image_key") // S3 key — source of truth for file location
 
   // Draft by default — only ADMIN can publish.
-  // Unpublished entries hidden from USER via Prisma middleware.
+  // Unpublished and soft-deleted rows are hidden by an explicit
+  // `where: { isPublished: true, deletedAt: null }` in the read services, not a
+  // global Prisma filter: publish visibility is role-conditional (CONTRIBUTOR+
+  // see drafts), which a client-wide extension cannot express cleanly.
   // Hard delete allowed for unpublished entries (no preservation value).
   // Soft delete applied to published entries.
   isPublished Boolean   @default(false) @map("is_published")
@@ -151,12 +159,14 @@ model Entry {
 
   translations Translation[]
 
-  // Substring search (ILIKE '%foo%'). A btree index cannot serve a leading
-  // wildcard; a trigram GIN index can. Depends on the pg_trgm extension,
-  // created by 20260815155000_enable_pg_trgm — Prisma does not model
-  // extensions, so nothing here can declare that dependency. Regenerating
-  // the init migration is safe; that one must not be deleted.
-  @@index([nawatContent(ops: raw("gin_trgm_ops"))], type: Gin, map: "entries_nawat_content_trgm_idx")
+  // Trigram search index NOT declared here. GET /entries/search matches on
+  // immutable_unaccent(nawat_content), so it is accent-insensitive ("takat"
+  // finds "tàkat"), and Prisma cannot model a functional index expression.
+  // The GIN trigram index therefore lives in
+  // 20260820163000_accent_insensitive_trigram_search, not here — which also
+  // dropped the raw-column index this replaced (entries_nawat_content_trgm_idx),
+  // since search was its only caller and now wraps the column in unaccent.
+  //
   // NOT THE FULL INDEX SET. entries_live_idx is a partial index defined in
   // 20260815160500_partial_live_indexes — Prisma cannot express a WHERE
   // clause, so it is invisible here. Check that migration before adding an
@@ -164,8 +174,13 @@ model Entry {
   @@map("entries")
 }
 
+// WORD and EXPRESSION are dictionary headwords — a single word vs. a multi-word
+// lexical unit (idiom, fixed/common expression, collocation). PHRASE is a full
+// teaching utterance that lives in lessons, not the dictionary browse; the
+// public dictionary reads restrict to WORD/EXPRESSION.
 enum EntryType {
   WORD
+  EXPRESSION
   PHRASE
 }
 
@@ -180,6 +195,15 @@ model Dialect {
   nameEn        String @unique @map("name_en") // e.g. "Common Nawat", "Izalco Nawat"
   descriptionEs String @map("description_es")
   descriptionEn String @map("description_en")
+
+  // Display order across dialects, lower first. `common` is 0 so it leads;
+  // towns follow in a chosen order. This is the whole ordering for an entry's
+  // translations and the basis of its headword — a dialect has at most one
+  // translation per entry (see Translation @@unique), so nothing orders within
+  // a dialect. Not unique: a new dialect defaults to 100 (sorts last) until
+  // placed, and ties break on code. Provisional values, re-decided at teardown
+  // like the codes themselves.
+  precedence Int @default(100)
 
   translations Translation[]
 
@@ -202,19 +226,6 @@ model Translation {
 
   audioUrl String? @map("audio_url")
   audioKey String? @map("audio_key") // S3 key
-
-  // Display priority when an entry has multiple translations.
-  // Applies across both dialect variants AND multiple definitions of the same word.
-  // Lower number = higher priority (1 = primary/most common meaning).
-  // e.g. "takat": priority 1 = "hombre" (most common), priority 2 = "persona"
-  //
-  // Unique per (entry, dialect) — this is what makes "the priority=1 common
-  // dialect translation" in DictionaryEntryListItem.primaryTranslation
-  // (see packages/shared entry.schema.ts) a well-defined, single row instead
-  // of an arbitrary pick among ties. Service layer must resolve the next
-  // free priority when adding a translation rather than relying on the
-  // schema default.
-  priority Int @default(1)
 
   // Draft by default — only ADMIN can publish.
   // Hard delete allowed for unpublished translations.
@@ -239,13 +250,19 @@ model Translation {
   lessonVocabulary     LessonVocabulary[]
   userCardProgress     UserCardProgress[]
 
-  @@unique([entryId, dialectCode, priority])
+  // One translation per dialect per entry. A word with several senses is one
+  // row with a pipe-separated gloss, not several rows (see CreateTranslation in
+  // packages/shared). Dialect precedence orders an entry's translations; there
+  // is nothing to order within a dialect.
+  @@unique([entryId, dialectCode])
   @@index([dialectCode])
-  // Substring search — see note on Entry's trigram index above. Separate
-  // indexes rather than one multi-column GIN: searches hit either language
-  // alone, and the planner can BitmapOr the two when a query spans both.
-  @@index([contentEs(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_es_trgm_idx")
-  @@index([contentEn(ops: raw("gin_trgm_ops"))], type: Gin, map: "translations_content_en_trgm_idx")
+  // Trigram search indexes NOT declared here — see the note on Entry. Both
+  // content columns are indexed as immutable_unaccent(col) gin_trgm_ops in
+  // 20260820163000_accent_insensitive_trigram_search (functional expressions
+  // Prisma cannot model). Separate per-language indexes, not one composite: a
+  // search hits either language alone and the planner BitmapOrs the two. The
+  // raw-column indexes they replaced were dropped in that same migration.
+  //
   // See note on Entry: translations_live_idx is partial and lives in the
   // migration, not here.
   @@map("translations")
@@ -260,7 +277,6 @@ enum PartOfSpeech {
   PARTICLE
   PREPOSITION
   CONJUNCTION
-  PHRASE
   OTHER
 }
 
