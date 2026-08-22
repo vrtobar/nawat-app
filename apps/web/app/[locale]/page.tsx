@@ -1,6 +1,6 @@
 // TODO: real landing page — hero, dictionary search entry
 // point, and course preview. This placeholder just proves the stack
-// (App Router + Tailwind) renders.
+// (App Router + Tailwind) renders under the [locale] segment.
 export default function LandingPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
