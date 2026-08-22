@@ -277,7 +277,6 @@ enum PartOfSpeech {
   PARTICLE
   PREPOSITION
   CONJUNCTION
-  PHRASE
   OTHER
 }
 

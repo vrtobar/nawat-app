@@ -18,7 +18,6 @@ export const PartOfSpeechSchema = z.enum([
   'PARTICLE',
   'PREPOSITION',
   'CONJUNCTION',
-  'PHRASE',
   'OTHER',
 ]);
 
