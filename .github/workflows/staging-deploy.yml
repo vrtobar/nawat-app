@@ -18,6 +18,7 @@ on:
         options:
           - up # build, apply infrastructure, migrate
           - deploy # build, migrate, roll services onto new code
+          - seed # load dev sample data (db:seed:dev) into a running environment
           - down # destroy the application layer
         default: deploy
 
@@ -38,10 +39,11 @@ env:
 
 jobs:
   # Skipped on `down` — a teardown needs no artifact, and building one would
-  # add three minutes to it.
+  # add three minutes to it. Also skipped on `seed`, which loads data into the
+  # image already running and builds nothing.
   images:
     name: Push ${{ matrix.app }}
-    if: inputs.action != 'down'
+    if: inputs.action != 'down' && inputs.action != 'seed'
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: true
@@ -82,7 +84,7 @@ jobs:
   infra:
     name: Terraform ${{ inputs.action }}
     needs: images
-    if: always() && (inputs.action == 'down' || needs.images.result == 'success')
+    if: always() && (inputs.action == 'down' || inputs.action == 'seed' || needs.images.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       cluster: ${{ steps.out.outputs.cluster }}
@@ -149,7 +151,7 @@ jobs:
   migrate:
     name: Run migrations
     needs: infra
-    if: inputs.action != 'down'
+    if: inputs.action == 'up' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@v6
@@ -211,6 +213,61 @@ jobs:
           echo "exitCode=$exit_code reason=$reason"
           if [ "$exit_code" != "0" ]; then
             echo "::error::Migration task did not exit cleanly. Check /ecs/nahuat-staging/migrate."
+            exit 1
+          fi
+
+  # Loads dev sample data into a running environment, on its own verb. Kept
+  # separate from up/deploy because staging's data is disposable and reloaded
+  # far more often than infrastructure changes — and, more importantly, because
+  # db:seed:dev must never be reachable from the production workflow (this one
+  # only ever assumes the develop-pinned staging role). Runs the migrate task
+  # family's latest revision, which the last up/deploy registered with that
+  # release's image — so the dev-entries.json being loaded is the one baked into
+  # the code currently on staging — with the command overridden. seed.ts's
+  # main() runs seedReference() before dev content regardless, so this also
+  # (re)seeds the dialect rows the entries' translations reference.
+  seed:
+    name: Seed dev data
+    needs: infra
+    if: inputs.action == 'seed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_STAGING_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # No revision registered here (unlike migrate): seed builds no image, so it
+      # runs the family's latest ACTIVE revision as-is. The container name is
+      # `migrate` — the seed reuses that task definition, only swapping argv.
+      - name: Run and wait
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          FAMILY: ${{ needs.infra.outputs.migrate_family }}
+          SUBNETS: ${{ needs.infra.outputs.subnets }}
+          SG: ${{ needs.infra.outputs.security_group }}
+        run: |
+          set -euo pipefail
+          task_arn=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$FAMILY" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["npm","run","db:seed:dev","--workspace=@nahuat/database"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Task: $task_arn"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task_arn"
+
+          # Same reasoning as the migrate task: exitCode is null for a task that
+          # never started, so only an explicit 0 is a pass.
+          read -r exit_code reason < <(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].[exitCode,reason]' --output text)
+
+          echo "exitCode=$exit_code reason=$reason"
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::Seed task did not exit cleanly. Check /ecs/nahuat-staging/migrate."
             exit 1
           fi
 
@@ -319,7 +376,7 @@ jobs:
 
   summary:
     name: Summary
-    needs: [images, infra, migrate, deploy, verify]
+    needs: [images, infra, migrate, seed, deploy, verify]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -333,11 +390,14 @@ jobs:
             echo "| Images | ${{ needs.images.result }} |"
             echo "| Terraform | ${{ needs.infra.result }} |"
             echo "| Migrations | ${{ needs.migrate.result }} |"
+            echo "| Seed | ${{ needs.seed.result }} |"
             echo "| Services | ${{ needs.deploy.result }} |"
             echo "| Verified | ${{ needs.verify.result }} |"
             echo
             if [ "${{ inputs.action }}" = "down" ]; then
               echo "Application layer destroyed. Foundation is untouched."
+            elif [ "${{ inputs.action }}" = "seed" ]; then
+              echo "Dev sample data loaded (\`db:seed:dev\`) — https://staging.nahuat.com/dictionary"
             else
               echo "Tag \`staging-${{ github.sha }}\` — https://staging.nahuat.com"
             fi
