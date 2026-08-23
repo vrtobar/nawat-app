@@ -10,7 +10,7 @@
     "auth:mock": "tsx scripts/mock-oidc/server.ts",
     "auth:token": "tsx scripts/mock-oidc/mint.ts",
     "start": "node dist/main.js",
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json",
     "test:unit": "vitest run"
   },
