@@ -6,6 +6,16 @@
   "type": "commonjs",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./dev-users": {
+      "types": "./dist/dev-users.d.ts",
+      "default": "./dist/dev-users.js"
+    }
+  },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
