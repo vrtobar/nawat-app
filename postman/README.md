@@ -40,11 +40,29 @@ which the Auth0 Post-Login Action stamps at login, so it must come from an
   (`https://staging.nahuat.com`), copy the access token it sends to the API (from
   the Network tab's `Authorization` header, or the SDK session), and paste it into
   the Staging environment's `token`.
-- **Authed routes locally are not testable yet.** Auth0 can't reach `localhost` to
-  run the role-stamping Action, and the strategy has no dev bypass. The planned
-  fix is a local mock OIDC/JWKS issuer (swap the _issuer_, not the _strategy_, so
-  ADR 13 stays intact) — tracked in the backlog. Until then the Local environment
-  is for public routes.
+- **Authed routes locally → mint a token from the mock issuer.** Auth0 cannot
+  reach `localhost` to run the role-stamping Action, so a local OIDC issuer
+  stands in. It swaps the _issuer_, not the _strategy_ — the API still verifies
+  RS256 against a JWKS endpoint with issuer and audience pinned, so ADR 13 is
+  intact.
+
+  ```bash
+  npm run db:seed:dev                     # creates the three dev users
+  npm run auth:mock --workspace=api       # leave running; serves JWKS on :8080
+  npm run --silent auth:token --workspace=api -- admin
+  ```
+
+  Add both lines to `apps/api/.env.local` and restart the API:
+
+  ```
+  AUTH0_ISSUER_URL=http://localhost:8080/
+  AUTH0_JWKS_URI=http://localhost:8080/jwks
+  ```
+
+  Paste the minted token into the Local environment's `token`. Use `admin`,
+  `contributor` or `user` to test each rung. Tokens expire after an hour;
+  mint another. The issuer must stay running — the API fetches its JWKS on
+  every unseen `kid`.
 
 `POST /auth/role` is the exception — public, gated by the `x-internal-secret`
 header (= the API's `INTERNAL_SECRET`). It is the single write path for user

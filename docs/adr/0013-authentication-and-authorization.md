@@ -6,6 +6,11 @@
 - **Amended 2026-08-17:** `REVIEWER` was removed from the role ladder. The
   decision below — ranked roles rather than capabilities — is unchanged; the
   ladder is three rungs instead of four. See the note in Consequences.
+- **Amended 2026-08-23:** the token _issuer_ became configurable so local
+  development can verify against a mock OIDC provider. The decision below —
+  RS256 verified against a JWKS endpoint, with no symmetric path — is
+  unchanged. `TEST_JWT_SECRET` was deleted. See "The issuer is configurable,
+  the strategy is not" below.
 
 ## Context
 
@@ -87,20 +92,67 @@ Three verification parameters are pinned deliberately:
 No shared secret exists in this service for token verification, so nothing here
 can leak in a way that lets an attacker mint a token.
 
-**`TEST_JWT_SECRET` is declared and deliberately never read.**
-`env.validation.ts:59` accepts it as optional and `.env.example` sets it, but no
-application code consumes it and none is intended to. Honouring it would mean
-the running service accepts symmetric tokens whenever that variable happens to
-be present, so anyone holding the value could forge `role: ADMIN`. Gating on
-`NODE_ENV` does not fix this — it relocates the failure to a misconfigured
-environment, and the branch itself is the vulnerability. Integration tests
-override the guard through Nest's testing module instead, which leaves this path
-single-algorithm with nothing to get wrong.
+**No symmetric path exists, and no `NODE_ENV` bypass.** Honouring a shared
+secret would mean the running service accepts symmetric tokens whenever some
+variable happens to be present, so anyone holding the value could forge
+`role: ADMIN`. Gating that on `NODE_ENV` does not fix it — it relocates the
+failure to a misconfigured environment, and the branch itself is the
+vulnerability. Integration tests override the guard through Nest's testing
+module instead, which leaves this path single-algorithm with nothing to get
+wrong.
 
-This is a real, if small, cost worth naming: a declared-but-unused environment
-variable reads as unfinished work, and the natural instinct of the next person
-to see it is to wire it up. That is the risk the decision accepts, and the
-reason it is written down rather than left as an inference.
+_Amended 2026-08-23._ This section originally documented `TEST_JWT_SECRET`, an
+optional variable declared in `env.validation.ts` and set in `.env.example`
+that no code read. The entry named its own cost: a declared-but-unused
+variable reads as unfinished work, and the instinct of the next person to see
+it is to wire it up. That is exactly what was proposed, and the amendment below
+is what was built instead. The variable has been deleted.
+
+### The issuer is configurable, the strategy is not
+
+_Added 2026-08-23._
+
+Everything above left one thing impossible: exercising a role-gated route
+locally. The role claim is stamped by an Auth0 Post Login Action that calls
+back into the API, and Auth0's servers cannot reach `localhost`, so no
+ADMIN-claimed token could exist against a local server. The only ways to get
+one were a real staging login or a tunnel — both heavyweight, neither wanted
+for routine work. Write-path _logic_ was already covered by the `.spec` suites,
+which override the guard through Nest's testing module; what was missing was
+end-to-end confidence against a live local server, and any way at all to hand-
+test the ADMIN-gated content-entry routes that authoring depends on.
+
+`AUTH0_ISSUER_URL` and `AUTH0_JWKS_URI` are optional, and default to the values
+derived from `AUTH0_DOMAIN`. Staging and production set neither and behave
+exactly as before. Local development points them at a mock OIDC provider
+(`apps/api/scripts/mock-oidc`) that serves a JWKS and mints RS256 tokens with
+arbitrary claims.
+
+**This is a different kind of change from the bypass rejected above, and the
+difference is the whole argument.** A `NODE_ENV` or shared-secret bypass adds a
+branch to the running service — a second way to be authenticated, which is
+wrong in exactly one environment away from where it was tested. Swapping the
+issuer adds no branch. `algorithms: ['RS256']`, `audience` and `issuer` are
+still pinned and still applied unconditionally; the service still trusts only
+RS256 verified against a published JWKS. What moved is which URL the keys are
+read from — a value that already came from configuration, since `AUTH0_DOMAIN`
+determined it. The trust surface is the same size; nothing new can be wrong.
+
+Two variables rather than one derived from the other, because the paths
+genuinely differ: Auth0 serves `/.well-known/jwks.json` and the mock serves
+`/jwks`. Deriving one from the other looked tidier and simply 404s.
+
+A consequence worth stating plainly: **anything that can set these variables
+can make the API trust a different key.** That was already true of
+`AUTH0_DOMAIN` — the JWKS URL was built from it — so this widens no boundary.
+It does mean the deployed task definitions must keep leaving both unset, which
+is the case today; the defaults are not a fallback for a misconfiguration, they
+are the production configuration.
+
+Tokens name a real `User.id` in their `userId` claim, so the seed creates three
+dev users, one per rung, on the `--dev` path only. Content attribution is a
+non-null foreign key: a token pointing at no row authenticates and then fails
+the first write. See `packages/database/src/dev-users.ts`.
 
 ### Roles are ranked, not matched
 
