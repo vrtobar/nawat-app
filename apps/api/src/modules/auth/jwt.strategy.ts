@@ -20,17 +20,29 @@ const LOCALE_CLAIM = `${CLAIM_NAMESPACE}/locale`;
 // the JWKS endpoint — no shared secret exists in this application, and a leak
 // of anything here would not let an attacker mint tokens.
 //
-// There is deliberately NO HS256 path. env.validation declares an optional
-// TEST_JWT_SECRET for integration-test tokens; wiring it here would mean the
-// running service accepts symmetric tokens whenever that variable is present,
-// so anyone holding the secret could forge role: ADMIN. Gating on NODE_ENV
-// only relocates the failure to a misconfigured environment. Integration tests
-// override the guard through Nest's testing module instead, which leaves this
-// path single-algorithm with no branch to get wrong.
+// There is deliberately NO HS256 path and no NODE_ENV bypass. Accepting
+// symmetric tokens whenever some variable happened to be present would let
+// anyone holding that value forge role: ADMIN, and gating it on NODE_ENV only
+// relocates the failure to a misconfigured environment — the branch itself is
+// the vulnerability. See docs/adr/0013.
+//
+// What IS configurable is the issuer, not the strategy. AUTH0_ISSUER_URL and
+// AUTH0_JWKS_URI both default to the Auth0 tenant, so deployed environments
+// set neither; local development points them at a mock OIDC provider to mint
+// tokens with arbitrary claims for hand-testing role-gated routes. Every
+// verification parameter below still applies unconditionally, so there is no
+// new branch here to get wrong — that is what makes this different in kind
+// from the bypass above.
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService<Env, true>) {
     const domain = config.get('AUTH0_DOMAIN', { infer: true });
+
+    // Trailing slash matters: Auth0 stamps `iss` as https://<domain>/ and the
+    // check below is a string comparison against it.
+    const issuer = config.get('AUTH0_ISSUER_URL', { infer: true }) ?? `https://${domain}/`;
+    const jwksUri =
+      config.get('AUTH0_JWKS_URI', { infer: true }) ?? `https://${domain}/.well-known/jwks.json`;
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -43,7 +55,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Both must be checked. Without `audience`, a token minted by the same
       // tenant for a different API would be accepted here.
       audience: config.get('AUTH0_AUDIENCE', { infer: true }),
-      issuer: `https://${domain}/`,
+      issuer,
 
       // jwks-rsa fetches and caches the signing keys, so key rotation needs no
       // deploy. rateLimit bounds requests to Auth0 if an attacker floods the
@@ -52,7 +64,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         cache: true,
         rateLimit: true,
         jwksRequestsPerMinute: 5,
-        jwksUri: `https://${domain}/.well-known/jwks.json`,
+        jwksUri,
       }),
     });
   }
