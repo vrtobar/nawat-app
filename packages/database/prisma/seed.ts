@@ -96,6 +96,96 @@ const SEED_AUTHOR = {
   role: 'CONTRIBUTOR',
 } as const;
 
+// -----------------------------------------------------------------------------
+// DEV LOGIN USERS
+// -----------------------------------------------------------------------------
+
+// Accounts for hand-testing role-gated routes against a local mock OIDC issuer
+// (docs/adr/0013). They are a companion to that issuer and useless without it:
+// a User row grants nothing on its own, because authorization is read from the
+// token, never from the database. Staging runs this same seed and is verified
+// against the real Auth0 tenant, which will never mint a `seed|` subject — so
+// the rows are inert there by construction.
+//
+// Same conventions as SEED_AUTHOR above, for the same reasons: `seed|` is not
+// an Auth0 connection prefix so these can never collide with a real `sub`, and
+// `.invalid` is reserved by RFC 2606 so the addresses can never be delivered
+// to. Dev path only — seedReference must stay safe for production.
+//
+// `id` is set explicitly instead of letting @default(cuid()) generate it. The
+// token's https://nahuat.com/userId claim has to match a real User.id, and a
+// generated cuid is not known until seed time — pinning the ids is what lets
+// tokens be minted offline, deterministically, with no database lookup.
+// Entry.creatorId and Translation.creatorId are non-null FKs with
+// onDelete: Restrict, so a token whose userId points at no row authenticates
+// happily and then fails the first write on a foreign key violation.
+//
+// All three rungs of the ladder, not just ADMIN: @Roles is a ranked comparison
+// (ADR 0013), so proving CONTRIBUTOR is refused a publish needs a CONTRIBUTOR
+// token as much as proving ADMIN is allowed one needs an ADMIN token.
+const DEV_USERS = [
+  {
+    id: 'dev_user_0000000000000000',
+    auth0Id: 'seed|dev-user',
+    email: 'dev-user@nahuat.invalid',
+    name: 'Dev User (USER)',
+    role: 'USER',
+  },
+  {
+    id: 'dev_contributor_000000000',
+    auth0Id: 'seed|dev-contributor',
+    email: 'dev-contributor@nahuat.invalid',
+    name: 'Dev User (CONTRIBUTOR)',
+    role: 'CONTRIBUTOR',
+  },
+  {
+    id: 'dev_admin_000000000000000',
+    auth0Id: 'seed|dev-admin',
+    email: 'dev-admin@nahuat.invalid',
+    name: 'Dev User (ADMIN)',
+    role: 'ADMIN',
+  },
+] as const;
+
+async function seedDevUsers(): Promise<void> {
+  for (const user of DEV_USERS) {
+    // Upsert on auth0Id, matching how a real login resolves a user. `update`
+    // carries role deliberately: changing a rung in this list should take
+    // effect on a re-seed rather than silently keeping the old one.
+    //
+    // `id` is absent from `update` on purpose — it is a primary key that
+    // Entry.creatorId and Translation.creatorId point at, so rewriting it
+    // would strand existing attribution. On a new database this never
+    // matters: no row matches, `create` runs, and the pinned id is used.
+    const row = await prisma.user.upsert({
+      where: { auth0Id: user.auth0Id },
+      create: user,
+      update: { email: user.email, name: user.name, role: user.role },
+      select: { id: true },
+    });
+
+    // Which leaves one way to end up wrong: a row that already exists under
+    // this auth0Id with some other id — a database seeded before these ids
+    // were pinned, or a pinned id edited in the list above. The upsert would
+    // report success while the id silently stayed stale, and the failure
+    // would surface much later as a foreign key violation on the first write
+    // by a token whose userId claim points at nothing. Refuse instead, and
+    // say exactly how to fix it.
+    if (row.id !== user.id) {
+      throw new Error(
+        `Dev user "${user.auth0Id}" exists with id "${row.id}", expected "${user.id}". ` +
+          `Tokens minted for this user would fail on write. Delete the row and re-seed: ` +
+          `DELETE FROM users WHERE auth0_id = '${user.auth0Id}';`,
+      );
+    }
+  }
+
+  console.log(
+    `dev users: ${DEV_USERS.length} (${DEV_USERS.map((u) => u.role).join(', ')}) ` +
+      `— local mock-issuer logins, dev/staging only`,
+  );
+}
+
 async function seedDevContent(): Promise<void> {
   const path = join(__dirname, 'seed-data', 'dev-entries.json');
   const parsed = SeedFileSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')));
@@ -198,9 +288,10 @@ async function main(): Promise<void> {
   await seedReference();
 
   if (withDevContent) {
+    await seedDevUsers();
     await seedDevContent();
   } else {
-    console.log('dev content: skipped (run `npm run db:seed:dev` to include it)');
+    console.log('dev users + content: skipped (run `npm run db:seed:dev` to include them)');
   }
 }
 
