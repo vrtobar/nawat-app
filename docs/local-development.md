@@ -86,10 +86,52 @@ you changed it deliberately.
 | Command               | What it does                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------------- |
 | `npm run db:seed`     | Reference data only. Safe in any environment; the production deploy runs it after migrations. |
-| `npm run db:seed:dev` | Reference data plus placeholder content, for local work.                                      |
+| `npm run db:seed:dev` | Reference data, a sample dictionary, and the three dev login users. Local and staging only.   |
 
 The split is structural rather than a flag because the seed task's command is
 overridden at run time, and a flag would put one typo between production and a
-dictionary of invented Nawat. **The placeholder entries are not real Nawat** —
-they are deliberately implausible (`zzz-placeholder-one`) so they cannot be
-mistaken for data.
+dictionary of invented Nawat. Everything reachable from the reference path must
+be safe to apply to production on every deploy, forever — which is why the dev
+users, one of them an ADMIN, live strictly on the other side of it.
+
+**The sample entries are real headwords with fabricated detail** — the regional
+variants, phonetics, examples and audio URLs are invented. They are test data,
+not authoritative Nawat, and the file says so. Real vocabulary enters through
+the API with validation and attribution, never through a fixture.
+
+### Hand-testing a role-gated route
+
+There is no dev bypass in the auth strategy, by design
+([ADR 13](adr/0013-authentication-and-authorization.md)). Auth0 stamps the role
+claim from a Post Login Action that calls back into the API, which it cannot do
+for `localhost`, so a local OIDC issuer stands in and mints the token that
+Action would have produced.
+
+```bash
+npm run db:seed:dev                                      # the three dev users
+npm run auth:mock --workspace=api                        # leave running
+npm run --silent auth:token --workspace=api -- admin     # or contributor | user
+```
+
+Point the API at it in `apps/api/.env.local`, then restart:
+
+```
+AUTH0_ISSUER_URL=http://localhost:8080/
+AUTH0_JWKS_URI=http://localhost:8080/jwks
+```
+
+```bash
+TOKEN=$(npm run --silent auth:token --workspace=api -- admin)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/v1/users/me
+```
+
+Two variables rather than one, because Auth0 serves its keys at
+`/.well-known/jwks.json` and the mock serves them at `/jwks`. Both are optional
+and default to the Auth0 tenant, so staging and production set neither.
+
+The signing key is cached in `apps/api/.mock-oidc-key.json` (gitignored) so
+restarting the issuer does not invalidate tokens already minted. Delete it to
+rotate.
+
+**Leave both unset to talk to real Auth0.** They are not a fallback for a
+missing configuration — unset _is_ the deployed configuration.
