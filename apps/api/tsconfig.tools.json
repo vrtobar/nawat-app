@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Type-checks the development scripts under scripts/, which tsconfig.json's
+  // `include: ["src"]` never sees. They do not ship — nothing here runs in
+  // production — but untypechecked code rots, and these read the same claim
+  // shape the strategy validates.
+  //
+  // Same split as packages/database/tsconfig.tools.json: rootDir is src and
+  // outDir is dist, so files above rootDir cannot go in tsconfig.json without
+  // breaking the emit layout.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*.ts"]
+}
