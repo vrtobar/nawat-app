@@ -121,7 +121,13 @@ resource "aws_ecs_task_definition" "api" {
         { name = "AUTH0_AUDIENCE", valueFrom = "${var.secret_arns["auth0"]}:audience::" },
         { name = "AUTH0_MGMT_CLIENT_ID", valueFrom = "${var.secret_arns["auth0_mgmt"]}:clientId::" },
         { name = "AUTH0_MGMT_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0_mgmt"]}:clientSecret::" },
-        { name = "INTERNAL_SECRET", valueFrom = "${var.secret_arns["internal"]}:secret::" },
+        # INTERNAL_SECRET was injected here until 2026-08-24, guarding
+        # POST /auth/role for the Auth0 Post Login Action. Both the endpoint and
+        # the Action are gone — identity is resolved per request from the
+        # database — so the API no longer reads it. The Secrets Manager secret
+        # itself still exists in each environment's foundation state; removing
+        # it is a separate human apply, deliberately not bundled with an
+        # application change.
       ])
 
       logConfiguration = {
@@ -178,11 +184,10 @@ resource "aws_ecs_task_definition" "web" {
         { name = "APP_BASE_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
       ]
 
-      # v4 SDK variable names. AUTH0_SECRET encrypts the session cookie; it is
-      # a separate key inside the auth0 secret rather than a reuse of
-      # INTERNAL_SECRET, which guards the /auth/role endpoint. Sharing one
-      # value across both would mean compromising either one compromises the
-      # other, despite serving unrelated trust boundaries.
+      # v4 SDK variable names. AUTH0_SECRET encrypts the session cookie and is
+      # its own key inside the auth0 secret, never shared with another value —
+      # compromising one would otherwise compromise the other across unrelated
+      # trust boundaries.
       secrets = [
         { name = "AUTH0_DOMAIN", valueFrom = "${var.secret_arns["auth0"]}:domain::" },
         { name = "AUTH0_CLIENT_ID", valueFrom = "${var.secret_arns["auth0"]}:clientId::" },
