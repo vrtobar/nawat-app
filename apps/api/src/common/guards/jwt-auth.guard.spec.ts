@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -93,6 +93,30 @@ describe('JwtAuthGuard', () => {
     }
   });
 
+  // Added 2026-08-24 with the per-request identity lookup: validate() now
+  // refuses a deactivated account with a 403, and flattening that into the
+  // generic 401 below told the caller to re-authenticate — advice that cannot
+  // work for an account that is disabled.
+  it('rethrows a deliberate refusal from validate() with its own status', () => {
+    const { guard } = guardWith(false);
+    const thrown = new ForbiddenException({
+      code: 'USER_DEACTIVATED',
+      message: 'This account has been deactivated',
+    });
+
+    try {
+      guard.handleRequest(thrown, false, undefined);
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toMatchObject({
+        code: 'USER_DEACTIVATED',
+      });
+    }
+  });
+
+  // The passthrough above must not swallow a plain Error, which is how a
+  // verification failure arrives alongside `info`.
   it('prefers the verification failure when both are present', () => {
     // `info` describes why the token itself failed, which is more specific
     // than whatever wrapper `err` carries.

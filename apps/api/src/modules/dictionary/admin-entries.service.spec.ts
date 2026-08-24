@@ -23,8 +23,13 @@ vi.mock('@nahuat/database', () => ({
 
 const entry = vi.mocked(prisma.entry);
 
-const admin: JwtClaims = { sub: 'auth0|a', role: 'ADMIN', userId: 'usr_admin' };
-const contributor: JwtClaims = { sub: 'auth0|c', role: 'CONTRIBUTOR', userId: 'usr_contrib' };
+const admin: JwtClaims = { sub: 'auth0|a', role: 'ADMIN', userId: 'usr_admin', locale: 'es' };
+const contributor: JwtClaims = {
+  sub: 'auth0|c',
+  role: 'CONTRIBUTOR',
+  userId: 'usr_contrib',
+  locale: 'es',
+};
 
 // Same reason as dialects.service.spec: Prisma mocks are cast to `never`, so
 // TypeScript checks nothing about the returned shape. Parsing every response

@@ -53,9 +53,6 @@ const EnvSchema = z
     AUTH0_MGMT_CLIENT_ID: z.string().min(1),
     AUTH0_MGMT_CLIENT_SECRET: z.string().min(1),
 
-    // Shared secret protecting the internal /auth/role endpoint
-    INTERNAL_SECRET: z.string().min(1),
-
     // Uploads / CDN
     S3_BUCKET: z.string().min(1),
     CDN_URL: z.url(),

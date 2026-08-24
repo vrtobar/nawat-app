@@ -40,6 +40,16 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   // and 'jwt expired' versus 'invalid signature' is the difference between the
   // client refreshing and the client being wrong.
   override handleRequest<TUser>(err: unknown, user: TUser, info: unknown): TUser {
+    // An HttpException from validate() is a deliberate, already-shaped refusal
+    // — USER_DEACTIVATED being the one that exists — so it passes through
+    // untouched. Without this it would be flattened into the generic 401 below
+    // and the caller would be told to re-authenticate, which for a deactivated
+    // account is advice that cannot work. Verification failures do not arrive
+    // this way: passport reports those on `info`.
+    if (err instanceof HttpException) {
+      throw err;
+    }
+
     if (err || !user) {
       throw new UnauthorizedException({
         code: 'UNAUTHORIZED',
