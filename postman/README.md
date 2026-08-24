@@ -17,7 +17,8 @@ Every URL is driven by `{{baseUrl}}`/`{{healthBase}}`, so pick an environment
 | **Nahuat — Local**   | `nahuat-local.postman_environment.json`   | `http://localhost:3001`          |
 | **Nahuat — Staging** | `nahuat-staging.postman_environment.json` | `https://api.staging.nahuat.com` |
 
-Each defines `token` (secret) and the
+Each defines `token` (secret), `webBaseUrl` — the Next app, which is where
+`/auth/*` is mounted and therefore where tokens come from — and the
 `entryId`/`translationId`/`dialectId`/`slug` placeholders to fill from a
 browse/list response. Add a production environment by copying the staging one and
 swapping the host — but production is torn down between sessions
@@ -39,10 +40,30 @@ determine your role** — the user row does. A role change applies to the very
 next request rather than at the next login, and a deactivated account is refused
 with `USER_DEACTIVATED`.
 
-- **Authed routes → use the Staging environment.** Log into the staging web app
-  (`https://staging.nahuat.com`), copy the access token it sends to the API (from
-  the Network tab's `Authorization` header, or the SDK session), and paste it into
-  the Staging environment's `token`.
+### Getting a token into `{{token}}`
+
+**Session → "Get access token → saves {{token}}"** does it for you: it calls
+`{{webBaseUrl}}/auth/access-token` and a post-response script writes the result
+into the active environment, so every authed request picks it up. Re-run it when
+the token expires (an hour) rather than minting anything by hand.
+
+That endpoint is on the **web app**, not the API — the API only ever verifies
+tokens — and it authorises by **session cookie**. So Postman needs the cookie the
+browser holds:
+
+1. Sign in at `{{webBaseUrl}}` in the browser.
+2. Copy the session cookie into Postman's **Cookies** manager (under the Send
+   button) for that domain.
+3. Run the request. The console reports the expiry it saved.
+
+If you would rather not manage cookies, open `{{webBaseUrl}}/auth/access-token`
+in the browser and paste the `token` value into the environment by hand — the
+same value, one more step.
+
+**A token does not carry your rank.** It carries only `sub`; the API reads role
+from your user row on every request. Changing a role in the database applies to
+the next request, with no new token and no re-login.
+
 - **Authed routes locally → mint a token from the mock issuer.** A local OIDC
   issuer stands in for the tenant, swapping the _issuer_ and not the _strategy_
   — the API still verifies RS256 against a JWKS endpoint with issuer and

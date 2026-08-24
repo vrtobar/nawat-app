@@ -21,6 +21,11 @@
       "type": "string"
     },
     {
+      "key": "webBaseUrl",
+      "value": "",
+      "type": "default"
+    },
+    {
       "key": "healthBase",
       "value": "http://localhost:3001/api",
       "type": "string"
@@ -85,6 +90,64 @@
             },
             "description": "Readiness probe (DB connectivity). Public, version-neutral."
           }
+        }
+      ]
+    },
+    {
+      "name": "Session",
+      "description": "Getting a token. /auth/access-token is mounted on the WEB app by the Auth0 SDK ({{webBaseUrl}}), not on the API ({{baseUrl}}) \u2014 the API never issues tokens, it only verifies them.\n\nIt authorises by SESSION COOKIE, so Postman needs the cookie the browser holds. Sign in at {{webBaseUrl}}, then copy the session cookie into Postman's Cookies manager for that domain (Cookies, under the Send button). Once it is there this request works and re-running it refreshes an expired token.\n\nIf you would rather not manage cookies, open {{webBaseUrl}}/auth/access-token in the browser and paste the `token` value into the environment by hand.",
+      "item": [
+        {
+          "name": "Get access token \u2192 saves {{token}}",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{webBaseUrl}}/auth/access-token",
+              "host": ["{{webBaseUrl}}"],
+              "path": ["auth", "access-token"]
+            },
+            "description": "Returns { token, expiresAt } for the signed-in session and writes `token` into the active environment, so every authed request in this collection picks it up.\n\nThe token carries only `sub`. Your rank comes from your user row, which the API reads on every request \u2014 so changing a role in the database takes effect immediately and does NOT need a new token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Writes the token into the active environment so the",
+                  "// collection-level Bearer auth ({{token}}) picks it up.",
+                  "let body;",
+                  "try {",
+                  "    body = pm.response.json();",
+                  "} catch (e) {",
+                  "    body = null;",
+                  "}",
+                  "",
+                  "pm.test('200 with a token', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(body && body.token, 'no token in response').to.be.a('string');",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401 || pm.response.code === 302) {",
+                  "    // No session cookie, or it expired. Postman does not follow the",
+                  "    // login redirect usefully \u2014 sign in in the browser first.",
+                  "    console.log('Not signed in. Sign in at the web app, then copy the session cookie into Postman.');",
+                  "} else if (body && typeof body.token === 'string') {",
+                  "    pm.environment.set('token', body.token);",
+                  "    const expiresAt = body.expiresAt ? new Date(body.expiresAt * 1000).toISOString() : 'unknown';",
+                  "    console.log('Saved {{token}}. Expires: ' + expiresAt);",
+                  "} else {",
+                  "    // Leave the old token alone rather than blanking it: a transient",
+                  "    // failure should not also log you out of every other request.",
+                  "    console.log('No token saved; the previous {{token}} is unchanged.');",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
