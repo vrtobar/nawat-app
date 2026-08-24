@@ -12,11 +12,20 @@ import { LOCALE_COOKIE, LOCALES, resolveLocale } from './lib/locale';
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // /auth/* is mounted by the Auth0 SDK, /api/* is never localized — both go
-  // straight to the SDK middleware, never the locale redirect, which would
-  // otherwise turn /auth/callback into /es/auth/callback and break the login
-  // round-trip.
-  if (pathname.startsWith('/auth') || pathname.startsWith('/api')) {
+  // Three prefixes skip the locale redirect and go straight to the SDK
+  // middleware. /auth/* is mounted by the SDK and would break the login
+  // round-trip if /auth/callback became /es/auth/callback. /api/* is never
+  // localized. /admin/* is the authoring panel, which is deliberately not
+  // localized either: it is staff tooling, and translating it would double the
+  // copy for an audience that reads the language it is written in.
+  //
+  // They still run auth0.middleware — skipping the locale redirect is not
+  // skipping the session. /admin needs the session most of all.
+  if (
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/admin')
+  ) {
     return auth0.middleware(request);
   }
 
