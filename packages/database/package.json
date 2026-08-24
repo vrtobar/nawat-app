@@ -29,6 +29,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:dev": "tsx prisma/seed.ts --dev",
+    "db:psql": "docker compose exec postgres psql -U nahuat -d nahuat_dev",
     "db:studio": "prisma studio",
     "test:unit": "vitest run"
   },
