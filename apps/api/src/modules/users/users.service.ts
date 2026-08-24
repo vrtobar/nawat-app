@@ -31,11 +31,12 @@ export class UsersService {
 
     // 401 rather than 404, and the distinction is deliberate.
     //
-    // The token asserts this user exists — /auth/role created the row and
-    // minted the claims from it. So a missing row means it was hard-deleted
-    // after the token was issued, and deletedAt means soft-deleted mid-session.
-    // Either way the token is still signed, unexpired and valid; what it
-    // describes is no longer true.
+    // JwtStrategy resolved this user from the database moments ago, so a
+    // missing row here means it was hard-deleted between the auth lookup and
+    // this query, and deletedAt means soft-deleted in the same window. Either
+    // way the token is still signed, unexpired and valid; what it describes is
+    // no longer true. (Before 2026-08-24 the window was much wider: the claims
+    // were minted at login and the row was not re-read on the way in.)
     //
     // 404 would read as "no such profile" and invite a retry. 401 tells the
     // client its credentials no longer represent a real user, which is what

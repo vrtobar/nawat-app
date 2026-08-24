@@ -11,7 +11,6 @@ const baseEnv = {
   AUTH0_CLIENT_SECRET: 'client-secret',
   AUTH0_MGMT_CLIENT_ID: 'mgmt-client-id',
   AUTH0_MGMT_CLIENT_SECRET: 'mgmt-client-secret',
-  INTERNAL_SECRET: 'internal-secret',
   S3_BUCKET: 'nahuat-assets',
   CDN_URL: 'https://cdn.nahuat.com',
 };
