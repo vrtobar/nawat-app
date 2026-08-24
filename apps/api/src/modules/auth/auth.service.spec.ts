@@ -19,6 +19,15 @@ const config = { get: () => 'tenant.auth0.com' } as unknown as ConfigService<nev
 
 const SUB = 'google-oauth2|1038929';
 
+// A P2002 shaped the way the pg driver adapter reports it. Prisma's documented
+// meta.target is undefined under that adapter; the columns live on the
+// adapter's error cause, which is what uniqueViolationFields reads.
+const uniqueViolation = (fields: string[]) =>
+  Object.assign(new Error('unique constraint'), {
+    code: 'P2002',
+    meta: { driverAdapterError: { cause: { constraint: { fields } } } },
+  });
+
 const row = (overrides: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   role: 'USER',
@@ -179,11 +188,12 @@ describe('AuthService.resolveIdentity', () => {
     });
 
     // A page load fires several requests at once, so two can both miss and both
-    // insert. The loser re-reads what the winner wrote.
+    // insert. The loser re-reads what the winner wrote. The first findUnique is
+    // the initial miss; the second is the recovery read.
     it('recovers from a concurrent insert by re-reading', async () => {
       vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
-      user.create.mockRejectedValue(Object.assign(new Error('dup'), { code: 'P2002' }) as never);
-      user.findUniqueOrThrow.mockResolvedValue({
+      user.create.mockRejectedValue(uniqueViolation(['auth0_id']) as never);
+      user.findUnique.mockResolvedValueOnce(null as never).mockResolvedValueOnce({
         id: 'usr_winner',
         role: 'CONTRIBUTOR',
         locale: 'EN',
@@ -197,6 +207,58 @@ describe('AuthService.resolveIdentity', () => {
         role: 'CONTRIBUTOR',
         locale: 'en',
       });
+    });
+
+    // Auth0 keys identity on connection + subject, so signing in with Google
+    // and with an email code produce different `sub` values for one person. The
+    // second arrives here as a new user whose email is already taken.
+    //
+    // The original code assumed every P2002 was a race on auth0_id, re-read by
+    // auth0Id, found nothing, and let Prisma's NotFoundError — carrying the
+    // query and absolute source paths — reach the client as a 401 body.
+    it('refuses a second identity whose email is already registered', async () => {
+      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'taken@b.com' }));
+      user.create.mockRejectedValue(uniqueViolation(['email']) as never);
+
+      expect(await errorCode(service.resolveIdentity(SUB, 'tok'))).toBe('EMAIL_ALREADY_REGISTERED');
+    });
+
+    it('does not name the connection that owns the address', async () => {
+      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'taken@b.com' }));
+      user.create.mockRejectedValue(uniqueViolation(['email']) as never);
+
+      // Confirming which connection holds an address would confirm the address
+      // is registered at all — an enumeration oracle on a public login page.
+      try {
+        await service.resolveIdentity(SUB, 'tok');
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        const payload = (error as { getResponse: () => { message: string } }).getResponse();
+        expect(payload.message).not.toContain('taken@b.com');
+        expect(payload.message.toLowerCase()).not.toContain('google');
+      }
+    });
+
+    // uniqueViolationFields reaches into an adapter-specific error shape and
+    // returns [] if Prisma ever moves it. A genuine race must still recover.
+    it('still recovers from a race when the violated fields cannot be read', async () => {
+      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
+      user.create.mockRejectedValue(Object.assign(new Error('dup'), { code: 'P2002' }) as never);
+      user.findUnique
+        .mockResolvedValueOnce(null as never)
+        .mockResolvedValueOnce({ id: 'usr_winner', role: 'USER', locale: 'ES' } as never);
+
+      const result = await service.resolveIdentity(SUB, 'tok');
+      expect(result).toMatchObject({ userId: 'usr_winner' });
+    });
+
+    // Whatever this is, it is not something to guess at — and it must not leak.
+    it('refuses cleanly when a unique violation leaves no readable row', async () => {
+      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
+      user.create.mockRejectedValue(uniqueViolation(['username']) as never);
+      user.findUnique.mockResolvedValue(null as never);
+
+      expect(await errorCode(service.resolveIdentity(SUB, 'tok'))).toBe('UNAUTHORIZED');
     });
 
     it('rethrows a create failure that is not a unique violation', async () => {

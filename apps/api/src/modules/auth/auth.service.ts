@@ -1,14 +1,18 @@
 import { prisma } from '@nahuat/database';
-import type { JwtClaims } from '@nahuat/shared';
-import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { API_ERROR_CODES, type JwtClaims } from '@nahuat/shared';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 
 import { LOCALE_TO_WIRE } from '../../common/locale';
+import { isPrismaError, PRISMA_ERROR, uniqueViolationFields } from '../../common/prisma-error';
 import type { Env } from '../../config/env.validation';
-
-// Prisma's unique-constraint violation.
-const UNIQUE_VIOLATION = 'P2002';
 
 // The auth path must not hang on a slow Auth0. Only reached when provisioning
 // a user seen for the first time, so the timeout costs nothing on the hot path.
@@ -128,22 +132,76 @@ export class AuthService {
         locale: LOCALE_TO_WIRE[created.locale],
       };
     } catch (error) {
-      // Two concurrent first requests can both miss and both insert — more
-      // likely now than at login time, since a page load fires several requests
-      // at once. The loser gets P2002; re-reading is correct because the winner
-      // wrote exactly what this call would have.
-      if (isUniqueViolation(error)) {
-        const raced = await prisma.user.findUniqueOrThrow({
+      // WHICH unique constraint matters. `users` holds three — auth0_id, email
+      // and username — and the original code assumed any P2002 here meant a
+      // concurrent insert of the same subject. It does not.
+      const fields = uniqueViolationFields(error);
+
+      // A second Auth0 identity carrying an email that already belongs to
+      // someone. Auth0 keys identity on connection + subject, so signing in
+      // with Google and with an email code produce different `sub` values for
+      // the same person, and the second one arrives here as a brand new user
+      // whose email is taken.
+      //
+      // Refused, not merged. Linking the two would mean deciding that a
+      // matching email proves the same person, which is only true when both
+      // addresses are verified — and getting that wrong is an account
+      // takeover, not an inconvenience. See the BACKLOG entry.
+      //
+      // The message deliberately does not name which connection owns the
+      // address. Doing so would confirm to any caller that a given email is
+      // registered here.
+      if (fields.includes('email')) {
+        this.logger.warn(`email already registered under a different auth0Id (sub "${auth0Id}")`);
+        throw new ConflictException({
+          code: API_ERROR_CODES.EMAIL_ALREADY_REGISTERED,
+          message:
+            'An account already exists for this email address. ' +
+            'Sign in the way you did the first time.',
+        });
+      }
+
+      // Any other P2002 is treated as the genuine race until proven otherwise:
+      // two concurrent first requests both missed and both inserted. More
+      // likely than it was at login time, since a page load fires several
+      // requests at once. Re-reading is correct because the winner wrote
+      // exactly what this call would have.
+      //
+      // This arm also catches a P2002 whose fields could not be read at all.
+      // uniqueViolationFields reaches into an adapter-specific error shape and
+      // returns [] if that shape ever moves, and the recovery must not depend
+      // on it: a genuine race failing because Prisma reorganised an error would
+      // be a worse bug than the one being fixed.
+      if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) {
+        const raced = await prisma.user.findUnique({
           where: { auth0Id },
           select: { id: true, role: true, locale: true },
         });
 
-        return {
-          sub: auth0Id,
-          userId: raced.id,
-          role: raced.role,
-          locale: LOCALE_TO_WIRE[raced.locale],
-        };
+        // findUnique, not findUniqueOrThrow. A miss means this was not a race
+        // at all — some other constraint collided, or the fields were
+        // unreadable and the email case fell through to here — and the Prisma
+        // NotFoundError that findUniqueOrThrow raises carries file paths and
+        // source lines. That is exactly how a stack trace reached a client on
+        // 2026-08-24.
+        if (raced) {
+          return {
+            sub: auth0Id,
+            userId: raced.id,
+            role: raced.role,
+            locale: LOCALE_TO_WIRE[raced.locale],
+          };
+        }
+
+        this.logger.error(
+          `unique violation on user create for sub "${auth0Id}" ` +
+            `(fields: ${fields.length > 0 ? fields.join(', ') : 'unreadable'}) ` +
+            `and no row is readable under that auth0Id`,
+        );
+        throw new UnauthorizedException({
+          code: API_ERROR_CODES.UNAUTHORIZED,
+          message: 'Could not establish identity',
+        });
       }
 
       throw error;
@@ -189,13 +247,4 @@ export class AuthService {
 
     return parsed.data;
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code: unknown }).code === UNIQUE_VIOLATION
-  );
 }
