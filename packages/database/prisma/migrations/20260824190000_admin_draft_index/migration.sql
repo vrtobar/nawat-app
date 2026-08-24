@@ -1,0 +1,32 @@
+-- Supporting index for the authoring panel's draft queue.
+--
+-- Hand-written: Prisma cannot express a WHERE clause on an index, so this
+-- cannot live in schema.prisma. Same constraint, and the same maintenance
+-- hazard, as 20260815160500_partial_live_indexes.
+--
+-- WHY NOTHING EXISTING SERVES THIS. entries_live_idx is partial on
+-- `WHERE is_published AND deleted_at IS NULL` — precisely the complement of a
+-- draft list, so it can never be used for one. The remaining indexes on
+-- `entries` are the primary key, the two uniques (nawat_content, slug) and the
+-- trigram GIN. A draft page therefore had no index at all and sorted the table.
+--
+-- WHAT IT SERVES. GET /admin/entries with its default status=draft:
+--   WHERE NOT is_published AND deleted_at IS NULL ORDER BY updated_at DESC
+-- The predicate matches exactly and updated_at is the leading column, so the
+-- page is an index scan with no sort. Contributor scoping (creator_id = $1) is
+-- applied as a filter on top rather than added to the index: leading with
+-- creator_id would make this unusable for an ADMIN, who reads every author's
+-- rows, and the partial index has already narrowed to drafts by then.
+--
+-- WHAT IT DELIBERATELY DOES NOT SERVE. status=published and status=all are left
+-- unindexed. The published set is what the public dictionary reads, which has
+-- its own partial index, and status=all on a table this size sequentially scans
+-- for less than the cost of maintaining a third index. Revisit when the entry
+-- count makes that untrue.
+--
+-- MAINTENANCE. A partial index is only usable when the query's WHERE clause
+-- implies its predicate. If the draft filter in AdminEntriesService ever stops
+-- being exactly `isPublished: false, deletedAt: null`, this stops being used
+-- silently — no error, just a sequential scan. Re-check with EXPLAIN.
+CREATE INDEX "entries_drafts_idx" ON "entries" ("updated_at" DESC)
+  WHERE NOT "is_published" AND "deleted_at" IS NULL;
