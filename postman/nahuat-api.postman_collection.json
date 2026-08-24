@@ -1,22 +1,55 @@
 {
   "info": {
     "name": "Nahuat API",
-    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables — every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat — Local** → http://localhost:3001. Public routes work; authed routes do not (see Auth).\n- **Nahuat — Staging** → https://api.staging.nahuat.com. The whole API works here, including authed routes, because the Auth0 tenant lives with this environment.\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, validated via JWKS against the tenant) — there is no local/HS256 bypass (ADR 13) — carrying a namespaced role claim `https://nahuat.com/role`. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Get a token by logging into the **staging** web app (https://staging.nahuat.com) and copying the access token it sends to the API (the CONTRIBUTOR/ADMIN role claim is stamped at login by the Auth0 Post-Login Action, so it must be an interactive login — not client-credentials). Paste it into the Staging environment's `token`.\n- **Locally, authed routes cannot be exercised yet**: Auth0 can't reach localhost to run the Action, and the strategy has no dev bypass. The planned fix is a local mock OIDC/JWKS issuer (swap the issuer, not the strategy) — tracked in the backlog. Until then, use the Staging environment for authed routes.\n- **/auth/role** is public but gated by the `x-internal-secret` header (= the API's INTERNAL_SECRET), in `{{internalSecret}}`. Normally only the Auth0 Action calls it.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
+    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables \u2014 every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat \u2014 Local** \u2192 http://localhost:3001\n- **Nahuat \u2014 Staging** \u2192 https://api.staging.nahuat.com\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, verified via JWKS against the tenant) \u2014 there is no local/HS256 bypass (ADR 13).\n\nThe token carries only `sub`. Since 2026-08-24 the API resolves the platform user id and role from its own database on every request, so a role change takes effect immediately rather than at the next login, and a deactivated account is refused on its next request with USER_DEACTIVATED. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Log into the web app for the environment you are targeting and copy the access token it sends to the API.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "bearer",
-    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3001/api/v1", "type": "string" },
-    { "key": "healthBase", "value": "http://localhost:3001/api", "type": "string" },
-    { "key": "token", "value": "", "type": "string" },
-    { "key": "internalSecret", "value": "", "type": "string" },
-    { "key": "entryId", "value": "REPLACE_WITH_ENTRY_ID", "type": "string" },
-    { "key": "translationId", "value": "REPLACE_WITH_TRANSLATION_ID", "type": "string" },
-    { "key": "dialectId", "value": "REPLACE_WITH_DIALECT_ID", "type": "string" },
-    { "key": "slug", "value": "takat", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "healthBase",
+      "value": "http://localhost:3001/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "entryId",
+      "value": "REPLACE_WITH_ENTRY_ID",
+      "type": "string"
+    },
+    {
+      "key": "translationId",
+      "value": "REPLACE_WITH_TRANSLATION_ID",
+      "type": "string"
+    },
+    {
+      "key": "dialectId",
+      "value": "REPLACE_WITH_DIALECT_ID",
+      "type": "string"
+    },
+    {
+      "key": "slug",
+      "value": "takat",
+      "type": "string"
+    }
   ],
   "item": [
     {
@@ -25,7 +58,9 @@
         {
           "name": "Liveness",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
@@ -39,7 +74,9 @@
         {
           "name": "Readiness",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{healthBase}}/health/ready",
@@ -52,25 +89,33 @@
       ]
     },
     {
-      "name": "Dictionary — reads (public)",
+      "name": "Dictionary \u2014 reads (public)",
       "item": [
         {
           "name": "Browse entries",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/entries?page=1&limit=20",
               "host": ["{{baseUrl}}"],
               "path": ["entries"],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
                 {
                   "key": "type",
                   "value": "WORD",
                   "disabled": true,
-                  "description": "WORD | EXPRESSION (PHRASE is rejected — lesson-only)"
+                  "description": "WORD | EXPRESSION (PHRASE is rejected \u2014 lesson-only)"
                 },
                 {
                   "key": "partOfSpeech",
@@ -78,7 +123,11 @@
                   "disabled": true,
                   "description": "NOUN|VERB|ADJECTIVE|ADVERB|PRONOUN|PARTICLE|PREPOSITION|CONJUNCTION|OTHER"
                 },
-                { "key": "dialectCode", "value": "common", "disabled": true },
+                {
+                  "key": "dialectCode",
+                  "value": "common",
+                  "disabled": true
+                },
                 {
                   "key": "isPublished",
                   "value": "true",
@@ -89,7 +138,7 @@
                   "key": "locale",
                   "value": "en",
                   "disabled": true,
-                  "description": "es (default) | en — resolves gloss/example language"
+                  "description": "es (default) | en \u2014 resolves gloss/example language"
                 }
               ]
             },
@@ -99,18 +148,40 @@
         {
           "name": "Search entries",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/entries/search?q=takat",
               "host": ["{{baseUrl}}"],
               "path": ["entries", "search"],
               "query": [
-                { "key": "q", "value": "takat", "description": "required; pg_trgm fuzzy match" },
-                { "key": "type", "value": "WORD", "disabled": true },
-                { "key": "dialectCode", "value": "common", "disabled": true },
-                { "key": "page", "value": "1", "disabled": true },
-                { "key": "limit", "value": "20", "disabled": true }
+                {
+                  "key": "q",
+                  "value": "takat",
+                  "description": "required; pg_trgm fuzzy match"
+                },
+                {
+                  "key": "type",
+                  "value": "WORD",
+                  "disabled": true
+                },
+                {
+                  "key": "dialectCode",
+                  "value": "common",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": true
+                }
               ]
             },
             "description": "Fuzzy search. `q` is required (400 without it). Public."
@@ -119,13 +190,21 @@
         {
           "name": "Entry by slug",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/entries/by-slug/{{slug}}?locale=es",
               "host": ["{{baseUrl}}"],
               "path": ["entries", "by-slug", "{{slug}}"],
-              "query": [{ "key": "locale", "value": "es", "disabled": true }]
+              "query": [
+                {
+                  "key": "locale",
+                  "value": "es",
+                  "disabled": true
+                }
+              ]
             },
             "description": "Canonical addressing by slug (accent-folded nawatContent). Public."
           }
@@ -133,7 +212,9 @@
         {
           "name": "Entry by id",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/entries/{{entryId}}",
@@ -146,19 +227,32 @@
       ]
     },
     {
-      "name": "Dictionary — writes (CONTRIBUTOR / ADMIN)",
+      "name": "Dictionary \u2014 writes (CONTRIBUTOR / ADMIN)",
       "item": [
         {
           "name": "Create entry (CONTRIBUTOR)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/entries", "host": ["{{baseUrl}}"], "path": ["entries"] },
+            "url": {
+              "raw": "{{baseUrl}}/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["entries"]
+            },
             "description": "Create a headword only (translations added separately). imageUrl optional. Requires CONTRIBUTOR."
           }
         },
@@ -166,11 +260,20 @@
           "name": "Create full entry (CONTRIBUTOR)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"niño | bebé\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[ˈkunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El niño duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"ni\u00f1o | beb\u00e9\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[\u02c8kunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El ni\u00f1o duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/entries/full",
@@ -184,11 +287,20 @@
           "name": "Update entry (CONTRIBUTOR)",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"nawatContent\": \"kunet\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/entries/{{entryId}}",
@@ -231,11 +343,20 @@
           "name": "Add translation (CONTRIBUTOR)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"niño\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[ˈkunet]\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"ni\u00f1o\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[\u02c8kunet]\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/entries/{{entryId}}/translations",
@@ -249,11 +370,20 @@
           "name": "Update translation (CONTRIBUTOR)",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"contentEs\": \"niño | crío\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"contentEs\": \"ni\u00f1o | cr\u00edo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/translations/{{translationId}}",
@@ -283,9 +413,15 @@
         {
           "name": "List dialects (public)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/dialects", "host": ["{{baseUrl}}"], "path": ["dialects"] },
+            "url": {
+              "raw": "{{baseUrl}}/dialects",
+              "host": ["{{baseUrl}}"],
+              "path": ["dialects"]
+            },
             "description": "Reference data, ordered by precedence. Public."
           }
         },
@@ -293,13 +429,26 @@
           "name": "Create dialect (ADMIN)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"code\": \"tacuba\",\n  \"nameEs\": \"Nawat de Tacuba\",\n  \"nameEn\": \"Tacuba Nawat\",\n  \"descriptionEs\": \"Variedad del nawat hablada en la comunidad de Tacuba.\",\n  \"descriptionEn\": \"The variety of Nawat spoken in the community of Tacuba.\",\n  \"precedence\": 50\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{baseUrl}}/dialects", "host": ["{{baseUrl}}"], "path": ["dialects"] },
+            "url": {
+              "raw": "{{baseUrl}}/dialects",
+              "host": ["{{baseUrl}}"],
+              "path": ["dialects"]
+            },
             "description": "Both languages required (reference data). precedence optional (defaults to 100). Requires ADMIN."
           }
         },
@@ -307,11 +456,20 @@
           "name": "Update dialect (ADMIN)",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"precedence\": 45\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/dialects/{{dialectId}}",
@@ -348,33 +506,6 @@
               "path": ["users", "me"]
             },
             "description": "The current user's profile. Any authenticated user; the id comes from the token. Needs a valid Bearer token."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Auth",
-      "item": [
-        {
-          "name": "Sync role (internal secret)",
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-internal-secret", "value": "{{internalSecret}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"auth0Id\": \"google-oauth2|1234567890\",\n  \"email\": \"someone@example.com\",\n  \"name\": \"Someone\",\n  \"pictureUrl\": null\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/role",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "role"]
-            },
-            "description": "Upserts the user and returns { userId, role, locale }. Public route, gated by the x-internal-secret header (INTERNAL_SECRET env). Normally only the Auth0 Post-Login Action calls this."
           }
         }
       ]
