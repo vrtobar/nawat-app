@@ -2,6 +2,7 @@ import {
   type ExecutionContext,
   HttpException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -15,6 +16,8 @@ import { IS_PUBLIC } from '../decorators/public.decorator';
 // because nothing fails when a decorator is forgotten.
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(private readonly reflector: Reflector) {
     super();
   }
@@ -51,6 +54,15 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
 
     if (err || !user) {
+      // An unexpected error from validate() is not surfaced to the caller (see
+      // describe), so log it here or the diagnosis is lost entirely. Guarded on
+      // `err` being a non-HttpException, since the deliberate refusals already
+      // returned above and passport's own verification failures on `info` are
+      // ordinary traffic, not incidents.
+      if (err instanceof Error) {
+        this.logger.error(`authentication failed unexpectedly: ${err.stack ?? err.message}`);
+      }
+
       throw new UnauthorizedException({
         code: 'UNAUTHORIZED',
         // `info` first because it carries the verification failure — expired,
@@ -61,7 +73,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         // for missing claims returned "Authentication required", the reason
         // was discarded, and the token had to be decoded by hand to find a
         // fault the API had already diagnosed.
-        message: describe(info) ?? describe(err) ?? 'Authentication required',
+        message: describeInfo(info) ?? describeThrown(err) ?? 'Authentication required',
       });
     }
 
@@ -69,11 +81,30 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 }
 
-// passport-jwt reports verification failures in `info` — a TokenExpiredError,
-// JsonWebTokenError, or a plain string when no token was supplied. Errors
-// thrown inside validate() arrive as `err`, wrapped in an HttpException whose
-// payload holds the message.
-function describe(reason: unknown): string | undefined {
+// TWO SOURCES, TWO RULES. They were one function until 2026-08-24, and merging
+// them is what let a Prisma error reach a client — message, failing query,
+// absolute source path and surrounding lines.
+//
+// `info` is passport's own verification outcome: a TokenExpiredError or
+// JsonWebTokenError from `jsonwebtoken`, or a plain string when no token was
+// supplied. Its messages are a closed set written by that library — 'jwt
+// expired', 'invalid signature', 'jwt malformed' — and they are exactly the
+// diagnosis a caller needs, so an Error message is safe to surface here.
+function describeInfo(reason: unknown): string | undefined {
+  if (typeof reason === 'string') return reason;
+  if (reason instanceof Error && reason.message) return reason.message;
+  return undefined;
+}
+
+// `err` is whatever `validate()` threw. Since 2026-08-24 that method queries
+// the database and calls Auth0, so it can be a driver or HTTP client error
+// whose message is written for an operator and may quote internals.
+//
+// Only an HttpException is returned — one this codebase constructed on purpose,
+// with a payload it chose. Anything else degrades to `undefined` and the caller
+// sees the generic 'Authentication required'. The diagnosis is not lost;
+// handleRequest logs it.
+function describeThrown(reason: unknown): string | undefined {
   if (typeof reason === 'string') return reason;
 
   if (reason instanceof HttpException) {
@@ -85,8 +116,6 @@ function describe(reason: unknown): string | undefined {
     }
     return reason.message;
   }
-
-  if (reason instanceof Error && reason.message) return reason.message;
 
   return undefined;
 }
