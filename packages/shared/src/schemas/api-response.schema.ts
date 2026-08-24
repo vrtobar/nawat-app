@@ -130,6 +130,11 @@ export const API_ERROR_CODES = {
   // Auth / users
   USER_NOT_FOUND: 'USER_NOT_FOUND',
   USER_DEACTIVATED: 'USER_DEACTIVATED',
+  // A second Auth0 identity — a different connection, so a different `sub` —
+  // presenting an email address that already belongs to a user row. Auth0 keys
+  // identity on connection + subject; this API keys it on auth0Id and holds a
+  // unique constraint on email, so the two cannot both exist.
+  EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES];
