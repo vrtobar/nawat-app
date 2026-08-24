@@ -1,5 +1,5 @@
 import { Prisma } from '@nahuat/database';
-import { type Locale, type TranslationDetail } from '@nahuat/shared';
+import { type AdminTranslationDetail, type Locale, type TranslationDetail } from '@nahuat/shared';
 
 // The full translation shape for a detail response — every field
 // TranslationDetail declares, plus its dialect inline so the client needs no
@@ -75,6 +75,64 @@ export function toTranslationDetail(t: TranslationDetailRow, locale: Locale): Tr
     phonetic: t.phonetic,
     partOfSpeech: t.partOfSpeech,
     exampleNawat: t.exampleNawat,
+    audioUrl: t.audioUrl,
+    isPublished: t.isPublished,
+    dialect: t.dialect,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
+
+// The admin projection. Same columns as TRANSLATION_DETAIL_SELECT — the
+// difference is entirely in the mapping, which hands both languages back
+// instead of resolving one. Declared separately rather than aliased so that
+// adding a column for one surface is a deliberate choice about the other:
+// these two shapes answer to different audiences and are expected to diverge.
+export const ADMIN_TRANSLATION_SELECT = {
+  id: true,
+  contentEs: true,
+  contentEn: true,
+  exampleNawat: true,
+  exampleEs: true,
+  exampleEn: true,
+  phonetic: true,
+  partOfSpeech: true,
+  audioUrl: true,
+  isPublished: true,
+  createdAt: true,
+  updatedAt: true,
+  dialect: {
+    select: {
+      id: true,
+      code: true,
+      nameEs: true,
+      nameEn: true,
+      descriptionEs: true,
+      descriptionEn: true,
+      precedence: true,
+    },
+  },
+} satisfies Prisma.TranslationSelect;
+
+export type AdminTranslationRow = Prisma.TranslationGetPayload<{
+  select: typeof ADMIN_TRANSLATION_SELECT;
+}>;
+
+// Maps a translation row for the editor. No resolveContent call and no locale
+// argument: every paired column is handed over as stored, which is what lets the
+// form PATCH back exactly the field names it received. contentEs is non-null in
+// the schema; contentEn genuinely may be absent, and the editor renders that as
+// an empty field to fill rather than an error.
+export function toAdminTranslationDetail(t: AdminTranslationRow): AdminTranslationDetail {
+  return {
+    id: t.id,
+    contentEs: t.contentEs,
+    contentEn: t.contentEn,
+    exampleNawat: t.exampleNawat,
+    exampleEs: t.exampleEs,
+    exampleEn: t.exampleEn,
+    phonetic: t.phonetic,
+    partOfSpeech: t.partOfSpeech,
     audioUrl: t.audioUrl,
     isPublished: t.isPublished,
     dialect: t.dialect,
