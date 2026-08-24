@@ -137,7 +137,7 @@ variable "cdn_domain" {
 }
 
 variable "secret_arns" {
-  description = "Foundation's Secrets Manager ARNs, keyed auth0 / auth0_mgmt / internal"
+  description = "Foundation's Secrets Manager ARNs, keyed auth0 / auth0_mgmt / internal (internal is no longer read by any container)"
   type        = map(string)
 }
 
