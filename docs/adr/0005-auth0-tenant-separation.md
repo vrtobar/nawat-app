@@ -3,6 +3,11 @@
 - **Status:** Accepted
 - **Date:** 2026-08-14 (records a decision taken 2026-08-13)
 - **Supersedes:** two earlier positions recorded below
+- **Amended 2026-08-24:** the decision stands, but its strongest argument no
+  longer applies. The Post Login Action was deleted
+  ([ADR 13](0013-authentication-and-authorization.md)), so a shared tenant can
+  no longer route a login to the wrong API. See "What the Action's removal
+  changes" below.
 
 ## Context
 
@@ -33,7 +38,10 @@ new account serves staging and local development.
 ### Why, on the merits
 
 **A shared tenant turns the Post Login Action into a security boundary.**
-Actions are tenant-level. One tenant serving both environments means a single
+_(No longer applicable as of 2026-08-24 — the Action is deleted. Retained
+because it was the argument that decided this, and a later reader comparing the
+tenants should know why the separation exists rather than assume it is
+arbitrary.)_ Actions are tenant-level. One tenant serving both environments means a single
 Action must branch on `event.client.client_id` to decide whether to call
 `api.nahuat.com` or `api.staging.nahuat.com`, holding an internal secret for
 each. A bug in that branch mints staging tokens carrying production roles. With
@@ -96,6 +104,27 @@ taken and is not resolved.
 **If the terms disallow it,** the fallback is separate applications in one
 tenant, with the Post Login Action's routing logic treated as security-critical
 and reviewed as such — not as plumbing.
+
+## What the Action's removal changes
+
+**Added 2026-08-24.** With the Post Login Action deleted, the failure mode this
+record was written against — one Action branching on `client_id` and calling the
+wrong API, minting staging tokens carrying production roles — cannot occur. A
+login now produces a token and nothing else; the API resolves role and identity
+from its own database.
+
+The separation is still right, on the arguments that remain: Auth0 configuration
+(connections, email provider, tenant settings) is tenant-level and would
+otherwise be unrehearsable, production's tenant does not list `localhost`
+callback URLs, and rate limits are not shared with a test environment.
+
+One constraint disappears outright. The staging tenant serves both staging and
+local development, and a single Action could not point at two APIs — which is
+why local development could not exercise login at all, and why a mock OIDC
+issuer was built to work around it. Nothing in the login path is
+environment-specific any more, so a local browser login against the staging
+tenant now works, resolving identity against whichever API the developer is
+running.
 
 ## Alternatives considered
 
