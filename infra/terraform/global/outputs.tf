@@ -70,3 +70,8 @@ output "github_build_role_arn" {
   description = "Add to GitHub variable: AWS_BUILD_ROLE_ARN"
   value       = aws_iam_role.github_build.arn
 }
+
+output "ssm_session_log_group" {
+  description = "CloudWatch group carrying every Session Manager transcript, both environments"
+  value       = aws_cloudwatch_log_group.ssm_sessions.name
+}
