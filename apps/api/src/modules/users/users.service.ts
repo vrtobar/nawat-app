@@ -40,12 +40,13 @@ export class UsersService {
     //
     // 404 would read as "no such profile" and invite a retry. 401 tells the
     // client its credentials no longer represent a real user, which is what
-    // happened, and prompts re-authentication — where /auth/role refuses a
-    // deactivated account outright.
+    // happened, and prompts re-authentication.
     //
-    // This also closes the window where a soft-deleted user keeps working until
-    // their token expires. Revoking the Auth0 session prevents a new login but
-    // does nothing to a token already issued.
+    // Since 2026-08-24 this is a second line rather than the mechanism:
+    // AuthService.resolveIdentity() refuses a soft-deleted or inactive account
+    // on every authenticated request, so the window this once closed on its own
+    // is now closed globally. It is kept for the hard-delete case above, which
+    // that check cannot see — a row that vanished has no isActive to read.
     if (!user || user.deletedAt !== null || !user.isActive) {
       throw new UnauthorizedException({
         code: 'UNAUTHORIZED',
