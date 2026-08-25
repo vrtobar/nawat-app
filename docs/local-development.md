@@ -61,6 +61,123 @@ typechecks and passes tests feels finished. CI runs `prettier --check .` and
 fails the pull request on whitespace — including in files you never opened, so
 format-on-save never touched them.
 
+## Reaching a deployed database
+
+Sometimes the question is about staging's data rather than the local copy —
+whether a migration landed, what a real login actually wrote, why a row looks
+the way it does.
+
+There is no direct route. RDS runs with `publicly_accessible = false` in private
+subnets, and ECS Exec is disabled on the services. Exec would not help even if
+it were enabled: `ecs execute-command` runs a command inside a task, while port
+forwarding needs an SSM _managed instance_, which a Fargate task is not.
+
+The path is an SSM bastion — a `t4g.nano` with no public IP, no key pair and no
+inbound rules at all. Session Manager works by the agent dialling out, so there
+is nothing listening to connect to and nothing to scan for. Access is an IAM
+question rather than a network one: whoever can call `ssm:StartSession` gets in,
+and nobody else does.
+
+```bash
+./infra/scripts/db-tunnel.sh staging          # localhost:5433 -> staging RDS
+./infra/scripts/db-tunnel.sh staging 5555     # pick the local port
+./infra/scripts/db-tunnel.sh staging --print-dsn   # connection string, then exit
+```
+
+It reads the instance id, the RDS endpoint and the database name from Terraform
+outputs rather than taking them as arguments. A hostname typed by hand is how
+someone ends up connected to production while believing they are in staging.
+
+Needs the Session Manager plugin, which is separate from the AWS CLI:
+
+```bash
+brew install --cask session-manager-plugin
+```
+
+### You will also need a psql that is not `db:psql`
+
+`npm run db:psql` is `docker compose exec postgres ...` — it talks to the local
+container and cannot see a forwarded port. Three options that can:
+
+```bash
+# Docker, no install. From inside a container localhost is the container,
+# so the host is reached as host.docker.internal.
+docker run --rm -it -e PGPASSWORD="$PGPASSWORD" postgres:16-alpine \
+  psql -h host.docker.internal -p 5433 -U nahuat -d nahuat
+
+# A real client on the PATH
+brew install libpq && brew link --force libpq
+psql "postgresql://nahuat@localhost:5433/nahuat"
+```
+
+Or point any GUI client (TablePlus, DBeaver, pgAdmin) at `localhost:5433`. The
+password comes from the AWS-managed RDS secret; `--print-dsn` prints a full
+connection string including it.
+
+The bastion deliberately cannot read that secret. The tunnel forwards a TCP
+port and authentication happens on this machine, so reaching the host and being
+able to log in stay two separate permissions.
+
+### Ctrl-C does not fully close it
+
+Ctrl-C closes the local port, but the session stays **Active** on the AWS side
+until a 20-minute idle timeout — a route to the database outliving the terminal
+it was opened from. To end it properly:
+
+```bash
+aws ssm describe-sessions --state Active --query 'Sessions[].SessionId' --output text
+aws ssm terminate-session --session-id <id>
+```
+
+### What is recorded, and what is not
+
+CloudTrail logs every `StartSession` with the IAM principal, the target instance
+and the document name — who connected, to what, and when.
+
+**The SQL is not recorded anywhere.** A forwarded port carries no terminal
+output, so Session Manager never sees the queries and `/aws/ssm/nahuat-sessions`
+stays empty for tunnels. That log group captures interactive shells on the
+bastion, which is a different and rarer thing. Auditing statements would mean
+`pgaudit` or `log_statement` on the database itself.
+
+### Production works the same way
+
+`./infra/scripts/db-tunnel.sh production` — `enable_bastion` is `true` in both
+environments, and the same tunnel is how production roles get set and production
+data gets inspected.
+
+Gating production off was considered and rejected. It would have guarded against
+accident rather than against an attacker, because anyone able to apply that layer
+can set the variable themselves; and it would have cost the only practical way to
+read production data, since the alternative — a command override on the migrate
+task — runs in a `node:24-alpine` image with no `psql` and cannot return rows
+through `prisma db execute`.
+
+So reaching production data is an IAM question rather than a network one:
+`ssm:StartSession` on the instance, plus `GetSecretValue` on the RDS secret. The
+security group has no ingress rules at all, so nothing is reachable without them.
+**Guard those permissions accordingly** — they are the whole boundary.
+
+The instance still dies with the application layer, so a torn-down production has
+no bastion and the script says so.
+
+### If a bring-up fails on `bastion_sg_id`
+
+The bastion's security group lives in the **foundation** layer, not with the
+instance. The RDS group's ingress rules are inline and therefore authoritative,
+so a rule added from the application layer would be reverted by the next
+foundation apply — and database access would break with nothing in the
+application diff to explain it.
+
+The consequence is an apply order: **foundation before application**, and
+foundation is applied by hand. `staging-deploy.yml` pins itself to the
+application layer, so a bring-up against a foundation that predates the bastion
+group fails on a missing `bastion_sg_id` output and takes the whole run with it.
+
+```bash
+terraform -chdir=infra/terraform/environments/staging/foundation apply
+```
+
 ## Gotchas
 
 ### After changing `schema.prisma`, regenerate _and_ force a rebuild
