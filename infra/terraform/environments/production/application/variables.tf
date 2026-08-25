@@ -163,3 +163,18 @@ variable "enable_autoscaling" {
   type        = bool
   default     = false
 }
+
+variable "enable_bastion" {
+  description = <<-EOT
+    Whether to create the SSM bastion. True in both environments: it is the only
+    practical way to read or correct data in a database that is private by
+    design, and gating it would guard against accident rather than against an
+    attacker, since anyone able to apply this layer can set it themselves.
+
+    Kept as a variable rather than hardcoded so an environment can go without
+    one. The instance is the part that costs money, and it disappears with a
+    teardown either way.
+  EOT
+  type        = bool
+  default     = false
+}

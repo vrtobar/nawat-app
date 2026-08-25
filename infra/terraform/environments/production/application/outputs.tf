@@ -25,6 +25,11 @@ output "rds_instance_id" {
   value       = module.database.instance_id
 }
 
+output "rds_db_name" {
+  description = "Initial database name on the instance; read by db-tunnel.sh so the DSN is not hand-typed"
+  value       = module.database.db_name
+}
+
 output "db_secret_arn" {
   description = <<-EOT
     ARN of the AWS-managed RDS credentials secret. ECS task definitions
@@ -103,4 +108,15 @@ output "ecs_subnet_ids" {
 output "ecs_api_sg_id" {
   description = "Security group for run-task; the same one the API service uses"
   value       = data.terraform_remote_state.foundation.outputs.ecs_api_sg_id
+}
+
+# -----------------------------------------------------------------------------
+# Bastion — read by infra/scripts/db-tunnel.sh
+#
+# Null when enable_bastion is false, which the script reports as "no bastion in
+# this environment" rather than failing on a missing output.
+# -----------------------------------------------------------------------------
+output "bastion_instance_id" {
+  description = "SSM bastion instance id, or null when no bastion is enabled"
+  value       = one(module.bastion[*].instance_id)
 }

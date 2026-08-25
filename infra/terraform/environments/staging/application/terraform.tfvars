@@ -38,3 +38,8 @@ deployment_min_healthy_pct = 0
 ecs_stop_timeout           = 5
 log_retention_days         = 7
 enable_autoscaling         = false
+
+# Database access. True here because reaching staging's database is routine
+# work and there is no other path to it: RDS is private and ECS Exec is off.
+# Dies with `staging-deploy.yml down`, so it bills only while staging is up.
+enable_bastion = true
