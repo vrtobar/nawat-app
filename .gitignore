@@ -63,5 +63,11 @@ pnpm-debug.log*
 # Misc caches
 .eslintcache
 
+# Signing key for the local mock OIDC issuer (apps/api/scripts/mock-oidc).
+# Generated on first run of `npm run auth:mock`; delete it to rotate. A
+# throwaway development key — it signs tokens only an API pointed at
+# http://localhost will verify — but a private key all the same.
+apps/api/.mock-oidc-key.json
+
 # Planning/handoff space 
 .claude/

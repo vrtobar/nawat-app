@@ -7,6 +7,7 @@ import { CreateEntrySchema, CreateTranslationSchema, slugifyNawat } from '@nahua
 import { PrismaPg } from '@prisma/adapter-pg';
 import { z } from 'zod';
 
+import { DEV_USERS } from '../src/dev-users';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { buildDatabaseUrl } from '../src/url';
 import { DIALECTS } from './seed-data/dialects';
@@ -95,6 +96,53 @@ const SEED_AUTHOR = {
   name: 'Seed (sample content)',
   role: 'CONTRIBUTOR',
 } as const;
+
+// -----------------------------------------------------------------------------
+// DEV LOGIN USERS
+// -----------------------------------------------------------------------------
+
+// DEV_USERS lives in src/dev-users.ts because the token-minting script needs
+// the same ids; see the reasoning there. Dev path only — seedReference must
+// stay safe to apply to production, every time, forever.
+
+async function seedDevUsers(): Promise<void> {
+  for (const user of DEV_USERS) {
+    // Upsert on auth0Id, matching how a real login resolves a user. `update`
+    // carries role deliberately: changing a rung in this list should take
+    // effect on a re-seed rather than silently keeping the old one.
+    //
+    // `id` is absent from `update` on purpose — it is a primary key that
+    // Entry.creatorId and Translation.creatorId point at, so rewriting it
+    // would strand existing attribution. On a new database this never
+    // matters: no row matches, `create` runs, and the pinned id is used.
+    const row = await prisma.user.upsert({
+      where: { auth0Id: user.auth0Id },
+      create: user,
+      update: { email: user.email, name: user.name, role: user.role },
+      select: { id: true },
+    });
+
+    // Which leaves one way to end up wrong: a row that already exists under
+    // this auth0Id with some other id — a database seeded before these ids
+    // were pinned, or a pinned id edited in the list above. The upsert would
+    // report success while the id silently stayed stale, and the failure
+    // would surface much later as a foreign key violation on the first write
+    // by a token whose userId claim points at nothing. Refuse instead, and
+    // say exactly how to fix it.
+    if (row.id !== user.id) {
+      throw new Error(
+        `Dev user "${user.auth0Id}" exists with id "${row.id}", expected "${user.id}". ` +
+          `Tokens minted for this user would fail on write. Delete the row and re-seed: ` +
+          `DELETE FROM users WHERE auth0_id = '${user.auth0Id}';`,
+      );
+    }
+  }
+
+  console.log(
+    `dev users: ${DEV_USERS.length} (${DEV_USERS.map((u) => u.role).join(', ')}) ` +
+      `— local mock-issuer logins, dev/staging only`,
+  );
+}
 
 async function seedDevContent(): Promise<void> {
   const path = join(__dirname, 'seed-data', 'dev-entries.json');
@@ -198,9 +246,10 @@ async function main(): Promise<void> {
   await seedReference();
 
   if (withDevContent) {
+    await seedDevUsers();
     await seedDevContent();
   } else {
-    console.log('dev content: skipped (run `npm run db:seed:dev` to include it)');
+    console.log('dev users + content: skipped (run `npm run db:seed:dev` to include them)');
   }
 }
 

@@ -6,6 +6,19 @@
 - **Amended 2026-08-17:** `REVIEWER` was removed from the role ladder. The
   decision below — ranked roles rather than capabilities — is unchanged; the
   ladder is three rungs instead of four. See the note in Consequences.
+- **Amended 2026-08-23:** the token _issuer_ became configurable so local
+  development can verify against a mock OIDC provider. The decision below —
+  RS256 verified against a JWKS endpoint, with no symmetric path — is
+  unchanged. `TEST_JWT_SECRET` was deleted. See "The issuer is configurable,
+  the strategy is not" below.
+- **REVERSED 2026-08-24:** authorization no longer comes from the token. Role
+  and user id are read from the database on every authenticated request, the
+  Auth0 Post Login Action is deleted, and `POST /auth/role` with it. **The
+  verification half of this record is untouched** — RS256 via JWKS, no
+  symmetric path, no bypass. What changed is where the API learns _who_ the
+  verified caller is. See "Reversal: identity is resolved per request" below,
+  which supersedes "Authorization comes from the token, so it costs no query"
+  and "The one route a token cannot protect".
 
 ## Context
 
@@ -19,7 +32,9 @@ with an endpoint that is protected in one sense and not the other.
 
 There is also one route that cannot use a token at all. `POST /auth/role` is
 called by the Auth0 Post Login Action **during** login — it is what produces the
-claims a token will carry, so no token exists when it runs.
+claims a token will carry, so no token exists when it runs. _(That route and
+that Action were deleted 2026-08-24; this paragraph records the problem as it
+stood when the decision was taken.)_
 
 ## Decision
 
@@ -37,8 +52,10 @@ defaults get forgotten at the same rate:
 | How you find out              | Immediately, in dev   | Possibly never                |
 
 The guard resolves `@Public()` with `getAllAndOverride` across the handler and
-the class, so it can be applied to either. Two things use it today: the health
-controller, at class level, and `POST /auth/role`.
+the class, so it can be applied to either. Two things used it when this was
+written: the health controller, at class level, and `POST /auth/role`. Since
+2026-08-24 the health controller and the public dictionary reads are what carry
+it; `POST /auth/role` no longer exists.
 
 The health controller's exemption is not incidental. The ECS probe carries no
 credentials, so without `@Public()` the container fails its own health check,
@@ -50,10 +67,14 @@ an open endpoint.
 `RolesGuard` is registered **after** `JwtAuthGuard`. Nest runs global guards in
 registration order and `RolesGuard` reads the user the first one attaches;
 reversed, every `@Roles` route would 403 because no user exists yet. Route-level
-guards run after both, which is why `POST /auth/role` can be `@Public()` and
-still not be public — `InternalSecretGuard` applies to it.
+guards run after both, which is why `POST /auth/role` could be `@Public()` and
+still not be public — `InternalSecretGuard` applied to it. Both are gone as of
+2026-08-24; the ordering rule they illustrate is unchanged.
 
 ### Authorization comes from the token, so it costs no query
+
+> **SUPERSEDED 2026-08-24.** Kept because the reasoning is still the reason the
+> reversal cost something. See "Reversal: identity is resolved per request".
 
 `request.user` is the verified claim set, not a database row. Auth0 requires
 custom claims to be namespaced, so the role and the platform user id arrive as
@@ -87,20 +108,67 @@ Three verification parameters are pinned deliberately:
 No shared secret exists in this service for token verification, so nothing here
 can leak in a way that lets an attacker mint a token.
 
-**`TEST_JWT_SECRET` is declared and deliberately never read.**
-`env.validation.ts:59` accepts it as optional and `.env.example` sets it, but no
-application code consumes it and none is intended to. Honouring it would mean
-the running service accepts symmetric tokens whenever that variable happens to
-be present, so anyone holding the value could forge `role: ADMIN`. Gating on
-`NODE_ENV` does not fix this — it relocates the failure to a misconfigured
-environment, and the branch itself is the vulnerability. Integration tests
-override the guard through Nest's testing module instead, which leaves this path
-single-algorithm with nothing to get wrong.
+**No symmetric path exists, and no `NODE_ENV` bypass.** Honouring a shared
+secret would mean the running service accepts symmetric tokens whenever some
+variable happens to be present, so anyone holding the value could forge
+`role: ADMIN`. Gating that on `NODE_ENV` does not fix it — it relocates the
+failure to a misconfigured environment, and the branch itself is the
+vulnerability. Integration tests override the guard through Nest's testing
+module instead, which leaves this path single-algorithm with nothing to get
+wrong.
 
-This is a real, if small, cost worth naming: a declared-but-unused environment
-variable reads as unfinished work, and the natural instinct of the next person
-to see it is to wire it up. That is the risk the decision accepts, and the
-reason it is written down rather than left as an inference.
+_Amended 2026-08-23._ This section originally documented `TEST_JWT_SECRET`, an
+optional variable declared in `env.validation.ts` and set in `.env.example`
+that no code read. The entry named its own cost: a declared-but-unused
+variable reads as unfinished work, and the instinct of the next person to see
+it is to wire it up. That is exactly what was proposed, and the amendment below
+is what was built instead. The variable has been deleted.
+
+### The issuer is configurable, the strategy is not
+
+_Added 2026-08-23._
+
+Everything above left one thing impossible: exercising a role-gated route
+locally. The role claim is stamped by an Auth0 Post Login Action that calls
+back into the API, and Auth0's servers cannot reach `localhost`, so no
+ADMIN-claimed token could exist against a local server. The only ways to get
+one were a real staging login or a tunnel — both heavyweight, neither wanted
+for routine work. Write-path _logic_ was already covered by the `.spec` suites,
+which override the guard through Nest's testing module; what was missing was
+end-to-end confidence against a live local server, and any way at all to hand-
+test the ADMIN-gated content-entry routes that authoring depends on.
+
+`AUTH0_ISSUER_URL` and `AUTH0_JWKS_URI` are optional, and default to the values
+derived from `AUTH0_DOMAIN`. Staging and production set neither and behave
+exactly as before. Local development points them at a mock OIDC provider
+(`apps/api/scripts/mock-oidc`) that serves a JWKS and mints RS256 tokens with
+arbitrary claims.
+
+**This is a different kind of change from the bypass rejected above, and the
+difference is the whole argument.** A `NODE_ENV` or shared-secret bypass adds a
+branch to the running service — a second way to be authenticated, which is
+wrong in exactly one environment away from where it was tested. Swapping the
+issuer adds no branch. `algorithms: ['RS256']`, `audience` and `issuer` are
+still pinned and still applied unconditionally; the service still trusts only
+RS256 verified against a published JWKS. What moved is which URL the keys are
+read from — a value that already came from configuration, since `AUTH0_DOMAIN`
+determined it. The trust surface is the same size; nothing new can be wrong.
+
+Two variables rather than one derived from the other, because the paths
+genuinely differ: Auth0 serves `/.well-known/jwks.json` and the mock serves
+`/jwks`. Deriving one from the other looked tidier and simply 404s.
+
+A consequence worth stating plainly: **anything that can set these variables
+can make the API trust a different key.** That was already true of
+`AUTH0_DOMAIN` — the JWKS URL was built from it — so this widens no boundary.
+It does mean the deployed task definitions must keep leaving both unset, which
+is the case today; the defaults are not a fallback for a misconfiguration, they
+are the production configuration.
+
+Tokens name a real `User.id` in their `userId` claim, so the seed creates three
+dev users, one per rung, on the `--dev` path only. Content attribution is a
+non-null foreign key: a token pointing at no row authenticates and then fails
+the first write. See `packages/database/src/dev-users.ts`.
 
 ### Roles are ranked, not matched
 
@@ -137,6 +205,12 @@ Two failure modes are deliberate:
 
 ### The one route a token cannot protect
 
+> **SUPERSEDED 2026-08-24.** The route, the guard and the secret are all
+> deleted. The `timingSafeEqual` reasoning below is retained because it applies
+> to any future shared-secret comparison, and the deactivation rule it describes
+> moved rather than disappeared. See "Reversal: identity is resolved per
+> request".
+
 `POST /auth/role` is guarded by a shared secret in `x-internal-secret`, held by
 Auth0's Action secrets and AWS Secrets Manager. This is a different mechanism
 from JWT verification, and weaker in a specific way worth stating: compromising
@@ -162,28 +236,106 @@ Three further properties of that endpoint follow from the same reasoning:
   gap: revoking an Auth0 session prevents nothing about a _new_ login, so a
   soft-deleted user would otherwise sign back in and receive a working token.
 
+### Reversal: identity is resolved per request
+
+**Decided 2026-08-24.** `validate()` reads `sub` from the verified token and
+looks the user up by `auth0Id` — one indexed read on a unique btree — returning
+the same `JwtClaims` shape the custom claims used to produce. Nothing
+downstream changed: `RolesGuard`, `@CurrentUser` and `@ContentLocale` read the
+same four fields from the same place.
+
+The Auth0 Post Login Action is deleted, and with it `POST /auth/role`,
+`InternalSecretGuard`, and `INTERNAL_SECRET` in both environments' task
+definitions.
+
+**Why the original decision did not survive contact.** Not performance — the
+query is genuinely cheap, and every request that reaches this point queries the
+database for its own work anyway. Four things, in rough order of weight:
+
+- **The Action was undeployable.** It lived as a file pasted into the Auth0
+  dashboard, mirrored in the repository by hand with a header admitting
+  "editing this file deploys nothing". It could not be tested, reviewed against
+  what actually ran, versioned with the code depending on it, or rolled back
+  with a release. Every other component of this system has those properties.
+- **Login depended on the API being reachable.** The Action called the API to
+  resolve the role and denied the login if the call failed, so an API outage
+  became an authentication outage — with a generic message.
+- **One Action could not serve two environments.** Actions are tenant-level,
+  and the staging tenant serves both staging and local development. Local
+  development therefore could not log in at all, which is what forced a mock
+  OIDC issuer into existence to hand-test role-gated routes. The reversal
+  removes the constraint instead of working around it.
+- **Role and deactivation changes did not take effect.** A promotion required
+  revoking the session and signing in again; a deactivated account kept a
+  working token until it expired. Both now apply on the caller's next request.
+  The Consequences section below recorded the first of these as an accepted
+  price; it is no longer paid.
+
+**What it costs.** One database read on the authentication path, and a new
+dependency: an authenticated request cannot be served while Postgres is down,
+where previously a cached or trivially-served route might have been. Given that
+the deactivation gate is itself a database fact, that dependency was always
+implicit in wanting the gate to be correct.
+
+**Provisioning moved with it.** The Action created the user row from the ID
+token's profile. The API now fetches `/userinfo` from Auth0 on the first
+request from an unknown `sub`, once per account ever. Deliberately not taken
+from the client: `email` is unique and non-null, so a client-supplied profile
+would let a caller choose the address attached to their own row. The subject in
+the response is compared against the subject in the token, and a mismatch is
+refused rather than written.
+
+**Kept from the superseded sections.** `role` is still never written by any
+login path — it is set by an admin through the users module. Deactivated
+accounts are still refused with `USER_DEACTIVATED`; that check simply moved
+from once-per-login to once-per-request, which is strictly stronger.
+
 ## Consequences
 
-- **A role change does nothing until the Auth0 session is revoked and the user
-  signs in again.** This is the direct price of authorizing from claims, and
-  nothing inside the API can shorten it — the old token remains signed,
-  unexpired, and valid, and the whole point of the design is that no route
-  consults the database to second-guess it.
+- ~~**A role change does nothing until the Auth0 session is revoked and the
+  user signs in again.**~~ **No longer true as of 2026-08-24.** This was the
+  direct price of authorizing from claims: the old token stayed signed,
+  unexpired and valid, and no route consulted the database to second-guess it.
+  Identity is now resolved per request, so a role change and a deactivation
+  both take effect on the caller's next request. The price paid instead is one
+  indexed read per authenticated request — see "Reversal: identity is resolved
+  per request".
 - **That consequence is currently unobservable, because nothing can change a
-  role.** There is no users admin module. `@Roles()` appears on **zero** routes —
-  only in its own definition, in the guard, and in the guard's tests. No
-  `DELETE /users/:id` exists despite comments referring to one, and nothing
-  reads `AUTH0_MGMT_CLIENT_ID` or `AUTH0_MGMT_CLIENT_SECRET`, though
-  `env.validation` requires both at boot. The authorization half of this record
-  is fully built, globally enforced, and has nothing yet to enforce.
-- **The staleness window is partly closed elsewhere, by a different
-  mechanism.** `GET /users/me` returns 401 — not 404 — when the row is missing,
-  soft-deleted, or inactive, so a session that outlives its user stops working
-  on any route that reads the profile. That is a per-route check rather than a
-  global one: a route authorizing purely from claims would not notice.
-- Deactivation is consequently enforced at two points for two different
-  reasons — `/auth/role` refuses a new login, `/users/me` refuses an
-  already-issued token.
+  role.** There is no users admin module. No `DELETE /users/:id` exists despite
+  comments referring to one, and nothing reads `AUTH0_MGMT_CLIENT_ID` or
+  `AUTH0_MGMT_CLIENT_SECRET`, though `env.validation` requires both at boot.
+
+  _Half-resolved 2026-08-20, recorded 2026-08-25._ This bullet also said
+  `@Roles()` appeared on **zero** routes. The Dictionary module changed that: it
+  gates **13** — seven at `CONTRIBUTOR` (entry and translation authoring, plus
+  the two admin read routes, gated at class level on the controller) and six at
+  `ADMIN` (publish, delete, and the three dialect writes). So the ladder is now
+  genuinely load-bearing. What remains true is the
+  narrower claim: no route can _change_ a role, so the per-request lookup's
+  headline benefit still has nothing to demonstrate itself on.
+
+  Note the ranking property was exercised the moment it had users:
+  `@Roles('CONTRIBUTOR')` on the authoring routes admits ADMIN without naming
+  it, which is the whole point of ranking over matching.
+
+- ~~**The staleness window is partly closed elsewhere, by a different
+  mechanism.**~~ ~~Deactivation is consequently enforced at two points for two
+  different reasons — `/auth/role` refuses a new login, `/users/me` refuses an
+  already-issued token.~~ **Both obsolete as of 2026-08-24**, recorded here
+  2026-08-25 because the reversal above missed them.
+
+  There is no staleness window left to close: `resolveIdentity()` reads
+  `deletedAt` and `isActive` on **every** authenticated request, so the check is
+  global rather than a per-route property of `GET /users/me`, and `/auth/role`
+  no longer exists to refuse anything. `GET /users/me` still returns 401 rather
+  than 404 for a missing row, but it is now a redundant second line rather than
+  the mechanism.
+
+  Worth keeping the shape of the original point: it was a per-route check
+  standing in for a global one, and the reason it was needed at all is that a
+  route authorizing purely from claims would not notice. That is precisely the
+  gap the reversal closed.
+
 - **401 responses carry the reason the token was rejected** — `jwt expired`
   versus `invalid signature` is the difference between the client refreshing and
   the client being wrong. Passport's default discards it, and reading only
@@ -220,9 +372,29 @@ Three further properties of that endpoint follow from the same reasoning:
   and never sent to the API, so every genuine access token failed validation
   until they were dropped. Adding them as custom claims would have made the
   schema true and put PII in every request — the profile is read from the
-  database instead, where `/auth/role` syncs it on each login.
+  database instead.
+
+  _Amended 2026-08-25._ That last clause read "where `/auth/role` syncs it on
+  each login". There is no login-time sync any more: the row is written once, by
+  `AuthService.provision()`, from Auth0's `/userinfo` on the first authenticated
+  request. **Nothing refreshes the profile after that** — a name or picture
+  changed at the identity provider does not propagate. That is a real gap the
+  reversal opened, and it belongs in the backlog rather than in a clause here.
 
 ## Open question
+
+> **DISSOLVED 2026-08-24, recorded 2026-08-25.** This question had no answer
+> because it had no subject: the Post Login Action it is about is deleted, and
+> the constraint went with it. Local development now signs in against the
+> staging tenant exactly as staging does, because nothing in the login path is
+> environment-specific any more — no Action, no callback URL, no per-environment
+> secret. The leaning recorded below ("point the Action at staging only and set
+> roles by hand in the local database") was never adopted; roles are set by hand
+> in the local database, but for the ordinary reason that no admin module exists
+> yet, not as a workaround.
+>
+> Kept because the ADR 5 tension it identifies is the clearest statement of why
+> a shared tenant was uncomfortable, and ADR 5 is amended in light of it.
 
 The Post Login Action that produces these claims is tenant-level, and the
 staging tenant serves both staging and local development — so one Action holds

@@ -93,3 +93,44 @@ export const UpdateTranslationSchema = CreateTranslationSchema.omit({
 
 export type CreateTranslation = z.infer<typeof CreateTranslationSchema>;
 export type UpdateTranslation = z.infer<typeof UpdateTranslationSchema>;
+
+// -----------------------------------------------------------------------------
+// ADMIN TRANSLATION DETAIL
+// Used only by the authenticated admin read surface (GET /admin/entries/:id),
+// which backs the entry editor.
+//
+// UNRESOLVED CONTENT — the deliberate inverse of TranslationDetail above. That
+// shape resolves to one locale because a learner reads one language and
+// pagination has to filter server-side. An editor is the one client that needs
+// both: it prefills a form whose fields ARE contentEs and contentEn, so a
+// resolved shape cannot round-trip through it. Before this existed no endpoint
+// returned both languages of a row — the paired columns appeared only on the
+// write DTOs, so a client could send them and never read them back.
+//
+// The field names match CreateTranslationSchema exactly (contentEs/contentEn,
+// exampleEs/exampleEn) rather than the resolved content/example. That is the
+// point: the editor PATCHes back the same field names it received, so no
+// mapping layer sits between the form and UpdateTranslationSchema where a
+// rename could silently drop a field.
+//
+// No `locale` field, because nothing was resolved. audioKey/imageKey stay
+// excluded — S3 keys are internal regardless of who is asking.
+// -----------------------------------------------------------------------------
+
+export const AdminTranslationDetailSchema = z.object({
+  id: z.string(),
+  contentEs: z.string(),
+  contentEn: z.string().nullable(),
+  exampleNawat: z.string().nullable(),
+  exampleEs: z.string().nullable(),
+  exampleEn: z.string().nullable(),
+  phonetic: z.string().nullable(),
+  partOfSpeech: PartOfSpeechSchema.nullable(),
+  audioUrl: z.url().nullable(),
+  isPublished: z.boolean(),
+  dialect: DialectSchema,
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export type AdminTranslationDetail = z.infer<typeof AdminTranslationDetailSchema>;

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PaginationParamsSchema } from './api-response.schema';
 import { LocaleSchema } from './locale.schema';
 import {
+  AdminTranslationDetailSchema,
   CreateTranslationSchema,
   PartOfSpeechSchema,
   TranslationDetailSchema,
@@ -169,3 +170,122 @@ export const CreateFullEntrySchema = CreateEntrySchema.extend({
 export type CreateEntry = z.infer<typeof CreateEntrySchema>;
 export type UpdateEntry = z.infer<typeof UpdateEntrySchema>;
 export type CreateFullEntry = z.infer<typeof CreateFullEntrySchema>;
+
+// =============================================================================
+// ADMIN SURFACE
+// Shapes for GET /admin/entries and GET /admin/entries/:id — the authenticated
+// CONTRIBUTOR+ read paths that back the content-authoring panel.
+//
+// A separate shape set rather than a flag on the public ones, for two reasons
+// that are not stylistic:
+//
+//   1. CONTENT IS UNRESOLVED. The public shapes resolve translations to one
+//      locale (ADR 0015 §4); an editor needs both languages to prefill a form.
+//      See AdminTranslationDetailSchema for the full reasoning.
+//   2. THE PUBLIC READS STAY UNAUTHENTICATED. They are @Public, so no req.user
+//      exists to authorize a draft view against, and giving them optional auth
+//      would put a fall-through branch in front of every dictionary page —
+//      the shape ADR 0013 rejects — and make a cacheable response vary by
+//      token.
+//
+// Kept in this file beside the public shapes on purpose: the two describe the
+// same resource and drift is the risk worth designing against.
+// =============================================================================
+
+// Who created or last touched a row. `id` is included here where the public
+// DictionaryEntryDetail exposes only `name` — this surface is role-gated, and
+// the panel needs the id to filter a contributor's own work. A CONTRIBUTOR only
+// ever sees rows they created, so the only id they can observe is their own.
+export const AdminActorSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+// -----------------------------------------------------------------------------
+// ADMIN LIST ITEM
+// A row in the authoring table. Deliberately NOT DictionaryEntryListItem: that
+// shape carries a primaryTranslation resolved to one locale, which a draft may
+// not have in the requested language at all.
+//
+// translationCount and hasEnglish are computed, not stored — they answer "is
+// this row worth opening" without a second request per row.
+//
+// hasEnglish means EVERY translation carries contentEn, not merely one of them,
+// and is false for an entry with no translations. It is INFORMATIONAL ONLY.
+// ADR 0015 §2 exempts dictionary entries from the English-to-publish rule
+// ("Entries publish with Spanish alone"), so this is a completeness hint the
+// panel can surface, never a gate — the publish path does not check it.
+// -----------------------------------------------------------------------------
+
+export const AdminEntryListItemSchema = z.object({
+  id: z.string(),
+  type: EntryTypeSchema,
+  nawatContent: z.string(),
+  slug: z.string(),
+  imageUrl: z.url().nullable(),
+  isPublished: z.boolean(),
+  translationCount: z.number().int(),
+  hasEnglish: z.boolean(),
+  creator: AdminActorSchema,
+  updater: AdminActorSchema,
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export type AdminEntryListItem = z.infer<typeof AdminEntryListItemSchema>;
+
+// -----------------------------------------------------------------------------
+// ADMIN DETAIL
+// Backs the entry edit form. Every translation, unresolved, including drafts.
+//
+// `updater` is present where the public detail has `creator` alone: on a review
+// surface "who touched this last" is the question being asked, and updaterId is
+// the only record of an edit until the editorial-review module exists.
+// -----------------------------------------------------------------------------
+
+export const AdminEntryDetailSchema = z.object({
+  id: z.string(),
+  type: EntryTypeSchema,
+  nawatContent: z.string(),
+  slug: z.string(),
+  imageUrl: z.url().nullable(),
+  isPublished: z.boolean(),
+  creator: AdminActorSchema,
+  updater: AdminActorSchema,
+  translations: z.array(AdminTranslationDetailSchema), // dialect precedence asc
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export type AdminEntryDetail = z.infer<typeof AdminEntryDetailSchema>;
+
+// -----------------------------------------------------------------------------
+// ADMIN QUERY PARAMS
+//
+// `status` defaults to 'draft' — the panel's job is the queue of things not yet
+// live, and that default is also the one the supporting partial index covers
+// (entries_drafts_idx).
+//
+// `type` accepts the FULL EntryTypeSchema, not the WORD/EXPRESSION subset the
+// public browse fences to. PHRASE is lesson-only for readers, but hiding rows
+// from the surface that manages them is how content becomes unreachable.
+//
+// `q` is a plain case-insensitive substring match on nawatContent, NOT the
+// trigram search GET /entries/search uses. An author knows the headword they
+// are looking for; fuzzy ranking would bury an exact match under near ones, and
+// the whole-string `%` operator returns nothing for the short prefixes someone
+// actually types into an admin filter.
+//
+// No `locale` — nothing on this surface is resolved.
+// -----------------------------------------------------------------------------
+
+export const AdminEntryStatusSchema = z.enum(['draft', 'published', 'all']);
+export type AdminEntryStatus = z.infer<typeof AdminEntryStatusSchema>;
+
+export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({
+  status: AdminEntryStatusSchema.default('draft'),
+  type: EntryTypeSchema.optional(),
+  q: z.string().min(1).optional(),
+});
+
+export type AdminEntriesQuery = z.infer<typeof AdminEntriesQuerySchema>;

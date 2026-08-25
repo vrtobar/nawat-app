@@ -141,8 +141,11 @@ model Entry {
   // Draft by default — only ADMIN can publish.
   // Unpublished and soft-deleted rows are hidden by an explicit
   // `where: { isPublished: true, deletedAt: null }` in the read services, not a
-  // global Prisma filter: publish visibility is role-conditional (CONTRIBUTOR+
-  // see drafts), which a client-wide extension cannot express cleanly.
+  // global Prisma filter: publish visibility is role-conditional, which a
+  // client-wide extension cannot express cleanly. The public reads are @Public
+  // and have no req.user to condition on, so they are unconditionally
+  // published-only; drafts are reachable through the CONTRIBUTOR+ admin read
+  // surface (GET /admin/entries), which applies its own scoping.
   // Hard delete allowed for unpublished entries (no preservation value).
   // Soft delete applied to published entries.
   isPublished Boolean   @default(false) @map("is_published")
@@ -167,10 +170,12 @@ model Entry {
   // dropped the raw-column index this replaced (entries_nawat_content_trgm_idx),
   // since search was its only caller and now wraps the column in unaccent.
   //
-  // NOT THE FULL INDEX SET. entries_live_idx is a partial index defined in
-  // 20260815160500_partial_live_indexes — Prisma cannot express a WHERE
-  // clause, so it is invisible here. Check that migration before adding an
-  // index on (isPublished, deletedAt): the partial one already covers it.
+  // NOT THE FULL INDEX SET. Two partial indexes are invisible here, because
+  // Prisma cannot express a WHERE clause: entries_live_idx
+  // (20260815160500_partial_live_indexes) covers the published public reads,
+  // and entries_drafts_idx (20260824190000_admin_draft_index) covers the
+  // admin draft queue. Check both before adding an index on
+  // (isPublished, deletedAt) — between them they already cover it.
   @@map("entries")
 }
 

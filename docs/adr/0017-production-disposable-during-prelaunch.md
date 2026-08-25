@@ -65,9 +65,13 @@ release rehearsals.
   `api.nahuat.com` is unreachable while down, which is expected — nothing consumes
   it in that state.
 - The production database lives in the application layer, so teardown destroys it.
-  This is acceptable **only** because there is no authored content or user data
-  yet: reference data (the dialect rows) is re-seeded by the deploy workflow on
-  every bring-up, and there is nothing else to lose.
+  This is acceptable **only** pre-launch: reference data (the dialect rows) is
+  re-seeded by the deploy workflow on every bring-up, there is no authored
+  dictionary content, and the user rows that exist are Auth0 identities synced on
+  login — Auth0 is their source of truth, so a login recreates them and nothing
+  durable is lost. To let the layer actually be destroyed, production sets
+  `deletion_protection = false` and `skip_final_snapshot = true` for this window
+  (see `terraform.tfvars`); both revert at launch.
 - Bring-up is not instant. A cold apply recreates RDS, the ALB, and the services,
   then the deploy workflow migrates and rolls — minutes, not seconds. Acceptable
   for a rehearsal; it is the reason this is a pre-launch posture, not a permanent
@@ -75,9 +79,10 @@ release rehearsals.
 
 ## This ends at launch
 
-The first real Nawat content authored in production, or the first real user,
+The first real Nawat content authored in production, or the first real user base,
 makes the application layer non-disposable — its database can no longer be thrown
-away. At that point this decision is superseded: production returns to the
+away. At that point this decision is superseded: `deletion_protection` and
+`skip_final_snapshot` revert to their protected values, production returns to the
 always-on, never-torn-down posture the deploy workflow already assumes, and this
 ADR is marked accordingly. Nothing here changes the foundation layer, which is
 never destroyed in any posture.

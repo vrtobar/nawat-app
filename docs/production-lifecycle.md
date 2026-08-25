@@ -43,6 +43,25 @@ on `production/application` only and never on the foundation or global layers.
 
 ## Tear down
 
+**One-time, only if the running database still has deletion protection on.**
+Production carried `deletion_protection = true` before the disposable-pre-launch
+settings landed (ADR 17). RDS refuses deletion while that is set, and a `destroy`
+cannot flip it in the same pass — the attribute has to be changed on the live
+instance first. So the first teardown of an already-running production needs one
+apply to disable it:
+
+```bash
+terraform -chdir=infra/terraform/environments/production/application apply \
+  -var "image_tag=prod-$(git rev-parse origin/main)"
+```
+
+The tfvars now set `deletion_protection = false` and `skip_final_snapshot = true`,
+so this apply clears the lock (a non-disruptive attribute change, applied
+immediately). After it, every bring-up carries those settings, so subsequent
+teardowns need no unlock step.
+
+Then:
+
 ```bash
 ./infra/scripts/prod-lifecycle.sh down
 ```
@@ -58,10 +77,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://nahuat.com   # maintenance pag
 
 ## Notes
 
-- **The database is destroyed with the layer.** That is acceptable only pre-launch,
-  with no authored content or users. Reference data is re-seeded on the next
-  bring-up by the deploy workflow. The first real content or user ends this
-  posture — see [ADR 17](adr/0017-production-disposable-during-prelaunch.md).
+- **The database is destroyed with the layer.** Acceptable only pre-launch:
+  reference data is re-seeded on the next bring-up, there is no authored dictionary
+  content, and user rows are Auth0 identities recreated on login. The first real
+  content or user base ends this posture — see
+  [ADR 17](adr/0017-production-disposable-during-prelaunch.md).
 - **Foundation and global are never destroyed.** The script refuses any target but
   `production/application`. The domain, TLS, the maintenance page, the assets
   bucket and the Terraform state all live below the application layer and survive

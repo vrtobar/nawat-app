@@ -27,6 +27,29 @@ definition, and the loader no-ops.
 
 `npm run dev:infra:down` stops the containers.
 
+## What runs where
+
+| URL                                      | What                                                    |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `http://localhost:3000`                  | Web app. `/` redirects to `/es` or `/en` (proxy.ts)     |
+| `http://localhost:3001/api/v1`           | API. URI-versioned; health opts out below               |
+| `http://localhost:3001/api/health`       | Liveness — what the ALB polls                           |
+| `http://localhost:3001/api/health/ready` | Readiness — checks the database                         |
+| `localhost:5432`                         | Postgres, database `nahuat_dev`, user/password `nahuat` |
+| `localhost:6379`                         | Valkey                                                  |
+| `localhost:8080`                         | Mock OIDC issuer, only while `auth:mock` is running     |
+
+Auth0 mounts its own routes on the web app; they are not localized and never
+pass through the locale redirect:
+
+| URL                  | What                                                        |
+| -------------------- | ----------------------------------------------------------- |
+| `/auth/login`        | Starts the round trip. `?returnTo=/es` comes back there     |
+| `/auth/logout`       | Clears the app and tenant sessions                          |
+| `/auth/callback`     | Auth0 redirects here. Must be registered in the dashboard   |
+| `/auth/access-token` | Returns `{ token, expiresAt }` — how to get a token by hand |
+| `/auth/profile`      | The ID token claims for the current session                 |
+
 ## Before pushing, run all four
 
 ```bash
@@ -37,6 +60,134 @@ npm run lint && npm run format:check && npm run typecheck && npm test
 typechecks and passes tests feels finished. CI runs `prettier --check .` and
 fails the pull request on whitespace — including in files you never opened, so
 format-on-save never touched them.
+
+## Reaching a deployed database
+
+Sometimes the question is about staging's data rather than the local copy —
+whether a migration landed, what a real login actually wrote, why a row looks
+the way it does.
+
+There is no direct route. RDS runs with `publicly_accessible = false` in private
+subnets, and ECS Exec is disabled on the services. Exec would not help even if
+it were enabled: `ecs execute-command` runs a command inside a task, while port
+forwarding needs an SSM _managed instance_, which a Fargate task is not.
+
+The path is an SSM bastion — a `t4g.nano` with no public IP, no key pair and no
+inbound rules at all. Session Manager works by the agent dialling out, so there
+is nothing listening to connect to and nothing to scan for. Access is an IAM
+question rather than a network one: whoever can call `ssm:StartSession` gets in,
+and nobody else does.
+
+```bash
+./infra/scripts/db-tunnel.sh staging          # localhost:5433 -> staging RDS
+./infra/scripts/db-tunnel.sh staging 5555     # pick the local port
+./infra/scripts/db-tunnel.sh staging --print-dsn   # connection string, then exit
+```
+
+It reads the instance id, the RDS endpoint and the database name from Terraform
+outputs rather than taking them as arguments. A hostname typed by hand is how
+someone ends up connected to production while believing they are in staging.
+
+Needs the Session Manager plugin, which is separate from the AWS CLI:
+
+```bash
+brew install --cask session-manager-plugin
+```
+
+### You will also need a psql that is not `db:psql`
+
+`npm run db:psql` is `docker compose exec postgres ...` — it talks to the local
+container and cannot see a forwarded port. Three options that can:
+
+```bash
+# Docker, no install. From inside a container localhost is the container,
+# so the host is reached as host.docker.internal.
+docker run --rm -it -e PGPASSWORD="$PGPASSWORD" postgres:16-alpine \
+  psql -h host.docker.internal -p 5433 -U nahuat -d nahuat
+
+# A real client on the PATH
+brew install libpq && brew link --force libpq
+psql "postgresql://nahuat@localhost:5433/nahuat"
+```
+
+Or point any GUI client (TablePlus, DBeaver, pgAdmin) at `localhost:5433`. The
+password comes from the AWS-managed RDS secret; `--print-dsn` prints a full
+connection string including it.
+
+The bastion deliberately cannot read that secret. The tunnel forwards a TCP
+port and authentication happens on this machine, so reaching the host and being
+able to log in stay two separate permissions.
+
+### Ctrl-C closes it properly; killing the process does not
+
+Ctrl-C is enough. The plugin handles `SIGINT` by terminating the session, and it
+is gone from `describe-sessions` immediately.
+
+**Killing the process is not the same.** `SIGTERM` — `pkill`, `kill <pid>`, a
+script cleaning up after itself — closes the local port but leaves the session
+**Active** on the AWS side until the 20-minute idle timeout, which is a route to
+the database outliving the terminal that opened it. The same applies to anything
+that takes the terminal away without an interrupt: a closed window, a dropped
+connection, a laptop suspending.
+
+Both behaviours were verified by signalling the plugin directly and watching
+`describe-sessions`. If you are ever unsure:
+
+```bash
+aws ssm describe-sessions --state Active --query 'Sessions[].SessionId' --output text
+aws ssm terminate-session --session-id <id>
+```
+
+An empty first line means nothing is open.
+
+### What is recorded, and what is not
+
+CloudTrail logs every `StartSession` with the IAM principal, the target instance
+and the document name — who connected, to what, and when.
+
+**The SQL is not recorded anywhere.** A forwarded port carries no terminal
+output, so Session Manager never sees the queries and `/aws/ssm/nahuat-sessions`
+stays empty for tunnels. That log group captures interactive shells on the
+bastion, which is a different and rarer thing. Auditing statements would mean
+`pgaudit` or `log_statement` on the database itself.
+
+### Production works the same way
+
+`./infra/scripts/db-tunnel.sh production` — `enable_bastion` is `true` in both
+environments, and the same tunnel is how production roles get set and production
+data gets inspected.
+
+Gating production off was considered and rejected. It would have guarded against
+accident rather than against an attacker, because anyone able to apply that layer
+can set the variable themselves; and it would have cost the only practical way to
+read production data, since the alternative — a command override on the migrate
+task — runs in a `node:24-alpine` image with no `psql` and cannot return rows
+through `prisma db execute`.
+
+So reaching production data is an IAM question rather than a network one:
+`ssm:StartSession` on the instance, plus `GetSecretValue` on the RDS secret. The
+security group has no ingress rules at all, so nothing is reachable without them.
+**Guard those permissions accordingly** — they are the whole boundary.
+
+The instance still dies with the application layer, so a torn-down production has
+no bastion and the script says so.
+
+### If a bring-up fails on `bastion_sg_id`
+
+The bastion's security group lives in the **foundation** layer, not with the
+instance. The RDS group's ingress rules are inline and therefore authoritative,
+so a rule added from the application layer would be reverted by the next
+foundation apply — and database access would break with nothing in the
+application diff to explain it.
+
+The consequence is an apply order: **foundation before application**, and
+foundation is applied by hand. `staging-deploy.yml` pins itself to the
+application layer, so a bring-up against a foundation that predates the bastion
+group fails on a missing `bastion_sg_id` output and takes the whole run with it.
+
+```bash
+terraform -chdir=infra/terraform/environments/staging/foundation apply
+```
 
 ## Gotchas
 
@@ -86,10 +237,144 @@ you changed it deliberately.
 | Command               | What it does                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------------- |
 | `npm run db:seed`     | Reference data only. Safe in any environment; the production deploy runs it after migrations. |
-| `npm run db:seed:dev` | Reference data plus placeholder content, for local work.                                      |
+| `npm run db:seed:dev` | Reference data, a sample dictionary, and the three dev login users. Local and staging only.   |
 
 The split is structural rather than a flag because the seed task's command is
 overridden at run time, and a flag would put one typo between production and a
-dictionary of invented Nawat. **The placeholder entries are not real Nawat** —
-they are deliberately implausible (`zzz-placeholder-one`) so they cannot be
-mistaken for data.
+dictionary of invented Nawat. Everything reachable from the reference path must
+be safe to apply to production on every deploy, forever — which is why the dev
+users, one of them an ADMIN, live strictly on the other side of it.
+
+**The sample entries are real headwords with fabricated detail** — the regional
+variants, phonetics, examples and audio URLs are invented. They are test data,
+not authoritative Nawat, and the file says so. Real vocabulary enters through
+the API with validation and attribution, never through a fixture.
+
+### Signing in locally
+
+A browser login works against the staging Auth0 tenant. Nothing in the login
+path calls the API any more — Auth0 authenticates, the callback sets a session,
+and that is the whole round trip ([ADR 13](adr/0013-authentication-and-authorization.md)).
+
+```bash
+npm run dev --workspace=web    # :3000
+npm run dev --workspace=api    # :3001
+```
+
+Sign in at `http://localhost:3000/es`. The header shows your name when it works.
+
+**Your user row is not created by logging in.** It is created the first time the
+API sees your token: it does not recognise the `sub`, fetches your profile from
+Auth0's `/userinfo`, and inserts the row. To make that happen, open
+`http://localhost:3000/auth/access-token` in the same browser (the session
+cookie is what authorises it), copy the `token`, and call the API:
+
+```bash
+TOKEN='eyJ...'   # paste it
+curl -s http://localhost:3001/api/v1/users/me -H "Authorization: Bearer $TOKEN"
+```
+
+You will be a `USER`. `role` defaults that way and no login path writes it — see
+below for promoting yourself.
+
+**If a real token 401s on the issuer or an unknown `kid`,** `AUTH0_ISSUER_URL`
+and `AUTH0_JWKS_URI` are still set in `apps/api/.env.local` from the mock issuer
+below. Comment them out and restart the API. Unset _is_ the deployed
+configuration; they are not a fallback for missing configuration.
+
+**The Accept/Decline consent screen is expected on localhost.** Requesting a
+custom API `audience` triggers it, and Auth0 does not skip consent for a
+`localhost` callback even though the application is first-party. Staging and
+production do not show it.
+
+**Declining is handled, not a 500.** The SDK's default renders a bare 500
+carrying the raw error; an `onCallback` hook in `apps/web/lib/auth0.ts` redirects
+back to `returnTo` with `?auth_error=denied` (or `failed` for anything else) and
+the header renders a message.
+
+**To sign in as somebody else,** logging out is not enough. It clears the app
+session and the Auth0 tenant session, but not the upstream Google session, so
+Auth0 silently re-authenticates you as the same person and only the consent
+screen appears. Force a picker:
+
+```
+http://localhost:3000/auth/login?prompt=select_account
+```
+
+The SDK forwards unrecognised query parameters through to `/authorize`, stripping
+only `connection`, `returnTo` and `scopes`. `prompt=login` forces a full
+re-authentication if `select_account` is not enough.
+
+### Poking at the local database
+
+The seed and the API cover most of it, but role changes and sanity checks are
+faster in `psql`. There is a shortcut for the connection:
+
+```bash
+npm run db:psql --workspace=@nahuat/database
+```
+
+That is `docker compose exec postgres psql -U nahuat -d nahuat_dev`, and it
+takes arguments after `--`:
+
+```bash
+npm run db:psql --workspace=@nahuat/database -- -c "SELECT count(*) FROM entries;"
+```
+
+The full form is worth knowing too, since `-T` is what makes these safe to paste
+into a script:
+
+```bash
+# Who exists? Seeded users are the `seed|` ones; yours came from a real login.
+docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
+  -c "SELECT auth0_id, email, name, role, is_active FROM users ORDER BY created_at;"
+
+# Promote yourself. Takes effect on the NEXT REQUEST — role is read from the
+# database per request, so no re-login and no new token.
+docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
+  -c "UPDATE users SET role='ADMIN' WHERE auth0_id NOT LIKE 'seed|%';"
+
+# Exercise the deactivation gate. Refuses with 403 USER_DEACTIVATED, immediately.
+docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
+  -c "UPDATE users SET is_active=false WHERE auth0_id NOT LIKE 'seed|%';"
+
+# What is in the dictionary, and how much of it is draft?
+docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
+  -c "SELECT count(*) AS entries, count(*) FILTER (WHERE NOT is_published) AS drafts FROM entries;"
+```
+
+`-T` disables TTY allocation, which is what lets these run from a script or a
+one-liner rather than dropping into a prompt.
+
+### Hand-testing without a browser
+
+The mock OIDC issuer mints a token for a seeded user offline, which is useful
+for curl, Postman and scripts. It swaps the _issuer_, not the _strategy_ — the
+API still verifies RS256 against a JWKS endpoint with issuer and audience
+pinned, so there is still no dev bypass.
+
+```bash
+npm run db:seed:dev                                      # the three dev users
+npm run auth:mock --workspace=api                        # leave running
+npm run --silent auth:token --workspace=api -- admin     # or contributor | user
+```
+
+Point the API at it in `apps/api/.env.local`, then restart:
+
+```
+AUTH0_ISSUER_URL=http://localhost:8080/
+AUTH0_JWKS_URI=http://localhost:8080/jwks
+```
+
+Two variables rather than one, because Auth0 serves its keys at
+`/.well-known/jwks.json` and the mock serves them at `/jwks`. Both are optional
+and default to the Auth0 tenant, so staging and production set neither.
+
+**The token only supplies the `sub`.** Which rung you get is whatever the
+matching user's row says, so `admin`, `contributor` and `user` select a seeded
+user rather than a claim — changing a role in the database takes effect without
+minting anything new.
+
+The signing key is cached in `apps/api/.mock-oidc-key.json` (gitignored) so
+restarting the issuer does not invalidate tokens already minted. Delete it to
+rotate.

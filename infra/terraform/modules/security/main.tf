@@ -140,6 +140,24 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.lambda.id]
   }
 
+  # The bastion, which exists so a human can reach this database at all: RDS is
+  # publicly_accessible = false in private subnets, and ECS Exec is disabled, so
+  # without this there is no path from a laptop to staging or production data.
+  #
+  # Unconditional, while the instance itself is controlled by enable_bastion. A
+  # security group with no member ENI is unreachable — nothing carries it, so
+  # nothing can open a connection through it — which means this rule opens no
+  # path on its own when an environment has no bastion. What it buys is that the
+  # shared module applies identically in both environments, with no dynamic
+  # block and no apply-order dependency inside foundation.
+  ingress {
+    description     = "PostgreSQL from the SSM bastion"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
   egress {
     description = "All outbound"
     from_port   = 0
@@ -218,4 +236,37 @@ resource "aws_security_group" "lambda" {
   }
 
   tags = { Name = "${var.prefix}-lambda" }
+}
+
+# -----------------------------------------------------------------------------
+# SSM bastion
+#
+# NO INGRESS RULES AT ALL, and that is the design rather than an omission.
+# Session Manager does not accept an inbound connection: the SSM agent on the
+# instance dials out to the SSM service and the session is carried back over
+# that outbound connection. So a bastion reachable only through SSM needs no
+# open port, no public IP, and no key pair — there is nothing to scan for and
+# nothing to brute force, which is the whole reason this replaces a classic
+# jump host.
+#
+# Egress is open because the agent has to reach ssm, ssmmessages and
+# ec2messages, and it does so through the application layer's NAT gateway
+# rather than through VPC interface endpoints. Three endpoints would cost about
+# $21/month for a path the NAT already serves, and the bastion only exists when
+# the application layer — and therefore the NAT — does.
+# -----------------------------------------------------------------------------
+resource "aws_security_group" "bastion" {
+  name        = "${var.prefix}-bastion"
+  description = "SSM bastion - no ingress; outbound only, for Session Manager and RDS"
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.prefix}-bastion" }
 }

@@ -31,20 +31,22 @@ export class UsersService {
 
     // 401 rather than 404, and the distinction is deliberate.
     //
-    // The token asserts this user exists — /auth/role created the row and
-    // minted the claims from it. So a missing row means it was hard-deleted
-    // after the token was issued, and deletedAt means soft-deleted mid-session.
-    // Either way the token is still signed, unexpired and valid; what it
-    // describes is no longer true.
+    // JwtStrategy resolved this user from the database moments ago, so a
+    // missing row here means it was hard-deleted between the auth lookup and
+    // this query, and deletedAt means soft-deleted in the same window. Either
+    // way the token is still signed, unexpired and valid; what it describes is
+    // no longer true. (Before 2026-08-24 the window was much wider: the claims
+    // were minted at login and the row was not re-read on the way in.)
     //
     // 404 would read as "no such profile" and invite a retry. 401 tells the
     // client its credentials no longer represent a real user, which is what
-    // happened, and prompts re-authentication — where /auth/role refuses a
-    // deactivated account outright.
+    // happened, and prompts re-authentication.
     //
-    // This also closes the window where a soft-deleted user keeps working until
-    // their token expires. Revoking the Auth0 session prevents a new login but
-    // does nothing to a token already issued.
+    // Since 2026-08-24 this is a second line rather than the mechanism:
+    // AuthService.resolveIdentity() refuses a soft-deleted or inactive account
+    // on every authenticated request, so the window this once closed on its own
+    // is now closed globally. It is kept for the hard-delete case above, which
+    // that check cannot see — a row that vanished has no isActive to read.
     if (!user || user.deletedAt !== null || !user.isActive) {
       throw new UnauthorizedException({
         code: 'UNAUTHORIZED',
