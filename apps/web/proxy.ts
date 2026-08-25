@@ -12,6 +12,20 @@ import { LOCALE_COOKIE, LOCALES, resolveLocale } from './lib/locale';
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Clearing a session must not run through auth0.middleware. For any path it
+  // does not itself handle, the SDK rolls the session cookie back onto the
+  // response — "simply touch the sessions if rolling sessions are enabled", in
+  // its own words — which silently undoes the deletion this route exists to
+  // perform. The user then keeps a valid session with no account behind it, and
+  // the header cheerfully greets them by name.
+  //
+  // Verified the hard way: a test using a fabricated cookie value passed,
+  // because an undecryptable session cannot be rolled. Only a real sign-in
+  // showed it.
+  if (pathname === '/auth/session-failed') {
+    return NextResponse.next();
+  }
+
   // Three prefixes skip the locale redirect and go straight to the SDK
   // middleware. /auth/* is mounted by the SDK and would break the login
   // round-trip if /auth/callback became /es/auth/callback. /api/* is never
