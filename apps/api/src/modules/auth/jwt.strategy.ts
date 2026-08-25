@@ -1,13 +1,10 @@
-import type { JwtClaims } from '@nahuat/shared';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import type { Request } from 'express';
 import { passportJwtSecret } from 'jwks-rsa';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import type { Env } from '../../config/env.validation';
-import { AuthService } from './auth.service';
 
 // Verifies Auth0 access tokens.
 //
@@ -33,10 +30,7 @@ import { AuthService } from './auth.service';
 // removal along with the mock issuer scripts.
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(
-    config: ConfigService<Env, true>,
-    private readonly authService: AuthService,
-  ) {
+  constructor(config: ConfigService<Env, true>) {
     const domain = config.get('AUTH0_DOMAIN', { infer: true });
 
     // Trailing slash matters: Auth0 stamps `iss` as https://<domain>/ and the
@@ -48,12 +42,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-
-      // validate() needs the raw token, not just its payload: provisioning a
-      // first-time user calls Auth0's /userinfo, which takes the access token
-      // as its credential. passport-jwt only passes the request through when
-      // asked, so this is what makes that possible.
-      passReqToCallback: true,
 
       // Pinned to RS256. Left open, a token signed with 'none' — or with HS256
       // using the public key as the HMAC secret — would verify.
@@ -85,7 +73,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   // 2026-08-24 (docs/adr/0013 records why), and the query is the deliberate
   // price of it: a role change or a deactivation now takes effect on the very
   // next request instead of waiting for the user to sign in again.
-  async validate(req: Request, payload: Record<string, unknown>): Promise<JwtClaims> {
+  //
+  // IT NO LONGER TOUCHES THE DATABASE AT ALL. Until 2026-08-25 this provisioned
+  // a missing row; the first attempt at moving that out had it read one
+  // instead. Both were wrong here, for the same underlying reason: a strategy
+  // cannot see which route it is authenticating, and one route — POST
+  // /auth/session — must be reachable by a caller who has no account, because
+  // it is what creates one. Resolving identity here made that endpoint
+  // unreachable by exactly the people it exists for, and only a real sign-in
+  // with a new address surfaced it.
+  //
+  // So this verifies, and JwtAuthGuard resolves. See @AllowMissingAccount.
+  validate(payload: Record<string, unknown>): { sub: string } {
     // `sub` is a registered claim that Auth0 always sets and the signature
     // covers. Everything else about the caller is looked up from it.
     const { sub } = payload;
@@ -96,22 +95,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
-    // The same extractor the strategy was configured with, so this reads the
-    // token that was actually verified rather than re-deriving where it came
-    // from.
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-    if (token === null) {
-      // Unreachable in practice — the token was extracted to get here — but
-      // typed as nullable, and inventing an empty string would send a
-      // credential-less request to /userinfo.
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Authentication required',
-      });
-    }
-
-    // Becomes request.user. Throws ForbiddenException(USER_DEACTIVATED) for a
-    // disabled account, and provisions the row on a first-ever request.
-    return this.authService.resolveIdentity(sub, token);
+    // The guard replaces this with full JwtClaims for every route that requires
+    // an account, which is all of them but one.
+    return { sub };
   }
 }
