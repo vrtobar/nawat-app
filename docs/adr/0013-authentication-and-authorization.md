@@ -11,6 +11,13 @@
   RS256 verified against a JWKS endpoint, with no symmetric path — is
   unchanged. `TEST_JWT_SECRET` was deleted. See "The issuer is configurable,
   the strategy is not" below.
+- **Amended 2026-08-25:** an account is created when someone logs in, by
+  `POST /auth/session`, and nowhere else. The 2026-08-24 reversal below left
+  provisioning happening lazily on the first authenticated request; that was
+  residue from deleting the Action rather than a decision, and it is corrected
+  here. Verification and identity resolution also separate: the strategy
+  verifies, the guard resolves. See "Amendment: an account exists because
+  someone logged in".
 - **REVERSED 2026-08-24:** authorization no longer comes from the token. Role
   and user id are read from the database on every authenticated request, the
   Auth0 Post Login Action is deleted, and `POST /auth/role` with it. **The
@@ -277,8 +284,11 @@ where previously a cached or trivially-served route might have been. Given that
 the deactivation gate is itself a database fact, that dependency was always
 implicit in wanting the gate to be correct.
 
-**Provisioning moved with it.** The Action created the user row from the ID
-token's profile. The API now fetches `/userinfo` from Auth0 on the first
+**Provisioning moved with it.** _Superseded 2026-08-25 — see the amendment
+below. Note the wording: provisioning "moved", passively. Where it landed was
+never argued for, and the only thing marked deliberate in this paragraph is not
+trusting the client for the profile._ The Action created the user row from the
+ID token's profile. The API now fetches `/userinfo` from Auth0 on the first
 request from an unknown `sub`, once per account ever. Deliberately not taken
 from the client: `email` is unique and non-null, so a client-supplied profile
 would let a caller choose the address attached to their own row. The subject in
@@ -289,6 +299,72 @@ refused rather than written.
 login path — it is set by an admin through the users module. Deactivated
 accounts are still refused with `USER_DEACTIVATED`; that check simply moved
 from once-per-login to once-per-request, which is strictly stronger.
+
+### Amendment: an account exists because someone logged in
+
+**Decided 2026-08-25.** `POST /auth/session` is the only path that creates an
+account. The web callback calls it once per sign-in with the token it has just
+received; a sign-in whose account cannot be created does not stand, and the
+session is cleared rather than left behind.
+
+**What was wrong with lazy provisioning.** Not that it was chosen badly — it was
+not chosen at all. It is where provisioning ended up when the Action was
+deleted, because the only place that saw a token was the API. Three consequences
+followed:
+
+- **"Logged in" and "has an account" were separable states.** A session could
+  exist with no row behind it, and the mismatch surfaced later at an arbitrary
+  request rather than at the moment it was created.
+- **Nothing recorded that a login happened.** The API sees requests, not logins,
+  so nothing could distinguish an active account from a dormant one, or tell
+  whether someone who signed up ever returned. `lastLoginAt` exists now because
+  that information is only available at this moment and nowhere else.
+- **A hard-deleted user silently reappeared.** A missing row was an expected
+  condition rather than a fault, so the next request from a still-valid token
+  re-created them as a fresh `USER`. The soft-delete gate cannot see a row that
+  is gone. Narrower than it sounds — `Entry.creatorId` and
+  `Translation.creatorId` are `onDelete: Restrict`, so anyone who has authored
+  content cannot be hard-deleted at all — but it applied to everyone who had
+  not.
+
+**This is not `POST /auth/role` returning.** Every objection recorded above is
+about that endpoint's trust model, and none of them transfer:
+
+| `/auth/role` (deleted)           | `/auth/session`                       |
+| -------------------------------- | ------------------------------------- |
+| Called by Auth0's servers        | Called by this project's web app      |
+| Ran before any token existed     | Runs after authentication             |
+| Authenticated by a shared secret | Authenticated by the caller's own JWT |
+| Lived in a dashboard file        | Ships in this repository              |
+| Denied login on any failure      | Denies login when there is no account |
+
+The last row is the one worth dwelling on. ADR 13 objected that the Action made
+"an API outage into an authentication outage" — but it did so while resolving a
+_role_, information that could have been defaulted or fetched later. Refusing a
+sign-in because the account cannot be created is a different claim: there is
+genuinely no user to serve, and letting someone through would hand them a
+credential every route rejects. Signing in again is a well-understood remedy;
+"signed in everywhere, recognised nowhere" is not.
+
+### Verification and identity resolution are separate
+
+_Added 2026-08-25, after the first attempt at the above did not work._
+
+`JwtStrategy` verifies — signature, issuer, audience, expiry — and attaches
+`{ sub }`. `JwtAuthGuard` then resolves the account and replaces that with the
+full claim set. `@AllowMissingAccount()` marks the single route that opts out.
+
+The separation is forced, not stylistic. **A strategy cannot see which route it
+is authenticating**, and `POST /auth/session` has to be reachable by a caller
+with no account, because it is the endpoint that creates one. Resolving identity
+inside the strategy rejected those callers before the handler ran — so account
+creation was impossible for exactly the people it existed for, while continuing
+to work for everyone who already had an account.
+
+Nothing caught it. The service and the strategy were each correct in isolation;
+the deadlock existed only in their composition, and it took a real sign-in with
+an unused address to surface. Two guard tests now pin it, at the level where the
+fault actually lived.
 
 ## Consequences
 

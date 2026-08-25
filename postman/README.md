@@ -93,8 +93,15 @@ the next request, with no new token and no re-login.
 
 There is no longer an internal endpoint for Auth0 to call. `POST /auth/role`,
 the `x-internal-secret` header and the Post Login Action behind them were all
-removed on 2026-08-24; a user row is created from Auth0's `/userinfo` on the
-first request from an account the API has not seen before.
+removed on 2026-08-24.
+
+A user row is created by **logging in**: the web app's callback calls
+`POST /auth/session` with the freshly issued token, and that is the only path
+that provisions an account. The practical consequence for this collection is
+that a token alone is not enough — **sign in through the web app at least once**
+before using one here, or every authenticated request answers
+`401 ACCOUNT_NOT_PROVISIONED`. The Session folder already gets its token from a
+browser session, so following it satisfies this by construction.
 
 ## Roles
 
