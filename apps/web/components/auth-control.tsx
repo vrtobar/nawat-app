@@ -54,7 +54,30 @@ export async function AuthControl({
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="text-gray-600">{label}</span>
-      <a href={`/auth/logout?returnTo=${target}`} className="font-medium hover:underline">
+      {/*
+        No returnTo, unlike the login link above, and the asymmetry is the point.
+
+        Login's returnTo is resolved inside this app — onCallback in lib/auth0.ts
+        does `new URL(ctx.returnTo, base)`, so a relative path is fine. Logout's
+        is handed to Auth0 verbatim as post_logout_redirect_uri, and Auth0
+        rejects anything that is not an absolute URL. Passing `/es` here produced
+        an invalid_request error page instead of a logout.
+
+        Omitting it makes the SDK fall back to APP_BASE_URL. Each environment's
+        base URL has to be listed in the tenant's Allowed Logout URLs, which is
+        one entry per environment rather than one per locale — verified against
+        staging, where the round trip completes and lands on /es.
+
+        The locale survives without being passed: logout clears the session
+        cookie, not LOCALE_COOKIE, and proxy.ts reads that before Accept-Language
+        when it redirects `/` to a locale.
+      */}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages --
+          /auth/* is a middleware route, not a page; <Link> would try a
+          client-side transition to a route that does not exist. Same
+          exemption as app/admin/layout.tsx. The rule only starts firing
+          now because the href became a static string. */}
+      <a href="/auth/logout" className="font-medium hover:underline">
         {copy.logout}
       </a>
     </div>
