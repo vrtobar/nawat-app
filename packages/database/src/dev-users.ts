@@ -16,13 +16,17 @@
 // never collide with a real `sub`, and `.invalid` is reserved by RFC 2606 so
 // the addresses can never be delivered to.
 //
-// `id` is pinned instead of left to @default(cuid()). The token's
-// https://nahuat.com/userId claim has to name a real User.id, and a generated
-// cuid is not known until seed time — pinning is what lets tokens be minted
-// offline, deterministically, with no database lookup. Entry.creatorId and
-// Translation.creatorId are non-null foreign keys with onDelete: Restrict, so
-// a token whose userId points at no row authenticates happily and then fails
-// the first write on a constraint violation.
+// `id` is pinned instead of left to @default(cuid()) so the rows are known
+// before they are written, which is what lets tokens be minted offline and
+// deterministically. Entry.creatorId and Translation.creatorId are non-null
+// foreign keys with onDelete: Restrict, so a request resolving to no row
+// authenticates and then fails the first write on a constraint violation.
+//
+// The original reason was narrower and no longer holds: the token carried a
+// https://nahuat.com/userId claim that had to name a real User.id. Custom
+// claims are gone as of 2026-08-24 (see docs/adr/0013) and only `sub` is read,
+// so what has to match a row now is `auth0Id`, not the id. Pinning both keeps
+// the seed and the minting script agreeing on one set of literals.
 //
 // All three rungs of the ladder, not just ADMIN: @Roles is a ranked
 // comparison, so proving a CONTRIBUTOR is refused a publish needs a
