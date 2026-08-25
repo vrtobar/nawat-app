@@ -135,6 +135,13 @@ export const API_ERROR_CODES = {
   // identity on connection + subject; this API keys it on auth0Id and holds a
   // unique constraint on email, so the two cannot both exist.
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
+  // A verified token whose subject has no account. Since 2026-08-25 accounts
+  // are created at login by POST /auth/session and nowhere else, so this means
+  // the session was established without that call completing — or the row was
+  // hard-deleted while the token was still valid. Distinct from UNAUTHORIZED
+  // because the remedy differs: the credential is fine, the account is absent,
+  // and signing in again is what fixes it.
+  ACCOUNT_NOT_PROVISIONED: 'ACCOUNT_NOT_PROVISIONED',
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES];

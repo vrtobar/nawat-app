@@ -2,7 +2,7 @@ import { prisma } from '@nahuat/database';
 import type { UserProfile } from '@nahuat/shared';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 
-import { LOCALE_TO_WIRE } from '../../common/locale';
+import { toUserProfile, USER_PROFILE_SELECT } from '../../common/user-profile';
 
 @Injectable()
 export class UsersService {
@@ -12,21 +12,7 @@ export class UsersService {
       // Columns listed explicitly rather than returning the row. auth0Id and
       // deletedAt are not the client's business, and a select-all would start
       // leaking whatever the next migration adds.
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        locale: true,
-        username: true,
-        pictureUrl: true,
-        xp: true,
-        streak: true,
-        lastActiveAt: true,
-        createdAt: true,
-        deletedAt: true,
-        isActive: true,
-      },
+      select: { ...USER_PROFILE_SELECT, deletedAt: true, isActive: true },
     });
 
     // 401 rather than 404, and the distinction is deliberate.
@@ -56,13 +42,8 @@ export class UsersService {
 
     const { deletedAt: _deletedAt, isActive: _isActive, ...profile } = user;
 
-    return {
-      ...profile,
-      locale: LOCALE_TO_WIRE[profile.locale],
-      // Prisma returns Date; the schema declares ISO strings, and the frontend
-      // parses them with the same schema it types against.
-      lastActiveAt: profile.lastActiveAt?.toISOString() ?? null,
-      createdAt: profile.createdAt.toISOString(),
-    };
+    // Shared with POST /auth/session, which returns the same shape. The mapper
+    // handles Date -> ISO and the database Locale enum -> its wire form.
+    return toUserProfile(profile);
   }
 }

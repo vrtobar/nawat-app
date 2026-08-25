@@ -263,19 +263,33 @@ npm run dev --workspace=api    # :3001
 
 Sign in at `http://localhost:3000/es`. The header shows your name when it works.
 
-**Your user row is not created by logging in.** It is created the first time the
-API sees your token: it does not recognise the `sub`, fetches your profile from
-Auth0's `/userinfo`, and inserts the row. To make that happen, open
-`http://localhost:3000/auth/access-token` in the same browser (the session
-cookie is what authorises it), copy the `token`, and call the API:
+**Logging in creates your user row**, as of 2026-08-25. The callback calls
+`POST /auth/session` with the token it has just received, which provisions the
+account from Auth0's `/userinfo`, re-syncs your name and picture, and stamps
+`lastLoginAt`. You will be a `USER`: `role` defaults that way and no login path
+writes it — see below for promoting yourself.
+
+**This means the API has to be running to sign in.** If it is not, the sign-in
+does not half-succeed: you land back on the page with "Sign-in could not be
+completed", the header offers Log in rather than your name, and no session
+survives. That is deliberate — an account is what a sign-in produces, so a
+sign-in that cannot produce one is not a sign-in. The reason is logged by the
+web process as `[auth] POST /auth/session failed: …`; the message you see is
+kept vague on purpose, so the log is the only place the cause exists.
+
+_It did not always work this way._ Until 2026-08-25 the row appeared lazily on
+the first authenticated API request, so logging in and then only browsing the
+public dictionary left `users` empty — a genuinely confusing state that
+[ADR 13](adr/0013-authentication-and-authorization.md) records the reasoning
+for removing.
+
+To get a token for curl or Postman without a browser, `/auth/access-token`
+still works in a signed-in browser session:
 
 ```bash
-TOKEN='eyJ...'   # paste it
+TOKEN='eyJ...'   # from http://localhost:3000/auth/access-token
 curl -s http://localhost:3001/api/v1/users/me -H "Authorization: Bearer $TOKEN"
 ```
-
-You will be a `USER`. `role` defaults that way and no login path writes it — see
-below for promoting yourself.
 
 **If a real token 401s on the issuer or an unknown `kid`,** `AUTH0_ISSUER_URL`
 and `AUTH0_JWKS_URI` are still set in `apps/api/.env.local` from the mock issuer

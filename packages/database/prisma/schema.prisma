@@ -50,19 +50,38 @@ model Level {
 // =============================================================================
 
 model User {
-  id       String  @id @default(cuid())
-  auth0Id  String  @unique @map("auth0_id")
-  email    String  @unique
-  name     String // synced from Auth0 on every login — not user-editable
+  id      String @id @default(cuid())
+  auth0Id String @unique @map("auth0_id")
+
+  // Set once, at account creation, and never re-synced. It is the unique key,
+  // so following a change at the identity provider could collide with another
+  // row — and the collision would surface as a failed login for someone who
+  // changed nothing.
+  email String @unique
+
+  // Re-synced from Auth0 on every login by POST /auth/session. Not
+  // user-editable. For connections that supply no name — email OTP — the email
+  // stands in.
+  name     String
   role     Role    @default(USER)
   isActive Boolean @default(true) @map("is_active")
+
+  // Set by POST /auth/session, which the web callback invokes once per login.
+  // Null only for rows created by the seed, which never log in.
+  //
+  // This is the only record that a login happened: the API sees requests, not
+  // logins, so nothing else can distinguish an active account from a dormant
+  // one. It is why account creation is an explicit step at the callback rather
+  // than a side effect of the first authenticated request.
+  lastLoginAt DateTime? @map("last_login_at")
 
   // User-chosen handle — auto-generated on first login (e.g. "victor_x7k2")
   // Editable once per 30 days. URL-safe: lowercase, numbers, underscores only.
   username          String?   @unique
   usernameUpdatedAt DateTime? @map("username_updated_at")
 
-  // Profile photo synced from Auth0/social provider on every login
+  // Profile photo, re-synced from Auth0 on every login by POST /auth/session.
+  // Optional because not every connection returns one.
   pictureUrl String? @map("picture_url")
 
   // Learning language — which locale content is served in. Beats
