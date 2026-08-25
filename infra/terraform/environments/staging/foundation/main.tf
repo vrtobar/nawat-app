@@ -510,8 +510,18 @@ resource "aws_secretsmanager_secret" "auth0_mgmt" {
   recovery_window_in_days = 7
 }
 
+# ORPHANED as of 2026-08-24 - nothing reads this.
+#
+# It held the shared secret for POST /auth/role, which the Auth0 Post Login
+# Action called during login. That endpoint, its guard, and the Action are all
+# deleted (docs/adr/0013), and the compute layer no longer injects the value.
+#
+# Left in place rather than removed in the same change: destroying it is a
+# one-way door on a 7-day recovery window, and it costs nothing to keep while
+# the reversal is still being verified in both environments. Removing it is a
+# tracked backlog item, not an oversight.
 resource "aws_secretsmanager_secret" "internal" {
   name                    = "nahuat/${var.environment}/internal"
-  description             = "Shared secret for the internal /auth/role endpoint - openssl rand -base64 32"
+  description             = "Orphaned - held the POST /auth/role shared secret, deleted 2026-08-24"
   recovery_window_in_days = 7
 }
