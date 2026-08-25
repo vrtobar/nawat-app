@@ -33,7 +33,17 @@ export function GET(request: NextRequest) {
     request.headers.get('accept-language'),
   );
 
-  const destination = new URL(`/${locale}`, request.nextUrl.origin);
+  // APP_BASE_URL, not request.nextUrl.origin.
+  //
+  // Behind the ALB the inferred origin is the container's own address — a real
+  // sign-in on staging redirected to
+  // https://ip-10-1-4-216.ec2.internal:3000/en, which the browser cannot
+  // resolve. Locally the two are identical, so this can only fail once there is
+  // a load balancer in front, and no local test can show it.
+  //
+  // onCallback already builds its redirects this way; the two now agree.
+  const base = process.env.APP_BASE_URL ?? 'http://localhost:3000';
+  const destination = new URL(`/${locale}`, base);
   destination.searchParams.set('auth_error', code);
 
   const response = NextResponse.redirect(destination.toString());
