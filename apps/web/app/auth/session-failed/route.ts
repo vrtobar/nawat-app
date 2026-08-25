@@ -48,14 +48,26 @@ export function GET(request: NextRequest) {
 
   const response = NextResponse.redirect(destination.toString());
 
-  // The session cookie is chunked when it exceeds the browser's per-cookie
-  // limit — __session, then __session.0, __session.1 and so on — so deleting
-  // the base name alone would leave a partial session behind. The chunk count
-  // is not knowable here, so clear generously; deleting a cookie that was never
-  // set is a no-op.
-  response.cookies.delete('__session');
-  for (let chunk = 0; chunk < 10; chunk += 1) {
-    response.cookies.delete(`__session.${chunk}`);
+  // Delete what is actually present rather than guessing names.
+  //
+  // The session is chunked when it exceeds the per-cookie size limit, and a
+  // real Auth0 session — access token plus ID token — does exceed it, so on a
+  // deployed environment the base cookie may hold nothing and the chunks hold
+  // everything. Guessing the names got this wrong once already: the SDK writes
+  // `__session__0` (CHUNK_PREFIX is a double underscore), while `__session.0`
+  // is its LEGACY form. Deleting the legacy names removed nothing, the session
+  // survived a refused sign-in, and the header greeted the user by name.
+  //
+  // A fabricated cookie in a local test did not show it, because a hand-written
+  // `__session` is exactly the one name that was being deleted correctly.
+  //
+  // Enumerating the request's own cookies covers both schemes, any number of
+  // chunks, and whatever the SDK renames them to next.
+  const SESSION_COOKIE = /^__session(__\d+|\.\d+)?$/;
+  for (const cookie of request.cookies.getAll()) {
+    if (SESSION_COOKIE.test(cookie.name)) {
+      response.cookies.delete(cookie.name);
+    }
   }
 
   return response;
