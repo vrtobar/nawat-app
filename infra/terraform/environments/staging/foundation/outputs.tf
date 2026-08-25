@@ -76,6 +76,11 @@ output "lambda_sg_id" {
   value       = module.security.lambda_sg_id
 }
 
+output "bastion_sg_id" {
+  description = "SSM bastion security group, attached to the bastion instance when one exists"
+  value       = module.security.bastion_sg_id
+}
+
 # -----------------------------------------------------------------------------
 # S3 and CloudFront
 # -----------------------------------------------------------------------------

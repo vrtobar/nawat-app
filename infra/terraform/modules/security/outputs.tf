@@ -35,3 +35,8 @@ output "lambda_sg_id" {
   description = "Lambda security group, attached to every consumer's VPC config"
   value       = aws_security_group.lambda.id
 }
+
+output "bastion_sg_id" {
+  description = "SSM bastion security group; RDS allows it on 5432. Created in both environments whether or not a bastion instance exists."
+  value       = aws_security_group.bastion.id
+}
