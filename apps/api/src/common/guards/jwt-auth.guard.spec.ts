@@ -2,12 +2,19 @@ import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AuthService } from '../../modules/auth/auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const guardWith = (isPublic: boolean) => {
   const getAllAndOverride = vi.fn().mockReturnValue(isPublic);
-  const guard = new JwtAuthGuard({ getAllAndOverride } as unknown as Reflector);
-  return { guard, getAllAndOverride };
+  const resolveIdentity = vi.fn();
+  const guard = new JwtAuthGuard(
+    { getAllAndOverride } as unknown as Reflector,
+    {
+      resolveIdentity,
+    } as unknown as AuthService,
+  );
+  return { guard, getAllAndOverride, resolveIdentity };
 };
 
 const context = {
@@ -16,22 +23,85 @@ const context = {
 } as never;
 
 describe('JwtAuthGuard', () => {
-  it('lets a @Public route through without authenticating', () => {
+  it('lets a @Public route through without authenticating', async () => {
     // The ECS probe carries no credentials. If this regresses, the container
     // fails its own health check and the circuit breaker rolls back a working
     // deploy — with the application itself fine.
     const { guard } = guardWith(true);
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
-  it('checks both handler and class metadata', () => {
+  it('checks both handler and class metadata', async () => {
     // The health controller marks the whole class, not the method.
     const { guard, getAllAndOverride } = guardWith(true);
 
-    guard.canActivate(context);
+    await guard.canActivate(context);
 
     expect(getAllAndOverride).toHaveBeenCalledWith('isPublic', [undefined, undefined]);
+  });
+
+  // THE COMPOSITION THIS FILE EXISTS TO PIN. Identity resolution lived in the
+  // strategy until 2026-08-25, which made POST /auth/session unreachable by
+  // anyone without an account — the endpoint that creates one. Nothing caught
+  // it: the service and the strategy were each correct in isolation, and only a
+  // real sign-in with a new address surfaced the deadlock.
+  describe('account resolution', () => {
+    const authenticated = (allowMissingAccount: boolean) => {
+      const request: { user: unknown } = { user: { sub: 'google-oauth2|1' } };
+      const ctx = {
+        getHandler: () => undefined,
+        getClass: () => undefined,
+        switchToHttp: () => ({ getRequest: () => request }),
+      } as never;
+
+      const getAllAndOverride = vi
+        .fn()
+        .mockImplementation((key: string) => (key === 'isPublic' ? false : allowMissingAccount));
+      const resolveIdentity = vi.fn().mockResolvedValue({
+        sub: 'google-oauth2|1',
+        userId: 'usr_1',
+        role: 'USER',
+        locale: 'es',
+      });
+
+      const guard = new JwtAuthGuard(
+        { getAllAndOverride } as unknown as Reflector,
+        {
+          resolveIdentity,
+        } as unknown as AuthService,
+      );
+
+      // The strategy attaches { sub }; passport's own verification is not under
+      // test here, so AuthGuard's canActivate is stubbed on the prototype the
+      // guard inherits from.
+      const passportProto = Object.getPrototypeOf(Object.getPrototypeOf(guard)) as {
+        canActivate: (ctx: unknown) => Promise<boolean>;
+      };
+      vi.spyOn(passportProto, 'canActivate').mockResolvedValue(true);
+
+      return { guard, ctx, request, resolveIdentity };
+    };
+
+    it('replaces { sub } with the full claim set on an ordinary route', async () => {
+      const { guard, ctx, request, resolveIdentity } = authenticated(false);
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+
+      expect(resolveIdentity).toHaveBeenCalledWith('google-oauth2|1');
+      expect(request.user).toMatchObject({ userId: 'usr_1', role: 'USER' });
+    });
+
+    it('skips resolution for @AllowMissingAccount, leaving { sub }', async () => {
+      const { guard, ctx, request, resolveIdentity } = authenticated(true);
+
+      await expect(guard.canActivate(ctx)).resolves.toBe(true);
+
+      // The whole point: POST /auth/session must run for a caller who has no
+      // account, because it is what creates one.
+      expect(resolveIdentity).not.toHaveBeenCalled();
+      expect(request.user).toEqual({ sub: 'google-oauth2|1' });
+    });
   });
 
   it('rejects when passport produced no user', () => {

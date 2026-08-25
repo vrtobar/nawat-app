@@ -8,6 +8,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 
+import { AuthService } from '../../modules/auth/auth.service';
+import { ALLOW_MISSING_ACCOUNT } from '../decorators/allow-missing-account.decorator';
 import { IS_PUBLIC } from '../decorators/public.decorator';
 
 // Registered globally via APP_GUARD, so every route requires a valid Auth0
@@ -18,11 +20,14 @@ import { IS_PUBLIC } from '../decorators/public.decorator';
 export class JwtAuthGuard extends AuthGuard('jwt') {
   private readonly logger = new Logger(JwtAuthGuard.name);
 
-  constructor(private readonly reflector: Reflector) {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly authService: AuthService,
+  ) {
     super();
   }
 
-  override canActivate(context: ExecutionContext) {
+  override async canActivate(context: ExecutionContext): Promise<boolean> {
     // getAllAndOverride so @Public() works on a controller class as well as a
     // handler — the health controller marks the whole class.
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
@@ -34,7 +39,35 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    return super.canActivate(context);
+    // Verification first: signature, issuer, audience, expiry. The strategy
+    // attaches { sub } and nothing else.
+    const verified = await super.canActivate(context);
+    if (!verified) {
+      return false;
+    }
+
+    // THEN identity, and only here, because only the guard can see the route.
+    //
+    // Resolving in the strategy — where this lived until 2026-08-25 — made
+    // POST /auth/session unreachable by anyone without an account, which is
+    // precisely who it exists for: it is the endpoint that creates one. The
+    // account lookup rejected the caller before the handler could run.
+    if (
+      this.reflector.getAllAndOverride<boolean>(ALLOW_MISSING_ACCOUNT, [
+        context.getHandler(),
+        context.getClass(),
+      ])
+    ) {
+      return true;
+    }
+
+    // Replaces { sub } with the full claim set every other route reads through
+    // @CurrentUser() and @Roles(). Throws USER_DEACTIVATED for a disabled
+    // account and ACCOUNT_NOT_PROVISIONED when the subject has no row.
+    const request = context.switchToHttp().getRequest<{ user: { sub: string } }>();
+    request.user = await this.authService.resolveIdentity(request.user.sub);
+
+    return true;
   }
 
   // Passport's default throws a bare UnauthorizedException whose body does not

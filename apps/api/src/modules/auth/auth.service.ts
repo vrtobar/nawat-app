@@ -1,5 +1,5 @@
 import { prisma } from '@nahuat/database';
-import { API_ERROR_CODES, type JwtClaims } from '@nahuat/shared';
+import { API_ERROR_CODES, type JwtClaims, type UserProfile } from '@nahuat/shared';
 import {
   ConflictException,
   ForbiddenException,
@@ -12,10 +12,12 @@ import { z } from 'zod';
 
 import { LOCALE_TO_WIRE } from '../../common/locale';
 import { isPrismaError, PRISMA_ERROR, uniqueViolationFields } from '../../common/prisma-error';
+import { toUserProfile, USER_PROFILE_SELECT } from '../../common/user-profile';
 import type { Env } from '../../config/env.validation';
 
-// The auth path must not hang on a slow Auth0. Only reached when provisioning
-// a user seen for the first time, so the timeout costs nothing on the hot path.
+// The login path must not hang on a slow Auth0. Reached once per login rather
+// than once per request, so it is nowhere near the hot path — but a login that
+// hangs is worse than one that fails, because the user has nothing to retry.
 const USERINFO_TIMEOUT_MS = 5000;
 
 // Auth0's /userinfo response, narrowed to what a user row needs. Everything
@@ -50,14 +52,30 @@ export class AuthService {
   // signature, issuer, audience and expiry have already passed. One indexed
   // read on users.auth0Id (unique btree); a request that gets this far is
   // about to query the database for its actual work anyway.
-  async resolveIdentity(auth0Id: string, accessToken: string): Promise<JwtClaims> {
+  //
+  // A PURE READ as of 2026-08-25. It used to provision a missing row here, and
+  // that had two problems. It made "logged in" and "has an account" different
+  // states, so a session could exist with no account and the discrepancy
+  // surfaced later at an arbitrary request. And because a missing row was an
+  // expected condition rather than a fault, **hard-deleting a user silently
+  // re-created them** on their next request: the soft-delete gate below cannot
+  // see a row that is gone. Accounts are now created at login by
+  // startSession(), and a missing row here is a fault.
+  async resolveIdentity(auth0Id: string): Promise<JwtClaims> {
     const existing = await prisma.user.findUnique({
       where: { auth0Id },
       select: { id: true, role: true, locale: true, deletedAt: true, isActive: true },
     });
 
     if (!existing) {
-      return this.provision(auth0Id, accessToken);
+      // 401, not 404: the credential is valid and the caller is who they say
+      // they are — there is simply no account behind the subject. Signing in
+      // again fixes it, because that is the path that creates one.
+      this.logger.warn(`no account for verified sub "${auth0Id}"`);
+      throw new UnauthorizedException({
+        code: API_ERROR_CODES.ACCOUNT_NOT_PROVISIONED,
+        message: 'No account exists for this sign-in. Please sign in again.',
+      });
     }
 
     // The deactivation gate. It used to run at login, which left a deactivated
@@ -79,22 +97,66 @@ export class AuthService {
     };
   }
 
-  // First request from an account that has never been seen. The access token
-  // carries `sub` and nothing else useful — email, name and picture live on the
-  // ID token, which the browser holds and the API never receives — so the
-  // profile is fetched from Auth0 rather than taken from the client. That
-  // matters: a client-supplied profile would let a caller choose the email
-  // attached to their own row, and email is a unique column.
-  private async provision(auth0Id: string, accessToken: string): Promise<JwtClaims> {
+  // A login just happened. Called by POST /auth/session, which the web
+  // callback invokes once per sign-in with the token it just received.
+  //
+  // This is the ONLY path that creates an account. It also re-syncs the
+  // profile, which nothing did between the Post Login Action's deletion on
+  // 2026-08-24 and this: a name or avatar changed at the identity provider
+  // never propagated, because the row was written once and never revisited.
+  //
+  // Deliberately refuses a deactivated account rather than stamping a login on
+  // it. Telling someone at sign-in that their account is disabled is a better
+  // answer than letting them in and failing every subsequent request.
+  async startSession(auth0Id: string, accessToken: string): Promise<UserProfile> {
     const profile = await this.fetchUserInfo(accessToken);
+    this.assertProfileUsable(auth0Id, profile);
 
+    const existing = await prisma.user.findUnique({
+      where: { auth0Id },
+      select: { id: true, deletedAt: true, isActive: true },
+    });
+
+    if (existing) {
+      if (existing.deletedAt !== null || !existing.isActive) {
+        throw new ForbiddenException({
+          code: API_ERROR_CODES.USER_DEACTIVATED,
+          message: 'This account has been deactivated',
+        });
+      }
+
+      // email is not re-synced — see the schema comment. It is the unique key,
+      // so following a change upstream risks colliding with another row, and
+      // the collision would surface as a failed login for someone who changed
+      // nothing.
+      const updated = await prisma.user.update({
+        where: { auth0Id },
+        data: {
+          name: profile.name ?? profile.email,
+          pictureUrl: profile.picture ?? null,
+          lastLoginAt: new Date(),
+        },
+        select: USER_PROFILE_SELECT,
+      });
+
+      return toUserProfile(updated);
+    }
+
+    return this.provision(auth0Id, profile);
+  }
+
+  // Rejects a /userinfo response that cannot produce a row, before any write.
+  private assertProfileUsable(
+    auth0Id: string,
+    profile: z.infer<typeof UserInfoSchema>,
+  ): asserts profile is z.infer<typeof UserInfoSchema> & { email: string } {
     // Auth0 returns the token's own subject. A mismatch means the token and the
     // profile describe different people, which should be impossible — refuse
     // rather than create a row under the wrong identity.
     if (profile.sub !== auth0Id) {
       this.logger.error(`userinfo sub "${profile.sub}" does not match token sub "${auth0Id}"`);
       throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
+        code: API_ERROR_CODES.UNAUTHORIZED,
         message: 'Could not establish identity',
       });
     }
@@ -106,11 +168,22 @@ export class AuthService {
     if (!profile.email) {
       this.logger.error(`userinfo returned no email for "${auth0Id}"`);
       throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
+        code: API_ERROR_CODES.UNAUTHORIZED,
         message: 'Could not establish identity',
       });
     }
+  }
 
+  // An account that has never been seen. The access token carries `sub` and
+  // nothing else useful — email, name and picture live on the ID token, which
+  // the browser holds and the API never receives — so the profile is fetched
+  // from Auth0 rather than taken from the client. That matters: a
+  // client-supplied profile would let a caller choose the email attached to
+  // their own row, and email is a unique column.
+  private async provision(
+    auth0Id: string,
+    profile: z.infer<typeof UserInfoSchema> & { email: string },
+  ): Promise<UserProfile> {
     try {
       const created = await prisma.user.create({
         data: {
@@ -121,16 +194,14 @@ export class AuthService {
           // Action this replaced.
           name: profile.name ?? profile.email,
           pictureUrl: profile.picture ?? null,
+          // Stamped on creation, not left null: the row exists because a login
+          // happened, and this is that login.
+          lastLoginAt: new Date(),
         },
-        select: { id: true, role: true, locale: true },
+        select: USER_PROFILE_SELECT,
       });
 
-      return {
-        sub: auth0Id,
-        userId: created.id,
-        role: created.role,
-        locale: LOCALE_TO_WIRE[created.locale],
-      };
+      return toUserProfile(created);
     } catch (error) {
       // WHICH unique constraint matters. `users` holds three — auth0_id, email
       // and username — and the original code assumed any P2002 here meant a
@@ -175,7 +246,7 @@ export class AuthService {
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) {
         const raced = await prisma.user.findUnique({
           where: { auth0Id },
-          select: { id: true, role: true, locale: true },
+          select: USER_PROFILE_SELECT,
         });
 
         // findUnique, not findUniqueOrThrow. A miss means this was not a race
@@ -185,12 +256,7 @@ export class AuthService {
         // source lines. That is exactly how a stack trace reached a client on
         // 2026-08-24.
         if (raced) {
-          return {
-            sub: auth0Id,
-            userId: raced.id,
-            role: raced.role,
-            locale: LOCALE_TO_WIRE[raced.locale],
-          };
+          return toUserProfile(raced);
         }
 
         this.logger.error(
