@@ -5,6 +5,8 @@ import {
   type ApiSuccess,
   ApiSuccessSchema,
   type PaginationMeta,
+  type UserProfile,
+  UserProfileSchema,
 } from '@nahuat/shared';
 import { z } from 'zod';
 
@@ -120,6 +122,20 @@ export async function fetchPage<T extends z.ZodType>(
 // a token cannot be called without one by forgetting an argument — the choice is
 // in the function name, at the call site, where it is reviewable.
 // -----------------------------------------------------------------------------
+
+// Records that a login just happened, creating the account if this is the
+// first one. The API's POST /auth/session; see its controller for why that is
+// not the deleted POST /auth/role.
+//
+// THE ONLY CALL THAT TAKES AN EXPLICIT TOKEN. Every other authed helper reads
+// it with getApiToken(), which reads the session — and this runs inside
+// onCallback, before the session exists. The token is the one the SDK has just
+// exchanged the authorization code for.
+export async function startSession(token: string): Promise<UserProfile> {
+  const body = await requestJson('/auth/session', { method: 'POST', token });
+  const parsed = ApiSuccessSchema(UserProfileSchema).parse(body) as ApiSuccess<UserProfile>;
+  return parsed.data;
+}
 
 // A single authenticated item.
 export async function authedItem<T extends z.ZodType>(
