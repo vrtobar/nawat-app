@@ -21,16 +21,22 @@
 #
 # Runs in the foreground and holds the tunnel open until Ctrl-C.
 #
-# CTRL-C IS NOT THE WHOLE STORY. It closes the local port, but the session stays
-# Active on the AWS side until the 20-minute idle timeout — so a route to the
-# database outlives the terminal it was opened from. To end it properly:
+# Ctrl-C is enough: the plugin terminates the session on SIGINT and it leaves
+# describe-sessions immediately.
+#
+# KILLING THE PROCESS IS NOT. On SIGTERM — pkill, kill <pid>, a wrapper cleaning
+# up after itself — the local port closes but the session stays Active on the
+# AWS side until the 20-minute idle timeout, leaving a route to the database
+# with no terminal attached. Same for a closed window or a suspended laptop.
+# Both were verified by signalling the plugin directly.
 #
 #   aws ssm describe-sessions --state Active \
 #     --query 'Sessions[].SessionId' --output text
 #   aws ssm terminate-session --session-id <id>
 #
-# Doing that automatically needs a trap, which needs the session id, which this
-# script cannot see while it exec's the CLI. Tracked in the backlog.
+# Covering the SIGTERM case automatically needs a trap, which needs the session
+# id, which this script cannot see while it exec's the CLI. Tracked in the
+# backlog; the interactive path does not need it.
 #
 # What gets recorded: CloudTrail logs the StartSession call with the IAM
 # principal, the target instance and the document name. The SQL itself is NOT

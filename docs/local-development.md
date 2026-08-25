@@ -118,16 +118,27 @@ The bastion deliberately cannot read that secret. The tunnel forwards a TCP
 port and authentication happens on this machine, so reaching the host and being
 able to log in stay two separate permissions.
 
-### Ctrl-C does not fully close it
+### Ctrl-C closes it properly; killing the process does not
 
-Ctrl-C closes the local port, but the session stays **Active** on the AWS side
-until a 20-minute idle timeout — a route to the database outliving the terminal
-it was opened from. To end it properly:
+Ctrl-C is enough. The plugin handles `SIGINT` by terminating the session, and it
+is gone from `describe-sessions` immediately.
+
+**Killing the process is not the same.** `SIGTERM` — `pkill`, `kill <pid>`, a
+script cleaning up after itself — closes the local port but leaves the session
+**Active** on the AWS side until the 20-minute idle timeout, which is a route to
+the database outliving the terminal that opened it. The same applies to anything
+that takes the terminal away without an interrupt: a closed window, a dropped
+connection, a laptop suspending.
+
+Both behaviours were verified by signalling the plugin directly and watching
+`describe-sessions`. If you are ever unsure:
 
 ```bash
 aws ssm describe-sessions --state Active --query 'Sessions[].SessionId' --output text
 aws ssm terminate-session --session-id <id>
 ```
+
+An empty first line means nothing is open.
 
 ### What is recorded, and what is not
 
