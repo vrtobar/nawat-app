@@ -149,3 +149,28 @@ module "compute" {
   log_retention_days         = var.log_retention_days
   enable_autoscaling         = var.enable_autoscaling
 }
+
+# =============================================================================
+# BASTION
+#
+# Gated, and off by default. See modules/bastion for why it is safe to define
+# and what it deliberately cannot do.
+#
+# In the APPLICATION layer so it dies with a teardown and bills only while the
+# environment is up — roughly $3/month if one were left running, and staging is
+# not. Its security group is in foundation; only the instance is here.
+# =============================================================================
+
+# APPLY ORDER: foundation before this layer, and foundation is applied by a
+# human — staging-deploy.yml only ever touches application (its TF_DIR is
+# pinned to it). So a `staging-deploy.yml up` run against a foundation that
+# predates the bastion security group fails here, on a bastion_sg_id output
+# that does not exist yet, and takes the whole bring-up with it.
+module "bastion" {
+  count  = var.enable_bastion ? 1 : 0
+  source = "../../../modules/bastion"
+
+  prefix             = local.prefix
+  private_subnet_ids = data.terraform_remote_state.foundation.outputs.private_subnet_ids
+  bastion_sg_id      = data.terraform_remote_state.foundation.outputs.bastion_sg_id
+}
