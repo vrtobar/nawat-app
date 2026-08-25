@@ -102,7 +102,29 @@ twelve of twenty results and the total count is wrong. Filtering has to be
 server-side, so resolution may as well be.
 
 **`User.locale` is delivered on the access token, not read per request**
-(added 2026-08-19). The resolution chain names `User.locale`, but the token
+(added 2026-08-19).
+
+> **SUPERSEDED 2026-08-24, recorded 2026-08-25.** There is no locale claim, and
+> no custom claims at all — the Post Login Action that minted them is deleted
+> ([ADR 13](0013-authentication-and-authorization.md)). `User.locale` is now read
+> per request from the user row, as one of the four fields
+> `AuthService.resolveIdentity()` returns, and `JwtClaimsSchema` makes `locale`
+> **required** where it was optional as a claim: a row always has one, so there
+> is no authenticated request where it can be absent.
+>
+> Three things below stop applying with it. The staleness this section accepts is
+> gone — a locale change takes effect on the next request, so the `?locale=`
+> override no longer has to paper over anything. The "fails soft" behaviour has
+> no subject, since there is no claim to be malformed. And the closing argument —
+> that a per-request read buys nothing because the public dictionary has no user
+> — was answered by the request being made anyway for `role` and `userId`; the
+> locale rides along on a read that already happens, and anonymous requests still
+> resolve through `Accept-Language` without one.
+>
+> Retained because the resolution chain itself (§4) is unchanged, and because the
+> reasoning is the clearest record of what the claims design was buying.
+
+The resolution chain names `User.locale`, but the token
 deliberately carries no database state — `role` and `userId` come from claims so
 authorization costs no query. Rather than reintroduce a per-request read for the
 locale step, the Post Login Action embeds `User.locale` as a

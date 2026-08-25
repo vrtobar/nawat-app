@@ -301,20 +301,41 @@ from once-per-login to once-per-request, which is strictly stronger.
   indexed read per authenticated request — see "Reversal: identity is resolved
   per request".
 - **That consequence is currently unobservable, because nothing can change a
-  role.** There is no users admin module. `@Roles()` appears on **zero** routes —
-  only in its own definition, in the guard, and in the guard's tests. No
-  `DELETE /users/:id` exists despite comments referring to one, and nothing
-  reads `AUTH0_MGMT_CLIENT_ID` or `AUTH0_MGMT_CLIENT_SECRET`, though
-  `env.validation` requires both at boot. The authorization half of this record
-  is fully built, globally enforced, and has nothing yet to enforce.
-- **The staleness window is partly closed elsewhere, by a different
-  mechanism.** `GET /users/me` returns 401 — not 404 — when the row is missing,
-  soft-deleted, or inactive, so a session that outlives its user stops working
-  on any route that reads the profile. That is a per-route check rather than a
-  global one: a route authorizing purely from claims would not notice.
-- Deactivation is consequently enforced at two points for two different
-  reasons — `/auth/role` refuses a new login, `/users/me` refuses an
-  already-issued token.
+  role.** There is no users admin module. No `DELETE /users/:id` exists despite
+  comments referring to one, and nothing reads `AUTH0_MGMT_CLIENT_ID` or
+  `AUTH0_MGMT_CLIENT_SECRET`, though `env.validation` requires both at boot.
+
+  _Half-resolved 2026-08-20, recorded 2026-08-25._ This bullet also said
+  `@Roles()` appeared on **zero** routes. The Dictionary module changed that: it
+  gates **13** — seven at `CONTRIBUTOR` (entry and translation authoring, plus
+  the two admin read routes, gated at class level on the controller) and six at
+  `ADMIN` (publish, delete, and the three dialect writes). So the ladder is now
+  genuinely load-bearing. What remains true is the
+  narrower claim: no route can _change_ a role, so the per-request lookup's
+  headline benefit still has nothing to demonstrate itself on.
+
+  Note the ranking property was exercised the moment it had users:
+  `@Roles('CONTRIBUTOR')` on the authoring routes admits ADMIN without naming
+  it, which is the whole point of ranking over matching.
+
+- ~~**The staleness window is partly closed elsewhere, by a different
+  mechanism.**~~ ~~Deactivation is consequently enforced at two points for two
+  different reasons — `/auth/role` refuses a new login, `/users/me` refuses an
+  already-issued token.~~ **Both obsolete as of 2026-08-24**, recorded here
+  2026-08-25 because the reversal above missed them.
+
+  There is no staleness window left to close: `resolveIdentity()` reads
+  `deletedAt` and `isActive` on **every** authenticated request, so the check is
+  global rather than a per-route property of `GET /users/me`, and `/auth/role`
+  no longer exists to refuse anything. `GET /users/me` still returns 401 rather
+  than 404 for a missing row, but it is now a redundant second line rather than
+  the mechanism.
+
+  Worth keeping the shape of the original point: it was a per-route check
+  standing in for a global one, and the reason it was needed at all is that a
+  route authorizing purely from claims would not notice. That is precisely the
+  gap the reversal closed.
+
 - **401 responses carry the reason the token was rejected** — `jwt expired`
   versus `invalid signature` is the difference between the client refreshing and
   the client being wrong. Passport's default discards it, and reading only
@@ -351,9 +372,29 @@ from once-per-login to once-per-request, which is strictly stronger.
   and never sent to the API, so every genuine access token failed validation
   until they were dropped. Adding them as custom claims would have made the
   schema true and put PII in every request — the profile is read from the
-  database instead, where `/auth/role` syncs it on each login.
+  database instead.
+
+  _Amended 2026-08-25._ That last clause read "where `/auth/role` syncs it on
+  each login". There is no login-time sync any more: the row is written once, by
+  `AuthService.provision()`, from Auth0's `/userinfo` on the first authenticated
+  request. **Nothing refreshes the profile after that** — a name or picture
+  changed at the identity provider does not propagate. That is a real gap the
+  reversal opened, and it belongs in the backlog rather than in a clause here.
 
 ## Open question
+
+> **DISSOLVED 2026-08-24, recorded 2026-08-25.** This question had no answer
+> because it had no subject: the Post Login Action it is about is deleted, and
+> the constraint went with it. Local development now signs in against the
+> staging tenant exactly as staging does, because nothing in the login path is
+> environment-specific any more — no Action, no callback URL, no per-environment
+> secret. The leaning recorded below ("point the Action at staging only and set
+> roles by hand in the local database") was never adopted; roles are set by hand
+> in the local database, but for the ordinary reason that no admin module exists
+> yet, not as a workaround.
+>
+> Kept because the ADR 5 tension it identifies is the clearest statement of why
+> a shared tenant was uncomfortable, and ADR 5 is amended in light of it.
 
 The Post Login Action that produces these claims is tenant-level, and the
 staging tenant serves both staging and local development — so one Action holds

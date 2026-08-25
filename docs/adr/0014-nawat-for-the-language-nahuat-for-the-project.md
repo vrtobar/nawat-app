@@ -55,6 +55,13 @@ than from the language. Changing it would mean updating the Post Login Action
 and `JwtStrategy` in lockstep and invalidating every token minted before the
 change, for no gain.
 
+_Moot as of 2026-08-24, recorded 2026-08-25._ There is no custom claim namespace
+any more — tokens carry no custom claims, and identity is read from the database
+per request ([ADR 13](0013-authentication-and-authorization.md)). The naming
+question this answered cannot recur unless claims do. The example is still a fair
+illustration of the anchor: it was decided on the domain, and the domain is
+`nahuat.com` regardless of what the language is called.
+
 **The repository is `nawat-app`.**
 
 _Amended 2026-08-18 — this section originally read "the repository slug stays
