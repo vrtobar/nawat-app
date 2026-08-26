@@ -234,6 +234,13 @@ export const AdminActorSchema = z.object({
 // ADR 0015 §2 exempts dictionary entries from the English-to-publish rule
 // ("Entries publish with Spanish alone"), so this is a completeness hint the
 // panel can surface, never a gate — the publish path does not check it.
+//
+// It is derived from englishCount in the service rather than computed a second
+// time, so the two cannot disagree. Note what the pair is actually reporting:
+// not tidiness, but VISIBILITY. §2 permits publishing with Spanish alone and §4
+// resolves content to one locale, so a Spanish-only entry is published and
+// simultaneously invisible to every English reader — a consequence neither ADR
+// states, and the reason the panel needs to say more than "missing".
 // -----------------------------------------------------------------------------
 
 export const AdminEntryListItemSchema = z.object({
@@ -244,6 +251,14 @@ export const AdminEntryListItemSchema = z.object({
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   translationCount: z.number().int(),
+  // How many of them carry contentEn. Present alongside hasEnglish because the
+  // boolean cannot distinguish the two cases the panel must word differently:
+  // one of three translations missing English means the entry still appears to
+  // an English reader with fewer senses, while none of them missing means the
+  // entry does not appear AT ALL. The public browse requires contentEn in its
+  // semi-join when the locale resolves to English, so an entry with no English
+  // anywhere is filtered out entirely rather than shown glossless.
+  englishCount: z.number().int(),
   hasEnglish: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
