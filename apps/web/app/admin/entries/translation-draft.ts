@@ -2,6 +2,7 @@ import {
   type AdminTranslationDetail,
   type CreateTranslation,
   type PartOfSpeech,
+  type UpdateTranslation,
 } from '@nahuat/shared';
 
 // One translation as the form holds it: every field a string, including the
@@ -87,5 +88,40 @@ export function toCreateTranslation(draft: TranslationDraft): CreateTranslation 
     exampleEs: omitEmpty(draft.exampleEs),
     exampleEn: omitEmpty(draft.exampleEn),
     audioUrl: omitEmpty(draft.audioUrl),
+  };
+}
+
+// An empty field on UPDATE is a CLEAR, and this is the deliberate inverse of
+// omitEmpty above rather than an inconsistency.
+//
+// On create, an empty box means the field never had a value, so omitting it is
+// exactly right. On update it means the author emptied a box that had something
+// in it, and only an explicit null says so — `undefined` disappears in
+// JSON.stringify, so an omitted key reaches the server as no key at all and the
+// column keeps whatever it held. That is why UpdateTranslationSchema is
+// nullable where CreateTranslationSchema is merely optional.
+//
+// Sent unconditionally rather than diffed against what was loaded: nulling a
+// column that is already null is a no-op, and a diff would introduce a second
+// account of what changed for no behavioural gain.
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+// dialectCode is absent because a dialect is immutable after creation — the
+// schema omits it, so sending one would be ignored.
+export function toUpdateTranslation(draft: TranslationDraft): UpdateTranslation {
+  return {
+    // The one field with no null branch: a translation with no Spanish gloss
+    // renders nowhere, so it is replaced or left alone, never emptied.
+    contentEs: draft.contentEs.trim(),
+    contentEn: emptyToNull(draft.contentEn),
+    phonetic: emptyToNull(draft.phonetic),
+    partOfSpeech: draft.partOfSpeech === '' ? null : draft.partOfSpeech,
+    exampleNawat: emptyToNull(draft.exampleNawat),
+    exampleEs: emptyToNull(draft.exampleEs),
+    exampleEn: emptyToNull(draft.exampleEn),
+    audioUrl: emptyToNull(draft.audioUrl),
   };
 }
