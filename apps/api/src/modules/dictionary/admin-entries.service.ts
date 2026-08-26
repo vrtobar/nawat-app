@@ -9,6 +9,7 @@ import {
 import { Injectable } from '@nestjs/common';
 
 import { entryNotFound } from './dictionary-errors';
+import { entryOwnership } from './ownership';
 import { ADMIN_TRANSLATION_SELECT, toAdminTranslationDetail } from './translation-detail';
 
 // Columns a list row needs. The nested translations are selected for their
@@ -125,11 +126,9 @@ export class AdminEntriesService {
     };
   }
 
-  // Negated against ADMIN rather than matched against CONTRIBUTOR: if a rank is
-  // ever added between them, an unrecognised role is scoped to its own rows
-  // instead of silently seeing everything.
+  // Shared with the entry and translation update paths — see ./ownership.
   private ownership(user: JwtClaims): Prisma.EntryWhereInput {
-    return user.role === 'ADMIN' ? {} : { creatorId: user.userId };
+    return entryOwnership(user.role, user.userId);
   }
 }
 

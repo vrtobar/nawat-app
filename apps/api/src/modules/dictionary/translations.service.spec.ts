@@ -158,6 +158,39 @@ describe('TranslationsService', () => {
       );
     });
 
+    it("scopes a CONTRIBUTOR through the parent entry's creator", async () => {
+      // Scoped by the ENTRY's creator rather than the translation's, so what a
+      // contributor may write matches exactly what GET /admin/entries shows
+      // them.
+      translation.findFirst.mockResolvedValueOnce(null as never);
+
+      const rejection = service.update('tra_1', { contentEs: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
+      });
+
+      expect(translation.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tra_1', deletedAt: null, entry: { creatorId: 'usr_1' } },
+        }),
+      );
+      expect(translation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('applies no ownership predicate for an ADMIN', async () => {
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.update('tra_1', { contentEs: 'x' }, 'adm_1', 'ADMIN', 'es');
+
+      expect(translation.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'tra_1', deletedAt: null } }),
+      );
+    });
+
     it('refuses a CONTRIBUTOR editing a published translation (FORBIDDEN), without writing', async () => {
       translation.findFirst.mockResolvedValueOnce({ isPublished: true } as never);
 

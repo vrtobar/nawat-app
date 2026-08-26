@@ -23,6 +23,7 @@ import {
   publishedEditForbidden,
   translationInUse,
 } from './dictionary-errors';
+import { entryOwnership } from './ownership';
 import {
   resolveContent,
   toTranslationDetail,
@@ -350,8 +351,13 @@ export class EntriesService {
     role: JwtClaims['role'],
     locale: Locale,
   ): Promise<DictionaryEntryDetail> {
+    // Ownership is part of the WHERE, so another author's entry comes back as
+    // nothing and 404s exactly like a missing id — the same refusal the admin
+    // read surface makes, and for the same reason: this endpoint returns the
+    // entry detail on success, so without it a contributor could confirm an id
+    // exists, and rewrite it, by guessing.
     const existing = await prisma.entry.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...entryOwnership(role, userId) },
       select: { isPublished: true },
     });
     if (!existing) throw entryNotFound();
