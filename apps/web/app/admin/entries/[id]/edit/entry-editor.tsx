@@ -178,6 +178,18 @@ export function EntryEditor({
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">Translations</h2>
 
+        {/* Entry-level rather than per-card, because this is the case where the
+            HEADWORD disappears rather than one sense of it. Publishing is still
+            allowed with Spanish alone (ADR 0015 §2) — this states the cost,
+            it does not block anything. */}
+        {entry.translations.length > 0 && entry.translations.every((t) => t.contentEn === null) && (
+          <p className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            No translation has an English gloss, so this entry does not appear in the English
+            dictionary at all. It publishes fine with Spanish alone — adding English anywhere below
+            makes it visible.
+          </p>
+        )}
+
         {entry.translations.map((translation) => (
           <TranslationCard
             key={translation.id}

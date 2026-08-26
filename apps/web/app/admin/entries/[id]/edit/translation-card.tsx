@@ -119,6 +119,16 @@ export function TranslationCard({
         onChange={change}
       />
 
+      {/* Read off the draft, not the saved row, so it clears as the gloss is
+          typed rather than after a save. A translation without English is
+          filtered out of the public browse when the locale resolves to
+          English — not shown untranslated, absent. */}
+      {draft.contentEn.trim() === '' && (
+        <p className="mt-2 text-xs text-amber-700">
+          No English gloss — this translation is not shown to English readers.
+        </p>
+      )}
+
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"

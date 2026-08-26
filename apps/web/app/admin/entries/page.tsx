@@ -1,29 +1,87 @@
+import { type AdminEntryStatus, AdminEntryStatusSchema } from '@nahuat/shared';
 import Link from 'next/link';
 
 import { getMe, listAdminEntries } from '../../../lib/api/admin';
 import { PublishButton } from './publish-button';
+import { UnpublishButton } from './unpublish-button';
 
-// Drafts, newest edit first — the queue the panel exists to work through.
+// The authoring queue, newest edit first.
 //
 // The row actions are deliberately thin. Editing and creating live on their own
 // routes rather than expanding inline here, because a row carries only what the
 // list projection computes — `translationCount` and `hasEnglish`, not the
 // translations themselves — so an inline editor would need a second request per
 // row to have anything to edit.
-export default async function AdminEntriesPage() {
+
+const VIEWS: { status: AdminEntryStatus; label: string }[] = [
+  { status: 'draft', label: 'Drafts' },
+  { status: 'published', label: 'Published' },
+  { status: 'all', label: 'All' },
+];
+
+const EMPTY: Record<AdminEntryStatus, string> = {
+  draft: 'No drafts.',
+  published: 'Nothing published yet.',
+  all: 'No entries.',
+};
+
+// The three cases the panel has to keep apart, which a single boolean could not:
+// every translation carries English, some do, or none do. Only the last means
+// the entry is absent from the English dictionary; the middle one means it
+// appears there with fewer senses than a Spanish reader sees.
+function EnglishStatus({
+  englishCount,
+  translationCount,
+}: {
+  englishCount: number;
+  translationCount: number;
+}) {
+  // No translations at all: the entry is unreachable in either language, which
+  // is a different problem and reported by the Translations column instead.
+  if (translationCount === 0) return <span className="text-gray-400">—</span>;
+
+  if (englishCount === translationCount) return <span className="text-gray-600">Complete</span>;
+
+  if (englishCount === 0) {
+    return (
+      <span className="text-amber-700" title="Add an English gloss to make it appear">
+        Not shown in English
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-gray-600" title="The rest are not shown to English readers">
+      {englishCount} of {translationCount} in English
+    </span>
+  );
+}
+
+export default async function AdminEntriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  // Parsed against the shared enum rather than trusted: ?status= is user input,
+  // and an unrecognised value falls back to the queue rather than 400ing a
+  // screen someone reached from a stale link.
+  const { status } = await searchParams;
+  const parsed = AdminEntryStatusSchema.safeParse(status);
+  const view: AdminEntryStatus = parsed.success ? parsed.data : 'draft';
+
   // Both are authenticated calls; the layout already established there is a
   // session, so a failure here is a genuine error rather than a signed-out user.
-  const [me, drafts] = await Promise.all([getMe(), listAdminEntries({ status: 'draft' })]);
+  const [me, entries] = await Promise.all([getMe(), listAdminEntries({ status: view })]);
 
-  const canPublish = me.role === 'ADMIN';
+  const isAdmin = me.role === 'ADMIN';
 
   return (
     <main className="p-6">
       <div className="mb-4 flex items-baseline justify-between gap-4">
-        <h1 className="text-lg font-semibold">Drafts</h1>
+        <h1 className="text-lg font-semibold">Entries</h1>
         <div className="flex items-baseline gap-4">
           <span className="text-sm text-gray-500">
-            {drafts.meta.total} {drafts.meta.total === 1 ? 'entry' : 'entries'}
+            {entries.meta.total} {entries.meta.total === 1 ? 'entry' : 'entries'}
           </span>
           <Link
             href="/admin/entries/new"
@@ -34,16 +92,36 @@ export default async function AdminEntriesPage() {
         </div>
       </div>
 
-      {drafts.data.length === 0 ? (
+      {/* Links rather than client-side state: the filter belongs in the URL so a
+          view can be linked to and survives a reload. Without it a published
+          entry was unreachable from the panel entirely — the list only ever
+          asked for drafts, and nothing else linked to an editor. */}
+      <nav className="mb-4 flex gap-4 border-b border-gray-200 text-sm">
+        {VIEWS.map(({ status: value, label }) => (
+          <Link
+            key={value}
+            href={value === 'draft' ? '/admin/entries' : `/admin/entries?status=${value}`}
+            className={
+              value === view
+                ? '-mb-px border-b-2 border-gray-900 pb-2 font-medium text-gray-900'
+                : 'pb-2 text-gray-500 hover:text-gray-900'
+            }
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
+
+      {entries.data.length === 0 ? (
         // Not an error state. An empty queue is the normal steady state, and
         // for a contributor it also means "none of yours" rather than "none at
         // all" — the API scopes the list to its caller.
         <p className="text-sm text-gray-600">
-          No drafts.{' '}
+          {EMPTY[view]}{' '}
           <Link href="/admin/entries/new" className="underline">
             Create an entry
-          </Link>{' '}
-          — it appears here until it is published.
+          </Link>
+          .
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -59,16 +137,25 @@ export default async function AdminEntriesPage() {
               </tr>
             </thead>
             <tbody>
-              {drafts.data.map((entry) => (
+              {entries.data.map((entry) => (
                 <tr key={entry.id} className="border-b border-gray-100">
                   <td className="py-2 pr-4 font-medium">{entry.nawatContent}</td>
                   <td className="py-2 pr-4 text-gray-600">{entry.type}</td>
                   <td className="py-2 pr-4 text-gray-600">{entry.translationCount}</td>
-                  {/* Informational, never a gate: ADR 0015 §2 exempts dictionary
-                      entries from the English-to-publish rule, so an entry with
-                      Spanish alone publishes fine. */}
-                  <td className="py-2 pr-4 text-gray-600">
-                    {entry.hasEnglish ? 'Complete' : 'Missing'}
+                  {/* Still never a gate — ADR 0015 §2 exempts dictionary entries
+                      from the English-to-publish rule, so Spanish alone
+                      publishes fine. But this column now reports the
+                      CONSEQUENCE rather than the tidiness, because the two ADRs
+                      combine into something neither says: §4 resolves content
+                      to one locale, and the public browse requires contentEn in
+                      its semi-join, so an entry with no English anywhere is
+                      published and invisible to every English reader at once.
+                      "Missing" read like a nicety and hid that entirely. */}
+                  <td className="py-2 pr-4">
+                    <EnglishStatus
+                      englishCount={entry.englishCount}
+                      translationCount={entry.translationCount}
+                    />
                   </td>
                   <td className="py-2 pr-4 text-gray-600">
                     {new Date(entry.updatedAt).toLocaleDateString()}
@@ -81,9 +168,15 @@ export default async function AdminEntriesPage() {
                       >
                         Edit
                       </Link>
-                      {canPublish && (
-                        <PublishButton id={entry.id} nawatContent={entry.nawatContent} />
-                      )}
+                      {/* Both lifecycle actions are ADMIN on the API, so neither
+                          is offered otherwise. Which one shows follows the row,
+                          not the view: `all` mixes both. */}
+                      {isAdmin &&
+                        (entry.isPublished ? (
+                          <UnpublishButton id={entry.id} nawatContent={entry.nawatContent} />
+                        ) : (
+                          <PublishButton id={entry.id} nawatContent={entry.nawatContent} />
+                        ))}
                     </div>
                   </td>
                 </tr>
