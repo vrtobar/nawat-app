@@ -42,6 +42,14 @@ export function publishEntry(id: string) {
   return mutate(`/entries/${encodeURIComponent(id)}/publish`, { method: 'PATCH' });
 }
 
+// PATCH /entries/:id/unpublish — ADMIN. Returns the entry to draft, cascading
+// to its published translations. The correction path for a mistake that went
+// live: before this route existed the only way back was deleting the row, which
+// costs its id, slug and attribution over what is usually a wrong gloss.
+export function unpublishEntry(id: string) {
+  return mutate(`/entries/${encodeURIComponent(id)}/unpublish`, { method: 'PATCH' });
+}
+
 // GET /admin/entries/:id — the entry behind the editor, CONTRIBUTOR+.
 //
 // Content comes back UNRESOLVED: contentEs and contentEn side by side, under

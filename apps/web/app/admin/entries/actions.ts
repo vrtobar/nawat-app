@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { publishEntry } from '../../../lib/api/admin';
+import { publishEntry, unpublishEntry } from '../../../lib/api/admin';
 
 export type PublishResult = { ok: true } | { ok: false; message: string };
 
@@ -28,6 +28,23 @@ export async function publishEntryAction(id: string): Promise<PublishResult> {
 
   // The row leaves the draft list, so the whole list is refetched rather than
   // patched in place — the counts and pagination move with it.
+  revalidatePath('/admin/entries');
+  return { ok: true };
+}
+
+// Unpublishing, the inverse. Same result-not-throw shape and the same reason:
+// "this entry was already a draft" does not deserve the error boundary.
+export async function unpublishEntryAction(id: string): Promise<PublishResult> {
+  try {
+    await unpublishEntry(id);
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'Unpublishing failed',
+    };
+  }
+
+  // The row moves between the draft and published views, so both are stale.
   revalidatePath('/admin/entries');
   return { ok: true };
 }
