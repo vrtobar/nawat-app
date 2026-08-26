@@ -13,14 +13,37 @@ import { UnpublishButton } from './unpublish-button';
 // translations themselves — so an inline editor would need a second request per
 // row to have anything to edit.
 
-const VIEWS: { status: AdminEntryStatus; label: string }[] = [
-  { status: 'draft', label: 'Drafts' },
-  { status: 'pending-translations', label: 'Pending translations' },
-  { status: 'published', label: 'Published' },
-  { status: 'all', label: 'All' },
+// "Mine" is not a status — it is the status-agnostic `?mine=true` filter, shown
+// as a tab because that is the cheapest thing to remove if it turns out to be
+// the wrong shape once the beta has contributors in it.
+//
+// Pending translations is ADMIN-only: only an ADMIN can publish, so for anyone
+// else it is a work queue holding no work they can perform. The per-row "not
+// live" indicator stays visible to everyone, because that is information rather
+// than a task.
+type View = {
+  key: string;
+  label: string;
+  status: AdminEntryStatus;
+  mine?: boolean;
+  adminOnly?: boolean;
+};
+
+const VIEWS: View[] = [
+  { key: 'mine', label: 'Mine', status: 'all', mine: true },
+  { key: 'draft', label: 'Drafts', status: 'draft' },
+  {
+    key: 'pending-translations',
+    label: 'Pending translations',
+    status: 'pending-translations',
+    adminOnly: true,
+  },
+  { key: 'published', label: 'Published', status: 'published' },
+  { key: 'all', label: 'All', status: 'all' },
 ];
 
-const EMPTY: Record<AdminEntryStatus, string> = {
+const EMPTY: Record<string, string> = {
+  mine: 'Nothing of yours yet — entries you create, and dialects you add to other entries, appear here.',
   draft: 'No drafts.',
   'pending-translations': 'Nothing waiting — every published entry has all its translations live.',
   published: 'Nothing published yet.',
@@ -30,9 +53,10 @@ const EMPTY: Record<AdminEntryStatus, string> = {
 // Preserves the view when moving between pages, and drops `page` when moving
 // between views — switching tabs should land on the first page of the new one,
 // not page 4 of a list that may not have four pages.
-function href(status: AdminEntryStatus, page?: number): string {
+function href(view: View, page?: number): string {
   const params = new URLSearchParams();
-  if (status !== 'draft') params.set('status', status);
+  if (view.status !== 'draft') params.set('status', view.status);
+  if (view.mine) params.set('mine', 'true');
   if (page !== undefined && page > 1) params.set('page', String(page));
   const query = params.toString();
   return query === '' ? '/admin/entries' : `/admin/entries?${query}`;
@@ -102,14 +126,21 @@ function TranslationCount({
 export default async function AdminEntriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; mine?: string }>;
 }) {
   // Parsed against the shared enum rather than trusted: ?status= is user input,
   // and an unrecognised value falls back to the queue rather than 400ing a
   // screen someone reached from a stale link.
-  const { status, page } = await searchParams;
+  const { status, page, mine } = await searchParams;
   const parsed = AdminEntryStatusSchema.safeParse(status);
-  const view: AdminEntryStatus = parsed.success ? parsed.data : 'draft';
+  const activeStatus: AdminEntryStatus = parsed.success ? parsed.data : 'draft';
+  const activeMine = mine === 'true';
+
+  // `mine` wins the tab highlight because it is the narrower claim: a URL
+  // carrying both is the Mine view, whatever status it names.
+  const view =
+    VIEWS.find((v) => (activeMine ? v.mine === true : !v.mine && v.status === activeStatus)) ??
+    VIEWS[1]!;
 
   // The API pages at 20 by default. Nothing sent one, so every view showed the
   // first 20 rows while the header reported the true total — the count and the
@@ -121,7 +152,7 @@ export default async function AdminEntriesPage({
   // session, so a failure here is a genuine error rather than a signed-out user.
   const [me, entries] = await Promise.all([
     getMe(),
-    listAdminEntries({ status: view, page: currentPage }),
+    listAdminEntries({ status: view.status, page: currentPage, mine: view.mine }),
   ]);
 
   const isAdmin = me.role === 'ADMIN';
@@ -148,17 +179,17 @@ export default async function AdminEntriesPage({
           entry was unreachable from the panel entirely — the list only ever
           asked for drafts, and nothing else linked to an editor. */}
       <nav className="mb-4 flex gap-4 border-b border-gray-200 text-sm">
-        {VIEWS.map(({ status: value, label }) => (
+        {VIEWS.filter((v) => !v.adminOnly || isAdmin).map((v) => (
           <Link
-            key={value}
-            href={href(value)}
+            key={v.key}
+            href={href(v)}
             className={
-              value === view
+              v.key === view.key
                 ? '-mb-px border-b-2 border-gray-900 pb-2 font-medium text-gray-900'
                 : 'pb-2 text-gray-500 hover:text-gray-900'
             }
           >
-            {label}
+            {v.label}
           </Link>
         ))}
       </nav>
@@ -168,7 +199,7 @@ export default async function AdminEntriesPage({
         // for a contributor it also means "none of yours" rather than "none at
         // all" — the API scopes the list to its caller.
         <p className="text-sm text-gray-600">
-          {EMPTY[view]}{' '}
+          {EMPTY[view.key]}{' '}
           <Link href="/admin/entries/new" className="underline">
             Create an entry
           </Link>

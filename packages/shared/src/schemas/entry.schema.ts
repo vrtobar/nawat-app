@@ -344,6 +344,19 @@ export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({
   status: AdminEntryStatusSchema.default('draft'),
   type: EntryTypeSchema.optional(),
   q: z.string().min(1).optional(),
+  // Narrows to the caller's own work: entries they created, or that carry a
+  // translation they created. An OPT-IN filter, not a scope — the reads are
+  // otherwise unscoped, because any contributor may edit any entry and a read
+  // narrower than the write scope would let someone edit a row they cannot
+  // open.
+  //
+  // Authored, not touched. `updaterId` records only the last writer, so an
+  // edit-based filter would drop a caller's own work out of this view as soon
+  // as anyone else saved that row.
+  //
+  // z.stringbool() rather than z.coerce.boolean(), which turns the query string
+  // "false" into true — the same reason DictionaryBrowseParamsSchema uses it.
+  mine: z.stringbool().optional(),
 });
 
 export type AdminEntriesQuery = z.infer<typeof AdminEntriesQuerySchema>;

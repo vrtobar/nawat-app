@@ -9,7 +9,7 @@ import {
 import { Injectable } from '@nestjs/common';
 
 import { entryNotFound } from './dictionary-errors';
-import { entryOwnership } from './ownership';
+import { authoredBy } from './ownership';
 import { ADMIN_TRANSLATION_SELECT, toAdminTranslationDetail } from './translation-detail';
 
 // Columns a list row needs. The nested translations are selected for two
@@ -97,23 +97,28 @@ export class AdminEntriesService {
     };
   }
 
-  async detail(id: string, user: JwtClaims): Promise<AdminEntryDetail> {
+  // No caller argument: the detail is no longer per-user. The route is still
+  // CONTRIBUTOR-gated, but which rows it will show is not a function of who is
+  // asking, so taking the claims here would imply a scoping that does not exist.
+  async detail(id: string): Promise<AdminEntryDetail> {
+    // Unscoped, deliberately. This backs the editor, and any CONTRIBUTOR+ may
+    // edit any entry — refusing to OPEN one they are allowed to CHANGE would be
+    // the wrong half of the old model left behind. The 404 now means what it
+    // says: no such live entry.
     const entry = await prisma.entry.findFirst({
-      // The scope predicate is reapplied here, not just on the list. Without it
-      // a CONTRIBUTOR who guessed or kept an id could read another author's
-      // draft directly.
-      where: { id, deletedAt: null, ...this.ownership(user) },
+      where: { id, deletedAt: null },
       select: DETAIL_SELECT,
     });
 
-    // 404, not 403, when the row exists but belongs to someone else: the two
-    // are indistinguishable to the caller on purpose, so this endpoint cannot
-    // be used to test whether an id exists.
     if (!entry) throw entryNotFound();
 
     return toAdminDetail(entry);
   }
 
+  // No ownership predicate. Every CONTRIBUTOR+ caller sees every entry, because
+  // every one of them may edit every entry — a read narrower than the write
+  // scope would leave rows editable but unopenable. `?mine=true` narrows it by
+  // choice. See ./ownership.
   private scope(params: AdminEntriesQuery, user: JwtClaims): Prisma.EntryWhereInput {
     return {
       deletedAt: null,
@@ -135,13 +140,8 @@ export class AdminEntriesService {
       // 'all' adds no predicate — deletedAt above is the only fence.
       ...(params.type ? { type: params.type } : {}),
       ...(params.q ? { nawatContent: { contains: params.q, mode: 'insensitive' } } : {}),
-      ...this.ownership(user),
+      ...(params.mine ? authoredBy(user.userId) : {}),
     };
-  }
-
-  // Shared with the entry and translation update paths — see ./ownership.
-  private ownership(user: JwtClaims): Prisma.EntryWhereInput {
-    return entryOwnership(user.role, user.userId);
   }
 }
 

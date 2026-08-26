@@ -101,9 +101,13 @@ describe('AdminEntriesService', () => {
   });
 
   describe('scoping — the authorization boundary', () => {
-    it('restricts a CONTRIBUTOR to rows they created', async () => {
+    // OWNERSHIP IS ATTRIBUTION, NOT PERMISSION. Every CONTRIBUTOR+ caller sees
+    // every entry, because every one of them may edit every entry — a read
+    // narrower than the write scope would leave rows editable but unopenable.
+    it('does not restrict a CONTRIBUTOR by creator', async () => {
       await service.list(query(), contributor);
-      expect(whereOf()).toMatchObject({ creatorId: 'usr_contrib' });
+      expect(whereOf()).not.toHaveProperty('creatorId');
+      expect(whereOf()).not.toHaveProperty('OR');
     });
 
     it('does not restrict an ADMIN by creator', async () => {
@@ -111,28 +115,42 @@ describe('AdminEntriesService', () => {
       expect(whereOf()).not.toHaveProperty('creatorId');
     });
 
-    // The predicate negates against ADMIN rather than matching CONTRIBUTOR, so
-    // a rank added between them is scoped to its own rows rather than silently
-    // granted every author's. This test is the reason for that shape.
-    it('scopes an unrecognised role to its own rows rather than opening up', async () => {
-      const future = { ...contributor, role: 'REVIEWER' } as unknown as JwtClaims;
-      await service.list(query(), future);
-      expect(whereOf()).toMatchObject({ creatorId: 'usr_contrib' });
-    });
+    it('narrows to the caller when ?mine=true, by authorship and not by edits', async () => {
+      await service.list(query({ mine: 'true' }), contributor);
 
-    it('reapplies the scope on detail, so an id cannot be used to read another author', async () => {
-      await service.detail('ent_1', contributor);
-      expect(vi.mocked(entry.findFirst).mock.calls[0]?.[0]?.where).toMatchObject({
-        id: 'ent_1',
-        creatorId: 'usr_contrib',
+      // Created the entry, OR created one of its translations. Updater is
+      // deliberately absent: it records only the LAST writer, so an
+      // edit-based filter would drop a caller's own work out of this view as
+      // soon as anyone else saved that row.
+      expect(whereOf()).toMatchObject({
+        OR: [
+          { creatorId: 'usr_contrib' },
+          { translations: { some: { creatorId: 'usr_contrib', deletedAt: null } } },
+        ],
       });
     });
 
-    // 404 not 403: the two must be indistinguishable or the endpoint becomes an
-    // oracle for whether an id exists.
-    it('throws ENTRY_NOT_FOUND when the row is missing or not the caller’s', async () => {
+    it('applies ?mine=true for an ADMIN too — it is a filter, not a role gate', async () => {
+      await service.list(query({ mine: 'true' }), admin);
+      expect(whereOf()).toMatchObject({ OR: expect.any(Array) });
+    });
+
+    it('leaves detail unscoped, since any contributor may edit any entry', async () => {
+      // Refusing to OPEN a row the caller is allowed to CHANGE would be the
+      // wrong half of the old model left behind.
+      await service.detail('ent_1');
+      const where = vi.mocked(entry.findFirst).mock.calls[0]?.[0]?.where;
+      expect(where).toMatchObject({ id: 'ent_1', deletedAt: null });
+      expect(where).not.toHaveProperty('creatorId');
+    });
+
+    // The 404 now means what it says. It used to conflate "no such entry" with
+    // "not yours", deliberately, so the endpoint could not be used as an oracle
+    // for whether an id existed — a concern that disappears with the scope,
+    // since every entry is now readable by every CONTRIBUTOR+ caller anyway.
+    it('throws ENTRY_NOT_FOUND when there is no live row with that id', async () => {
       entry.findFirst.mockResolvedValue(null as never);
-      await expect(service.detail('ent_x', contributor)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.detail('ent_x')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -206,15 +224,18 @@ describe('AdminEntriesService', () => {
       });
     });
 
-    it('still scopes a CONTRIBUTOR to their own entries', async () => {
+    it('is not scoped by creator either — the queue belongs to whoever publishes', async () => {
+      // Only an ADMIN can publish, so this view is an ADMIN work queue and the
+      // panel hides the tab from anyone else. Scoping it by creator would also
+      // have no sensible answer once contributors edit each other's entries:
+      // the entry's creator did not add the pending translation, and whoever
+      // did does not own the entry.
       entry.findMany.mockResolvedValue([] as never);
       entry.count.mockResolvedValue(0 as never);
 
       await service.list(query({ status: 'pending-translations' }), contributor);
 
-      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]).toMatchObject({
-        where: expect.objectContaining({ creatorId: contributor.userId }),
-      });
+      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]?.where).not.toHaveProperty('creatorId');
     });
   });
 
@@ -315,7 +336,7 @@ describe('AdminEntriesService', () => {
     // The point of the whole surface: both languages come back unresolved, under
     // the same field names CreateTranslationSchema uses.
     it('returns detail with both locales unresolved', async () => {
-      const result = await service.detail('ent_1', admin);
+      const result = await service.detail('ent_1');
       expect(() => AdminEntryDetailSchema.strict().parse(result)).not.toThrow();
       expect(result.translations[0]).toMatchObject({ contentEs: 'hombre', contentEn: 'man' });
       expect(result.translations[0]).not.toHaveProperty('locale');

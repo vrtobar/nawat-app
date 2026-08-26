@@ -50,8 +50,12 @@ export class AdminEntriesController {
   // languages because this backs an edit form (see AdminTranslationDetail), and
   // the panel navigates from a list it already holds ids for — a slug lookup
   // exists for the public URL, which a draft does not have yet.
+  //
+  // No @CurrentUser either: the row returned does not depend on who asks. Any
+  // CONTRIBUTOR+ may edit any entry, so refusing to open one would be the wrong
+  // half of the old ownership model left behind.
   @Get(':id')
-  detail(@Param('id') id: string, @CurrentUser() user: JwtClaims): Promise<AdminEntryDetail> {
-    return this.adminEntriesService.detail(id, user);
+  detail(@Param('id') id: string): Promise<AdminEntryDetail> {
+    return this.adminEntriesService.detail(id);
   }
 }

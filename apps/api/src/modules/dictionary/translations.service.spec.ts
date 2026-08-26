@@ -274,33 +274,9 @@ describe('TranslationsService', () => {
       });
     });
 
-    it("scopes a CONTRIBUTOR through the parent entry's creator", async () => {
-      // Scoped by the ENTRY's creator rather than the translation's, so what a
-      // contributor may write matches exactly what GET /admin/entries shows
-      // them.
-      translation.findFirst.mockResolvedValueOnce(null as never);
-
-      const rejection = service.update(
-        'tra_1',
-        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
-        'usr_1',
-        'CONTRIBUTOR',
-        'es',
-      );
-      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
-      await rejection.catch((error: { getResponse(): { code: string } }) => {
-        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
-      });
-
-      expect(translation.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'tra_1', deletedAt: null, entry: { creatorId: 'usr_1' } },
-        }),
-      );
-      expect(translation.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('applies no ownership predicate for an ADMIN', async () => {
+    it('does not scope the update to the caller — any contributor may edit any translation', async () => {
+      // The case the whole change exists for: a speaker adding or correcting
+      // the form for their own dialect on an entry someone else created.
       translation.findFirst
         .mockResolvedValueOnce({ isPublished: false } as never)
         .mockResolvedValueOnce(detailRow() as never);
@@ -309,14 +285,17 @@ describe('TranslationsService', () => {
       await service.update(
         'tra_1',
         { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
-        'adm_1',
-        'ADMIN',
+        'usr_1',
+        'CONTRIBUTOR',
         'es',
       );
 
-      expect(translation.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'tra_1', deletedAt: null } }),
+      expect(vi.mocked(translation.findFirst).mock.calls[0]?.[0]?.where).not.toHaveProperty(
+        'entry',
       );
+      const updateWhere = vi.mocked(translation.updateMany).mock.calls[0]?.[0]?.where;
+      expect(updateWhere).not.toHaveProperty('entry');
+      expect(updateWhere).toMatchObject({ updatedAt: new Date(LOADED_AT) });
     });
 
     it('refuses a CONTRIBUTOR editing a published translation (FORBIDDEN), without writing', async () => {
