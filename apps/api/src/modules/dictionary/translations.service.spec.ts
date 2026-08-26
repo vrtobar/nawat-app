@@ -139,6 +139,26 @@ describe('TranslationsService', () => {
     });
   });
 
+  describe('create, response mapping', () => {
+    it('serves Spanish when a new dialect has no English and the caller asked for it', async () => {
+      // REGRESSION, and the likelier of the two paths: adding a dialect without
+      // an English gloss is ordinary, since ADR 0015 §2 makes English optional.
+      // The row was created and then the response threw.
+      entry.findFirst.mockResolvedValue({ id: 'ent_1' } as never);
+      translation.create.mockResolvedValue(detailRow({ contentEn: null }) as never);
+
+      const result = await service.create(
+        'ent_1',
+        { dialectCode: 'izalco', contentEs: 'hombre' },
+        'usr_9',
+        'en',
+      );
+
+      TranslationDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ locale: 'es', content: 'hombre | persona' });
+    });
+  });
+
   describe('update', () => {
     it('updates a draft translation (CONTRIBUTOR), re-stamping the editor', async () => {
       translation.findFirst
@@ -167,6 +187,48 @@ describe('TranslationsService', () => {
           data: expect.objectContaining({ updaterId: 'usr_9' }),
         }),
       );
+    });
+
+    it('serves Spanish when the caller asked for English and there is none', async () => {
+      // REGRESSION. This threw a 500 — after the write had already committed,
+      // so the author saw an error and the edit existed anyway. The strict
+      // resolver is right for the read paths, which filter English-less rows
+      // out first; this path answers with ONE translation and cannot filter.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow({ contentEn: null }) as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.update(
+        'tra_1',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'en',
+      );
+
+      TranslationDetailSchema.strict().parse(result);
+      // `locale` reports what was actually served, not what was asked for —
+      // which is the field's whole purpose.
+      expect(result).toMatchObject({ locale: 'es', content: 'hombre | persona' });
+    });
+
+    it('still serves English when the row has it', async () => {
+      // The fallback must not swallow the normal case.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.update(
+        'tra_1',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'en',
+      );
+
+      expect(result).toMatchObject({ locale: 'en', content: 'man | person' });
     });
 
     it('409s EDIT_CONFLICT when the row moved since the caller loaded it', async () => {
