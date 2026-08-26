@@ -15,11 +15,16 @@ import { deleteTranslationAction, updateTranslationAction } from './actions';
 export function TranslationCard({
   entryId,
   translation,
+  entryPublished,
   canEdit,
   canDelete,
 }: {
   entryId: string;
   translation: AdminTranslationDetail;
+  // Only used to word the status. A draft translation means two different
+  // things: on a draft entry it is the normal state, and on a live one it is a
+  // dialect that was added later and is not reaching readers.
+  entryPublished: boolean;
   // False for a CONTRIBUTOR looking at published content: both
   // entries.service.update and translations.service.update refuse it with
   // publishedEditForbidden, so the fields are disabled rather than offering a
@@ -69,10 +74,15 @@ export function TranslationCard({
           <h3 className="text-sm font-semibold">{translation.dialect.nameEs}</h3>
           {/* Publication is entry-level and cascades, but a dialect added after
               the entry went live is a draft on a published entry — so this is
-              per translation rather than inherited from the header. */}
-          <span className="text-xs text-gray-500">
-            {translation.isPublished ? 'Published' : 'Draft'}
-          </span>
+              per translation rather than inherited from the header. "Draft" on
+              a live entry read as normal when it actually means invisible. */}
+          {translation.isPublished ? (
+            <span className="text-xs text-gray-500">Published</span>
+          ) : entryPublished ? (
+            <span className="text-xs text-amber-700">Not live yet</span>
+          ) : (
+            <span className="text-xs text-gray-500">Draft</span>
+          )}
         </div>
 
         {canDelete &&

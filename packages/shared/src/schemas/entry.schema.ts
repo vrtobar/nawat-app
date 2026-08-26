@@ -259,6 +259,17 @@ export const AdminEntryListItemSchema = z.object({
   // semi-join when the locale resolves to English, so an entry with no English
   // anywhere is filtered out entirely rather than shown glossless.
   englishCount: z.number().int(),
+  // Translations not yet published. Read together with isPublished, it names a
+  // state the panel could not otherwise show: an entry that is LIVE while some
+  // of its translations are not, which happens whenever a dialect is added to
+  // an already-published entry. Those translations are excluded from the public
+  // reads in every locale, so the dialect exists only in the panel.
+  //
+  // On a draft entry this equals translationCount and means nothing — nothing
+  // is published because the entry is not. The condition worth surfacing is
+  // isPublished && unpublishedTranslationCount > 0, which is the caller's to
+  // apply; the count is reported raw for the same reason englishCount is.
+  unpublishedTranslationCount: z.number().int(),
   hasEnglish: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
@@ -313,7 +324,18 @@ export type AdminEntryDetail = z.infer<typeof AdminEntryDetailSchema>;
 // No `locale` — nothing on this surface is resolved.
 // -----------------------------------------------------------------------------
 
-export const AdminEntryStatusSchema = z.enum(['draft', 'published', 'all']);
+// 'pending-translations' is the odd one out and deliberately so: the other
+// three filter on the entry's own isPublished, while this one asks about its
+// translations — published entries carrying at least one translation that is
+// not live, which happens whenever a dialect is added after publishing.
+//
+// A view of its own rather than folded into 'draft', because publishing a new
+// entry and releasing a stray translation are different jobs: one is reviewing
+// a whole record, the other is letting through an addition to a record already
+// reviewed. Merging them would make the queue mean two things. It also cannot
+// live under 'draft' without that word covering both "this entry is not live"
+// and "part of this live entry is not live".
+export const AdminEntryStatusSchema = z.enum(['draft', 'pending-translations', 'published', 'all']);
 export type AdminEntryStatus = z.infer<typeof AdminEntryStatusSchema>;
 
 export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({

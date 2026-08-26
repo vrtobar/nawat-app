@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import {
   createTranslation,
   deleteTranslation,
+  publishEntry,
   updateEntry,
   updateTranslation,
 } from '../../../../../lib/api/admin';
@@ -82,6 +83,34 @@ export async function deleteTranslationAction(
     await deleteTranslation(translationId);
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not remove' };
+  }
+  revalidateEntry(entryId);
+  return { ok: true };
+}
+
+// Publishes the translations added since the entry went live.
+//
+// WHY THIS ACTION EXISTS AT ALL. A translation is created as a draft, and
+// publishing is entry-level and cascades — so a dialect added to an ALREADY
+// PUBLISHED entry is stranded: the list offers Unpublish (the entry is live),
+// which means the cascade that would publish it is unreachable, and the public
+// reads exclude an unpublished translation in every locale. The only path was
+// unpublishing the whole entry and publishing it again, taking the headword off
+// the dictionary in between.
+//
+// No new endpoint. PATCH /entries/:id/publish already sets the entry published
+// — a no-op when it already is — and cascades to exactly its draft
+// translations, which is precisely the operation wanted here. It is named for
+// what it does from the editor rather than reusing publishEntryAction, whose
+// revalidation targets only the list.
+export async function publishPendingTranslationsAction(entryId: string): Promise<SaveResult> {
+  try {
+    await publishEntry(entryId);
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'Could not publish',
+    };
   }
   revalidateEntry(entryId);
   return { ok: true };

@@ -12,11 +12,11 @@ import { entryNotFound } from './dictionary-errors';
 import { entryOwnership } from './ownership';
 import { ADMIN_TRANSLATION_SELECT, toAdminTranslationDetail } from './translation-detail';
 
-// Columns a list row needs. The nested translations are selected for their
-// contentEn alone: translationCount, englishCount and hasEnglish are computed
-// from this array rather than fetched per row, so the whole page costs one
-// query. Selecting the column (not a _count aggregate) is what makes the
-// English counts answerable at all.
+// Columns a list row needs. The nested translations are selected for two
+// columns only: translationCount, englishCount, hasEnglish and
+// unpublishedTranslationCount are all computed from this array rather than
+// fetched per row, so the whole page costs one query. Selecting the columns
+// (not a _count aggregate) is what makes those counts answerable at all.
 const LIST_SELECT = {
   id: true,
   type: true,
@@ -30,7 +30,7 @@ const LIST_SELECT = {
   updater: { select: { id: true, name: true } },
   translations: {
     where: { deletedAt: null },
-    select: { contentEn: true },
+    select: { contentEn: true, isPublished: true },
   },
 } satisfies Prisma.EntrySelect;
 
@@ -119,6 +119,19 @@ export class AdminEntriesService {
       deletedAt: null,
       ...(params.status === 'draft' ? { isPublished: false } : {}),
       ...(params.status === 'published' ? { isPublished: true } : {}),
+      // A live entry holding at least one translation that is not. The only
+      // predicate here that reaches through the relation, and the only one
+      // entries_drafts_idx (partial on is_published = false) does not help:
+      // this asks for the opposite value on the entry and then joins. Left
+      // unindexed on purpose — an index before there is a query plan worth
+      // reading is a guess, and the table is small enough that the guess would
+      // not be checkable.
+      ...(params.status === 'pending-translations'
+        ? {
+            isPublished: true,
+            translations: { some: { isPublished: false, deletedAt: null } },
+          }
+        : {}),
       // 'all' adds no predicate — deletedAt above is the only fence.
       ...(params.type ? { type: params.type } : {}),
       ...(params.q ? { nawatContent: { contains: params.q, mode: 'insensitive' } } : {}),
@@ -137,6 +150,7 @@ function toAdminListItem(entry: ListRow): AdminEntryListItem {
 
   // Counted once and reused, so englishCount and hasEnglish cannot drift.
   const englishCount = translations.filter((t) => t.contentEn !== null).length;
+  const unpublishedTranslationCount = translations.filter((t) => !t.isPublished).length;
 
   return {
     id: entry.id,
@@ -147,6 +161,7 @@ function toAdminListItem(entry: ListRow): AdminEntryListItem {
     isPublished: entry.isPublished,
     translationCount: translations.length,
     englishCount,
+    unpublishedTranslationCount,
     // EVERY translation, and false when there are none — an entry with nothing
     // in it is not "complete in English". `.every` on an empty array is true,
     // which is the trap this guards; comparing counts avoids it by construction.
