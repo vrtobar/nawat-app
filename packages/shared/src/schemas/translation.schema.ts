@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { OptimisticLockSchema } from './api-response.schema';
 import { DialectSchema } from './dialect.schema';
 import { LocaleSchema } from './locale.schema';
 
@@ -86,10 +87,46 @@ export const CreateTranslationSchema = z.object({
   audioUrl: z.url().optional(),
 });
 
-// PATCH — all fields optional; dialect is immutable after creation
+// PATCH — every field optional, dialect immutable after creation, and the
+// optional ones additionally NULLABLE.
+//
+// On create, "optional" has one meaning: not supplied. On update it has to
+// carry two, because an editor can do two different things to a field it is
+// not filling in — leave what is there, or remove it. JSON distinguishes them
+// exactly once: an ABSENT key means leave alone, an explicit NULL means clear.
+// That is JSON Merge Patch (RFC 7396), and it is the only distinction
+// available, since `undefined` does not survive JSON.stringify and never
+// reaches the server as a key at all.
+//
+// Without the nullable half, clearing was impossible and FAILED SILENTLY: the
+// key vanished in serialization, the spread in the service left the column
+// untouched, and the author watched the value they had just deleted come back
+// on the next read.
+//
+// `contentEs` is deliberately absent from the nullable set. It is the one
+// required field on a translation — a row with no Spanish gloss renders
+// nowhere — so it can be left alone or replaced, never emptied.
+//
+// Each nullable field is derived from its create counterpart with .unwrap()
+// rather than redeclared, so a change to the underlying rule — audioUrl's
+// z.url(), the part-of-speech enum gaining a member — tracks here instead of
+// drifting into a second, staler definition.
+const createShape = CreateTranslationSchema.shape;
+
 export const UpdateTranslationSchema = CreateTranslationSchema.omit({
   dialectCode: true,
-}).partial();
+})
+  .extend({
+    contentEn: createShape.contentEn.unwrap().nullable(),
+    phonetic: createShape.phonetic.unwrap().nullable(),
+    partOfSpeech: createShape.partOfSpeech.unwrap().nullable(),
+    exampleNawat: createShape.exampleNawat.unwrap().nullable(),
+    exampleEs: createShape.exampleEs.unwrap().nullable(),
+    exampleEn: createShape.exampleEn.unwrap().nullable(),
+    audioUrl: createShape.audioUrl.unwrap().nullable(),
+  })
+  .partial()
+  .extend({ expectedUpdatedAt: OptimisticLockSchema });
 
 export type CreateTranslation = z.infer<typeof CreateTranslationSchema>;
 export type UpdateTranslation = z.infer<typeof UpdateTranslationSchema>;

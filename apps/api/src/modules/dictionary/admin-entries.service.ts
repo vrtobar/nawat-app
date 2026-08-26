@@ -9,12 +9,14 @@ import {
 import { Injectable } from '@nestjs/common';
 
 import { entryNotFound } from './dictionary-errors';
+import { authoredBy } from './ownership';
 import { ADMIN_TRANSLATION_SELECT, toAdminTranslationDetail } from './translation-detail';
 
-// Columns a list row needs. The nested translations are selected for their
-// contentEn alone: translationCount and hasEnglish are computed from this array
-// rather than fetched per row, so the whole page costs one query. Selecting the
-// column (not a _count aggregate) is what makes hasEnglish answerable at all.
+// Columns a list row needs. The nested translations are selected for two
+// columns only: translationCount, englishCount, hasEnglish and
+// unpublishedTranslationCount are all computed from this array rather than
+// fetched per row, so the whole page costs one query. Selecting the columns
+// (not a _count aggregate) is what makes those counts answerable at all.
 const LIST_SELECT = {
   id: true,
   type: true,
@@ -28,7 +30,7 @@ const LIST_SELECT = {
   updater: { select: { id: true, name: true } },
   translations: {
     where: { deletedAt: null },
-    select: { contentEn: true },
+    select: { contentEn: true, isPublished: true },
   },
 } satisfies Prisma.EntrySelect;
 
@@ -95,45 +97,60 @@ export class AdminEntriesService {
     };
   }
 
-  async detail(id: string, user: JwtClaims): Promise<AdminEntryDetail> {
+  // No caller argument: the detail is no longer per-user. The route is still
+  // CONTRIBUTOR-gated, but which rows it will show is not a function of who is
+  // asking, so taking the claims here would imply a scoping that does not exist.
+  async detail(id: string): Promise<AdminEntryDetail> {
+    // Unscoped, deliberately. This backs the editor, and any CONTRIBUTOR+ may
+    // edit any entry — refusing to OPEN one they are allowed to CHANGE would be
+    // the wrong half of the old model left behind. The 404 now means what it
+    // says: no such live entry.
     const entry = await prisma.entry.findFirst({
-      // The scope predicate is reapplied here, not just on the list. Without it
-      // a CONTRIBUTOR who guessed or kept an id could read another author's
-      // draft directly.
-      where: { id, deletedAt: null, ...this.ownership(user) },
+      where: { id, deletedAt: null },
       select: DETAIL_SELECT,
     });
 
-    // 404, not 403, when the row exists but belongs to someone else: the two
-    // are indistinguishable to the caller on purpose, so this endpoint cannot
-    // be used to test whether an id exists.
     if (!entry) throw entryNotFound();
 
     return toAdminDetail(entry);
   }
 
+  // No ownership predicate. Every CONTRIBUTOR+ caller sees every entry, because
+  // every one of them may edit every entry — a read narrower than the write
+  // scope would leave rows editable but unopenable. `?mine=true` narrows it by
+  // choice. See ./ownership.
   private scope(params: AdminEntriesQuery, user: JwtClaims): Prisma.EntryWhereInput {
     return {
       deletedAt: null,
       ...(params.status === 'draft' ? { isPublished: false } : {}),
       ...(params.status === 'published' ? { isPublished: true } : {}),
+      // A live entry holding at least one translation that is not. The only
+      // predicate here that reaches through the relation, and the only one
+      // entries_drafts_idx (partial on is_published = false) does not help:
+      // this asks for the opposite value on the entry and then joins. Left
+      // unindexed on purpose — an index before there is a query plan worth
+      // reading is a guess, and the table is small enough that the guess would
+      // not be checkable.
+      ...(params.status === 'pending-translations'
+        ? {
+            isPublished: true,
+            translations: { some: { isPublished: false, deletedAt: null } },
+          }
+        : {}),
       // 'all' adds no predicate — deletedAt above is the only fence.
       ...(params.type ? { type: params.type } : {}),
       ...(params.q ? { nawatContent: { contains: params.q, mode: 'insensitive' } } : {}),
-      ...this.ownership(user),
+      ...(params.mine ? authoredBy(user.userId) : {}),
     };
-  }
-
-  // Negated against ADMIN rather than matched against CONTRIBUTOR: if a rank is
-  // ever added between them, an unrecognised role is scoped to its own rows
-  // instead of silently seeing everything.
-  private ownership(user: JwtClaims): Prisma.EntryWhereInput {
-    return user.role === 'ADMIN' ? {} : { creatorId: user.userId };
   }
 }
 
 function toAdminListItem(entry: ListRow): AdminEntryListItem {
   const translations = entry.translations;
+
+  // Counted once and reused, so englishCount and hasEnglish cannot drift.
+  const englishCount = translations.filter((t) => t.contentEn !== null).length;
+  const unpublishedTranslationCount = translations.filter((t) => !t.isPublished).length;
 
   return {
     id: entry.id,
@@ -143,10 +160,12 @@ function toAdminListItem(entry: ListRow): AdminEntryListItem {
     imageUrl: entry.imageUrl,
     isPublished: entry.isPublished,
     translationCount: translations.length,
+    englishCount,
+    unpublishedTranslationCount,
     // EVERY translation, and false when there are none — an entry with nothing
     // in it is not "complete in English". `.every` on an empty array is true,
-    // which is the trap this guards.
-    hasEnglish: translations.length > 0 && translations.every((t) => t.contentEn !== null),
+    // which is the trap this guards; comparing counts avoids it by construction.
+    hasEnglish: translations.length > 0 && englishCount === translations.length,
     creator: entry.creator,
     updater: entry.updater,
     createdAt: entry.createdAt.toISOString(),

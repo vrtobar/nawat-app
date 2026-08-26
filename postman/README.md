@@ -20,7 +20,12 @@ Every URL is driven by `{{baseUrl}}`/`{{healthBase}}`, so pick an environment
 Each defines `token` (secret), `webBaseUrl` — the Next app, which is where
 `/auth/*` is mounted and therefore where tokens come from — and the
 `entryId`/`translationId`/`dialectId`/`slug` placeholders to fill from a
-browse/list response. Add a production environment by copying the staging one and
+browse/list response.
+
+`entryUpdatedAt` and `translationUpdatedAt` are filled in for you: the two
+requests under **Admin read surface** write them, and the two `PATCH` requests
+read them back as their optimistic lock (see below). You should not need to
+touch them by hand. Add a production environment by copying the staging one and
 swapping the host — but production is torn down between sessions
 ([ADR 17](../docs/adr/0017-production-disposable-during-prelaunch.md)) and is not
 a hand-testing target.
@@ -108,3 +113,26 @@ browser session, so following it satisfies this by construction.
 Ranked `USER < CONTRIBUTOR < ADMIN`. Each folder notes its minimum role. A token
 below the required rank gets a 403 that deliberately does not name the required
 role.
+
+## Editing something: run the reads first
+
+Both `PATCH` routes require **`expectedUpdatedAt`** — the `updatedAt` you last
+read. The update is conditional on it, so a row that changed between your read
+and your write answers **409 `EDIT_CONFLICT`** instead of silently overwriting
+whatever the other person saved.
+
+This is not ceremony. The editor sends every field on every save rather than a
+diff, so an unconditional write puts back whatever the sender's form last
+loaded — which, with two people on one translation, deletes the other's work
+with nothing raised anywhere.
+
+So the order is:
+
+1. **Admin read surface → List entries** — saves `{{entryId}}`
+2. **Admin read surface → Entry detail** — saves `{{entryUpdatedAt}}`,
+   `{{translationId}}`, `{{translationUpdatedAt}}`
+3. **Update entry** or **Update translation**
+
+Running a `PATCH` without step 2 sends an empty lock and gets a validation
+error; running it twice without re-reading gets the 409, which is the mechanism
+working rather than a bug. Re-run step 2 after any successful write.

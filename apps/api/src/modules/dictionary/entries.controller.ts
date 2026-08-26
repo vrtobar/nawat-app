@@ -123,6 +123,19 @@ export class EntriesController {
     return this.entriesService.publish(id, user.userId, locale);
   }
 
+  // The inverse of publish, and ADMIN for the same reason: it changes what the
+  // public dictionary shows. `:id/unpublish` is more specific than `:id`, so it
+  // does not collide with the CONTRIBUTOR update above.
+  @Roles('ADMIN')
+  @Patch(':id/unpublish')
+  unpublish(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtClaims,
+    @ContentLocale() locale: Locale,
+  ): Promise<DictionaryEntryDetail> {
+    return this.entriesService.unpublish(id, user.userId, locale);
+  }
+
   // No @HttpCode(204): TransformInterceptor turns the void return into
   // { success: true, data: null } at 200, which delete clients parse like any
   // other response — a 204 would forbid that body.

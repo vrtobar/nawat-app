@@ -12,12 +12,13 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 import {
   dialectNotFound,
+  editConflict,
   entryNotFound,
   publishedEditForbidden,
   translationInUse,
   translationNotFound,
 } from './dictionary-errors';
-import { toTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
+import { toWrittenTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
 
 @Injectable()
 export class TranslationsService {
@@ -44,7 +45,9 @@ export class TranslationsService {
         data: { ...input, entryId, creatorId: userId, updaterId: userId },
         select: TRANSLATION_DETAIL_SELECT,
       });
-      return toTranslationDetail(created, locale);
+      // Falls back rather than throwing when the new row has no content in the
+      // resolved locale — see toWrittenTranslationDetail.
+      return toWrittenTranslationDetail(created, locale);
     } catch (error) {
       // One translation per (entry, dialect) — a second for the same dialect
       // collides on the unique constraint.
@@ -71,6 +74,14 @@ export class TranslationsService {
     // live content is not changed without review; ADMIN edits published
     // directly. Read first to decide that and to tell a genuine not-found from a
     // gated-published one; a soft-deleted row is not found.
+    // The precondition is not a column — destructured out so it cannot be spread
+    // into `data`. Prisma's generated types reject an unknown key there, so
+    // forgetting this fails the typecheck rather than at runtime.
+    const { expectedUpdatedAt, ...changes } = input;
+
+    // NOT scoped to the caller's own rows — any contributor may edit any
+    // translation, which is the point of the change. The published-content gate
+    // below is the only per-row refusal left. See ./ownership.
     const existing = await prisma.translation.findFirst({
       where: { id, deletedAt: null },
       select: { isPublished: true },
@@ -78,10 +89,26 @@ export class TranslationsService {
     if (!existing) throw translationNotFound();
     if (existing.isPublished && role !== 'ADMIN') throw publishedEditForbidden();
 
-    await prisma.translation.updateMany({
-      where: { id, deletedAt: null },
-      data: { ...input, updaterId: userId },
+    // THE CONDITIONAL UPDATE IS THE AUTHORITY, not the read above. This is the
+    // path the editor exercises most, and the one where a lost update is worst:
+    // the form sends EVERY field, not a diff, so an unconditional write would
+    // push a stale blank over a gloss another contributor had just added, with
+    // nothing raised anywhere. Matching updatedAt makes that write match no rows.
+    const result = await prisma.translation.updateMany({
+      where: { id, deletedAt: null, updatedAt: new Date(expectedUpdatedAt) },
+      data: { ...changes, updaterId: userId },
     });
+
+    // The read above established the row exists and is editable, so a miss here
+    // means updatedAt moved — or the row was deleted in between, which one extra
+    // read tells apart. Paid only on the failure path.
+    if (result.count === 0) {
+      const stillThere = await prisma.translation.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      throw stillThere ? editConflict('translation') : translationNotFound();
+    }
 
     const translation = await prisma.translation.findFirst({
       where: { id },
@@ -90,7 +117,7 @@ export class TranslationsService {
     // Unreachable barring a delete raced between the two reads; the guard keeps
     // the type honest rather than asserting non-null on a nullable findFirst.
     if (!translation) throw translationNotFound();
-    return toTranslationDetail(translation, locale);
+    return toWrittenTranslationDetail(translation, locale);
   }
 
   // Delete a translation (ADMIN). Blocked while any learning content references

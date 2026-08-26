@@ -19,6 +19,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { isPrismaError, PRISMA_ERROR, uniqueViolationFields } from '../../common/prisma-error';
 import {
   dialectNotFound,
+  editConflict,
   entryNotFound,
   publishedEditForbidden,
   translationInUse,
@@ -350,6 +351,14 @@ export class EntriesService {
     role: JwtClaims['role'],
     locale: Locale,
   ): Promise<DictionaryEntryDetail> {
+    // The precondition is not a column — destructured out so it cannot be spread
+    // into `data`. Prisma's generated types reject an unknown key there, so
+    // forgetting this fails the typecheck rather than at runtime.
+    const { expectedUpdatedAt, ...changes } = input;
+
+    // NOT scoped to the caller's own rows. Any contributor may edit any entry —
+    // ownership is attribution, not permission — so the only per-row gate left
+    // here is the published-content one below. See ./ownership.
     const existing = await prisma.entry.findFirst({
       where: { id, deletedAt: null },
       select: { isPublished: true },
@@ -357,14 +366,22 @@ export class EntriesService {
     if (!existing) throw entryNotFound();
     if (existing.isPublished && role !== 'ADMIN') throw publishedEditForbidden();
 
+    // THE CONDITIONAL UPDATE IS THE AUTHORITY, not the read above. `updatedAt`
+    // is matched in the WHERE, so a row that moved between the read that filled
+    // the form and this write matches nothing and updates nothing — rather than
+    // overwriting a change the caller never saw. The read's only job is to
+    // classify the refusal (404 vs 403); this decides whether the write happens.
+    let result;
     try {
-      await prisma.entry.updateMany({
-        where: { id, deletedAt: null },
+      result = await prisma.entry.updateMany({
+        where: { id, deletedAt: null, updatedAt: new Date(expectedUpdatedAt) },
         data: {
-          ...input,
+          ...changes,
           // Regenerate the slug only when the headword changes; a rename can
           // collide with another entry's slug, same as a create.
-          ...(input.nawatContent !== undefined ? { slug: slugifyNawat(input.nawatContent) } : {}),
+          ...(changes.nawatContent !== undefined
+            ? { slug: slugifyNawat(changes.nawatContent) }
+            : {}),
           updaterId: userId,
         },
       });
@@ -372,6 +389,18 @@ export class EntriesService {
       if (uniqueViolationFields(error).includes('slug')) throw entrySlugConflict();
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) throw entryConflict();
       throw error;
+    }
+
+    // Nothing matched. The read above already established the row exists and is
+    // editable, so the only thing that can have changed is updatedAt — unless
+    // the row was deleted in between, which one extra read distinguishes. Paid
+    // only on the failure path, where the better message is worth it.
+    if (result.count === 0) {
+      const stillThere = await prisma.entry.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      throw stillThere ? editConflict('entry') : entryNotFound();
     }
 
     const entry = await prisma.entry.findFirst({
@@ -441,6 +470,45 @@ export class EntriesService {
       await tx.translation.updateMany({
         where: { entryId: id, deletedAt: null, isPublished: false },
         data: { isPublished: true, updaterId: userId },
+      });
+    });
+
+    const entry = await prisma.entry.findFirst({
+      where: { id },
+      select: writeDetailSelect(locale),
+    });
+    if (!entry) throw entryNotFound();
+    return toEntryDetail(entry, locale);
+  }
+
+  // Returns a published entry to draft, cascading to its translations exactly
+  // as publish cascades the other way. ADMIN.
+  //
+  // WHY THIS EXISTS. Publishing was one-way: nothing accepted isPublished on an
+  // update, so a mistake could only be resolved by deleting the row and
+  // recreating it — losing its id, its slug and its attribution over a wrong
+  // gloss. Deletion is a poor substitute for a correction.
+  //
+  // The cascade is the mirror of publish's: that one promotes only the entry's
+  // DRAFT translations, so already-published rows are not re-stamped, and this
+  // one demotes only its PUBLISHED ones for the same reason.
+  //
+  // Not guarded against learning content that references a translation, unlike
+  // delete — no referencing module is built yet, so there is nothing to check
+  // and a guard written now would be untested against its real case. Worth
+  // revisiting alongside lessons: unpublishing a word cited by a live lesson is
+  // the same class of problem TRANSLATION_IN_USE exists for.
+  async unpublish(id: string, userId: string, locale: Locale): Promise<DictionaryEntryDetail> {
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.entry.updateMany({
+        where: { id, deletedAt: null },
+        data: { isPublished: false, updaterId: userId },
+      });
+      if (result.count === 0) throw entryNotFound();
+      // Only the published ones, so drafts are not needlessly re-stamped.
+      await tx.translation.updateMany({
+        where: { entryId: id, deletedAt: null, isPublished: true },
+        data: { isPublished: false, updaterId: userId },
       });
     });
 

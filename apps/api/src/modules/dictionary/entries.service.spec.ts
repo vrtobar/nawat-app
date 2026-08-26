@@ -115,6 +115,11 @@ const detailRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// The version the caller claims to have loaded. Mocks do not enforce the
+// WHERE, so its value is arbitrary — what the tests assert is that it REACHES
+// the query, and that a zero-row result becomes a conflict.
+const LOADED_AT = '2026-08-24T00:00:00.000Z';
+
 describe('EntriesService', () => {
   const service = new EntriesService();
 
@@ -458,7 +463,7 @@ describe('EntriesService', () => {
 
       const result = await service.update(
         'ent_1',
-        { nawatContent: 'tak+' },
+        { nawatContent: 'tak+', expectedUpdatedAt: LOADED_AT },
         'usr_9',
         'CONTRIBUTOR',
         'es',
@@ -467,7 +472,13 @@ describe('EntriesService', () => {
       DictionaryEntryDetailSchema.strict().parse(result);
       expect(entry.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'ent_1', deletedAt: null },
+          // The lock reaches the WHERE, which is the whole mechanism: a row
+          // whose updatedAt has moved matches nothing and is not overwritten.
+          where: expect.objectContaining({
+            id: 'ent_1',
+            deletedAt: null,
+            updatedAt: new Date(LOADED_AT),
+          }),
           data: expect.objectContaining({ updaterId: 'usr_9' }),
         }),
       );
@@ -478,7 +489,7 @@ describe('EntriesService', () => {
 
       const rejection = service.update(
         'ent_1',
-        { nawatContent: 'x' },
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
         'usr_1',
         'CONTRIBUTOR',
         'es',
@@ -490,13 +501,108 @@ describe('EntriesService', () => {
       expect(entry.updateMany).not.toHaveBeenCalled();
     });
 
+    it('409s EDIT_CONFLICT when the row moved since the caller loaded it', async () => {
+      // The read passes — the row exists and is editable — and the conditional
+      // update still matches nothing, which can only mean updatedAt moved. The
+      // follow-up read confirms the row is still there, so this is a conflict
+      // rather than a deletion.
+      entry.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never) // gate check
+        .mockResolvedValueOnce({ id: 'ent_1' } as never); // still there?
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'ent_1',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'EDIT_CONFLICT' });
+      });
+    });
+
+    it('404s instead when the row was removed rather than edited', async () => {
+      entry.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(null as never); // gone
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'ent_1',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+    });
+
+    it('does not send the precondition to the database as a column', async () => {
+      // expectedUpdatedAt is destructured out before the spread. Prisma would
+      // reject it at the type level, but this pins the runtime shape too — a
+      // stray key here would be a write to a column that does not exist.
+      entry.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.update(
+        'ent_1',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      const call = vi.mocked(entry.updateMany).mock.calls[0]?.[0] as { data: object };
+      expect(call.data).not.toHaveProperty('expectedUpdatedAt');
+    });
+
+    it('does not scope the update to the caller — any contributor may edit any entry', async () => {
+      // Ownership is attribution, not permission. The published-content gate is
+      // the only per-row refusal left; a contributor editing another author's
+      // DRAFT is now the intended behaviour, not a hole.
+      entry.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.update(
+        'ent_1',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      expect(vi.mocked(entry.findFirst).mock.calls[0]?.[0]?.where).not.toHaveProperty('creatorId');
+      const updateWhere = vi.mocked(entry.updateMany).mock.calls[0]?.[0]?.where;
+      expect(updateWhere).not.toHaveProperty('creatorId');
+      // The optimistic lock survives the change — it was never the ownership check.
+      expect(updateWhere).toMatchObject({ updatedAt: new Date(LOADED_AT) });
+    });
+
     it('lets an ADMIN edit a published entry', async () => {
       entry.findFirst
         .mockResolvedValueOnce({ isPublished: true } as never)
         .mockResolvedValueOnce(detailRow() as never);
       entry.updateMany.mockResolvedValue({ count: 1 } as never);
 
-      const result = await service.update('ent_1', { nawatContent: 'x' }, 'adm_1', 'ADMIN', 'es');
+      const result = await service.update(
+        'ent_1',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'adm_1',
+        'ADMIN',
+        'es',
+      );
 
       DictionaryEntryDetailSchema.strict().parse(result);
       expect(entry.updateMany).toHaveBeenCalled();
@@ -505,7 +611,13 @@ describe('EntriesService', () => {
     it('404s ENTRY_NOT_FOUND when no live row matches, without writing', async () => {
       entry.findFirst.mockResolvedValueOnce(null as never);
 
-      const rejection = service.update('nope', { nawatContent: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'nope',
+        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
@@ -519,7 +631,7 @@ describe('EntriesService', () => {
 
       const rejection = service.update(
         'ent_1',
-        { nawatContent: 'dupe' },
+        { nawatContent: 'dupe', expectedUpdatedAt: LOADED_AT },
         'usr_1',
         'CONTRIBUTOR',
         'es',
@@ -634,6 +746,44 @@ describe('EntriesService', () => {
       entry.updateMany.mockResolvedValue({ count: 0 } as never);
 
       const rejection = service.publish('nope', 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(entry.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('unpublish', () => {
+    it('returns the entry to draft and demotes its published translations', async () => {
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+      translationTable.updateMany.mockResolvedValue({ count: 2 } as never);
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.unpublish('ent_1', 'usr_9', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(entry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ent_1', deletedAt: null },
+          data: expect.objectContaining({ isPublished: false, updaterId: 'usr_9' }),
+        }),
+      );
+      // The exact mirror of publish's cascade: that one matches drafts, this one
+      // matches published rows, so neither re-stamps what is already correct.
+      expect(translationTable.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { entryId: 'ent_1', deletedAt: null, isPublished: true },
+          data: expect.objectContaining({ isPublished: false, updaterId: 'usr_9' }),
+        }),
+      );
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live row matches, cascading to nothing', async () => {
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.unpublish('nope', 'usr_1', 'es');
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { PaginationParamsSchema } from './api-response.schema';
+import { OptimisticLockSchema, PaginationParamsSchema } from './api-response.schema';
 import { LocaleSchema } from './locale.schema';
 import {
   AdminTranslationDetailSchema,
@@ -155,8 +155,29 @@ export const CreateEntrySchema = z.object({
   imageUrl: z.url().optional(),
 });
 
-// PATCH — all fields optional
-export const UpdateEntrySchema = CreateEntrySchema.partial();
+// PATCH — every field optional, and imageUrl additionally NULLABLE so it can
+// be removed. See UpdateTranslationSchema for the full reasoning: an absent key
+// means leave alone and an explicit null means clear (RFC 7396), because
+// `undefined` does not survive JSON.stringify and so cannot express the
+// difference on the wire.
+//
+// `nawatContent` and `type` are not nullable. An entry with no headword is not
+// an entry, and `type` has a default rather than an empty state — both can be
+// changed, neither can be emptied.
+//
+// `type` IS UNWRAPPED FROM ITS DEFAULT, and that is a bug fix rather than
+// tidying. `.partial()` makes a field optional but does not remove a
+// `.default()` underneath it, so the previous `CreateEntrySchema.partial()`
+// resolved a missing `type` to 'WORD' and handed it to the service's spread —
+// meaning any partial update, a rename included, silently rewrote an
+// EXPRESSION or a PHRASE into a WORD. Unwrapping leaves an absent `type`
+// absent. The default still applies where it belongs, on create.
+export const UpdateEntrySchema = CreateEntrySchema.extend({
+  type: CreateEntrySchema.shape.type.unwrap(),
+  imageUrl: CreateEntrySchema.shape.imageUrl.unwrap().nullable(),
+})
+  .partial()
+  .extend({ expectedUpdatedAt: OptimisticLockSchema });
 
 // POST /entries/full — an entry and its first translations in one atomic
 // request. At least one translation: a full create with none is just POST
@@ -215,6 +236,13 @@ export const AdminActorSchema = z.object({
 // ADR 0015 §2 exempts dictionary entries from the English-to-publish rule
 // ("Entries publish with Spanish alone"), so this is a completeness hint the
 // panel can surface, never a gate — the publish path does not check it.
+//
+// It is derived from englishCount in the service rather than computed a second
+// time, so the two cannot disagree. Note what the pair is actually reporting:
+// not tidiness, but VISIBILITY. §2 permits publishing with Spanish alone and §4
+// resolves content to one locale, so a Spanish-only entry is published and
+// simultaneously invisible to every English reader — a consequence neither ADR
+// states, and the reason the panel needs to say more than "missing".
 // -----------------------------------------------------------------------------
 
 export const AdminEntryListItemSchema = z.object({
@@ -225,6 +253,25 @@ export const AdminEntryListItemSchema = z.object({
   imageUrl: z.url().nullable(),
   isPublished: z.boolean(),
   translationCount: z.number().int(),
+  // How many of them carry contentEn. Present alongside hasEnglish because the
+  // boolean cannot distinguish the two cases the panel must word differently:
+  // one of three translations missing English means the entry still appears to
+  // an English reader with fewer senses, while none of them missing means the
+  // entry does not appear AT ALL. The public browse requires contentEn in its
+  // semi-join when the locale resolves to English, so an entry with no English
+  // anywhere is filtered out entirely rather than shown glossless.
+  englishCount: z.number().int(),
+  // Translations not yet published. Read together with isPublished, it names a
+  // state the panel could not otherwise show: an entry that is LIVE while some
+  // of its translations are not, which happens whenever a dialect is added to
+  // an already-published entry. Those translations are excluded from the public
+  // reads in every locale, so the dialect exists only in the panel.
+  //
+  // On a draft entry this equals translationCount and means nothing — nothing
+  // is published because the entry is not. The condition worth surfacing is
+  // isPublished && unpublishedTranslationCount > 0, which is the caller's to
+  // apply; the count is reported raw for the same reason englishCount is.
+  unpublishedTranslationCount: z.number().int(),
   hasEnglish: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
@@ -279,13 +326,37 @@ export type AdminEntryDetail = z.infer<typeof AdminEntryDetailSchema>;
 // No `locale` — nothing on this surface is resolved.
 // -----------------------------------------------------------------------------
 
-export const AdminEntryStatusSchema = z.enum(['draft', 'published', 'all']);
+// 'pending-translations' is the odd one out and deliberately so: the other
+// three filter on the entry's own isPublished, while this one asks about its
+// translations — published entries carrying at least one translation that is
+// not live, which happens whenever a dialect is added after publishing.
+//
+// A view of its own rather than folded into 'draft', because publishing a new
+// entry and releasing a stray translation are different jobs: one is reviewing
+// a whole record, the other is letting through an addition to a record already
+// reviewed. Merging them would make the queue mean two things. It also cannot
+// live under 'draft' without that word covering both "this entry is not live"
+// and "part of this live entry is not live".
+export const AdminEntryStatusSchema = z.enum(['draft', 'pending-translations', 'published', 'all']);
 export type AdminEntryStatus = z.infer<typeof AdminEntryStatusSchema>;
 
 export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({
   status: AdminEntryStatusSchema.default('draft'),
   type: EntryTypeSchema.optional(),
   q: z.string().min(1).optional(),
+  // Narrows to the caller's own work: entries they created, or that carry a
+  // translation they created. An OPT-IN filter, not a scope — the reads are
+  // otherwise unscoped, because any contributor may edit any entry and a read
+  // narrower than the write scope would let someone edit a row they cannot
+  // open.
+  //
+  // Authored, not touched. `updaterId` records only the last writer, so an
+  // edit-based filter would drop a caller's own work out of this view as soon
+  // as anyone else saved that row.
+  //
+  // z.stringbool() rather than z.coerce.boolean(), which turns the query string
+  // "false" into true — the same reason DictionaryBrowseParamsSchema uses it.
+  mine: z.stringbool().optional(),
 });
 
 export type AdminEntriesQuery = z.infer<typeof AdminEntriesQuerySchema>;

@@ -1,9 +1,11 @@
 import {
+  DialectSchema,
   DictionaryEntryDetailSchema,
   DictionaryEntryListItemSchema,
   type DictionaryEntryType,
   type Locale,
 } from '@nahuat/shared';
+import { z } from 'zod';
 
 import { fetchItem, fetchPage } from './client';
 
@@ -25,4 +27,16 @@ export function getEntryBySlug(slug: string, locale: Locale) {
   return fetchItem(`/entries/by-slug/${encodeURIComponent(slug)}`, DictionaryEntryDetailSchema, {
     locale,
   });
+}
+
+// GET /dialects — every dialect, precedence ascending. Public and unpaginated:
+// the route is @Public and answers with a plain array, so this is fetchItem
+// over z.array rather than fetchPage, which would look for a meta block that
+// is not there.
+//
+// Anonymous despite backing an authenticated form. The dialect list is
+// reference data with nothing user-specific in it, and reading it with a token
+// would only tie a cacheable, identical-for-everyone response to a session.
+export function listDialects() {
+  return fetchItem('/dialects', z.array(DialectSchema));
 }

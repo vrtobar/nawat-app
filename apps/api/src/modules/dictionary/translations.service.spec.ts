@@ -73,6 +73,11 @@ const input = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// The version the caller claims to have loaded. Mocks do not enforce the
+// WHERE, so its value is arbitrary — what the tests assert is that it REACHES
+// the query, and that a zero-row result becomes a conflict.
+const LOADED_AT = '2026-08-24T00:00:00.000Z';
+
 describe('TranslationsService', () => {
   const service = new TranslationsService();
 
@@ -134,6 +139,26 @@ describe('TranslationsService', () => {
     });
   });
 
+  describe('create, response mapping', () => {
+    it('serves Spanish when a new dialect has no English and the caller asked for it', async () => {
+      // REGRESSION, and the likelier of the two paths: adding a dialect without
+      // an English gloss is ordinary, since ADR 0015 §2 makes English optional.
+      // The row was created and then the response threw.
+      entry.findFirst.mockResolvedValue({ id: 'ent_1' } as never);
+      translation.create.mockResolvedValue(detailRow({ contentEn: null }) as never);
+
+      const result = await service.create(
+        'ent_1',
+        { dialectCode: 'izalco', contentEs: 'hombre' },
+        'usr_9',
+        'en',
+      );
+
+      TranslationDetailSchema.strict().parse(result);
+      expect(result).toMatchObject({ locale: 'es', content: 'hombre | persona' });
+    });
+  });
+
   describe('update', () => {
     it('updates a draft translation (CONTRIBUTOR), re-stamping the editor', async () => {
       translation.findFirst
@@ -143,7 +168,7 @@ describe('TranslationsService', () => {
 
       const result = await service.update(
         'tra_1',
-        { contentEs: 'varón' },
+        { contentEs: 'varón', expectedUpdatedAt: LOADED_AT },
         'usr_9',
         'CONTRIBUTOR',
         'es',
@@ -152,16 +177,137 @@ describe('TranslationsService', () => {
       TranslationDetailSchema.strict().parse(result);
       expect(translation.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tra_1', deletedAt: null },
+          // The lock reaches the WHERE, which is the whole mechanism: a row
+          // whose updatedAt has moved matches nothing and is not overwritten.
+          where: expect.objectContaining({
+            id: 'tra_1',
+            deletedAt: null,
+            updatedAt: new Date(LOADED_AT),
+          }),
           data: expect.objectContaining({ updaterId: 'usr_9' }),
         }),
       );
     });
 
+    it('serves Spanish when the caller asked for English and there is none', async () => {
+      // REGRESSION. This threw a 500 — after the write had already committed,
+      // so the author saw an error and the edit existed anyway. The strict
+      // resolver is right for the read paths, which filter English-less rows
+      // out first; this path answers with ONE translation and cannot filter.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow({ contentEn: null }) as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.update(
+        'tra_1',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'en',
+      );
+
+      TranslationDetailSchema.strict().parse(result);
+      // `locale` reports what was actually served, not what was asked for —
+      // which is the field's whole purpose.
+      expect(result).toMatchObject({ locale: 'es', content: 'hombre | persona' });
+    });
+
+    it('still serves English when the row has it', async () => {
+      // The fallback must not swallow the normal case.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.update(
+        'tra_1',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'en',
+      );
+
+      expect(result).toMatchObject({ locale: 'en', content: 'man | person' });
+    });
+
+    it('409s EDIT_CONFLICT when the row moved since the caller loaded it', async () => {
+      // The path where a lost update hurts most: the editor sends every field,
+      // not a diff, so an unconditional write here would push this caller's
+      // stale blanks over whatever the other author had just saved.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never) // gate check
+        .mockResolvedValueOnce({ id: 'tra_1' } as never); // still there?
+      translation.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'EDIT_CONFLICT' });
+      });
+    });
+
+    it('404s instead when the row was removed rather than edited', async () => {
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(null as never);
+      translation.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
+      });
+    });
+
+    it('does not scope the update to the caller — any contributor may edit any translation', async () => {
+      // The case the whole change exists for: a speaker adding or correcting
+      // the form for their own dialect on an entry someone else created.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      translation.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      expect(vi.mocked(translation.findFirst).mock.calls[0]?.[0]?.where).not.toHaveProperty(
+        'entry',
+      );
+      const updateWhere = vi.mocked(translation.updateMany).mock.calls[0]?.[0]?.where;
+      expect(updateWhere).not.toHaveProperty('entry');
+      expect(updateWhere).toMatchObject({ updatedAt: new Date(LOADED_AT) });
+    });
+
     it('refuses a CONTRIBUTOR editing a published translation (FORBIDDEN), without writing', async () => {
       translation.findFirst.mockResolvedValueOnce({ isPublished: true } as never);
 
-      const rejection = service.update('tra_1', { contentEs: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(ForbiddenException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'FORBIDDEN' });
@@ -175,7 +321,13 @@ describe('TranslationsService', () => {
         .mockResolvedValueOnce(detailRow() as never);
       translation.updateMany.mockResolvedValue({ count: 1 } as never);
 
-      const result = await service.update('tra_1', { contentEs: 'x' }, 'adm_1', 'ADMIN', 'es');
+      const result = await service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'adm_1',
+        'ADMIN',
+        'es',
+      );
 
       TranslationDetailSchema.strict().parse(result);
       expect(translation.updateMany).toHaveBeenCalled();
@@ -184,7 +336,13 @@ describe('TranslationsService', () => {
     it('404s TRANSLATION_NOT_FOUND when no live row matches, without writing', async () => {
       translation.findFirst.mockResolvedValueOnce(null as never);
 
-      const rejection = service.update('nope', { phonetic: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'nope',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
