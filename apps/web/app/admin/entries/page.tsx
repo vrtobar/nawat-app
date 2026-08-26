@@ -1,12 +1,15 @@
+import Link from 'next/link';
+
 import { getMe, listAdminEntries } from '../../../lib/api/admin';
 import { PublishButton } from './publish-button';
 
 // Drafts, newest edit first — the queue the panel exists to work through.
 //
-// Deliberately read-only apart from publishing. The editor is the next slice;
-// this one proves the path a token takes from the session to the API and back,
-// on a screen that survives into the finished panel rather than scaffolding
-// thrown away afterwards.
+// The row actions are deliberately thin. Editing and creating live on their own
+// routes rather than expanding inline here, because a row carries only what the
+// list projection computes — `translationCount` and `hasEnglish`, not the
+// translations themselves — so an inline editor would need a second request per
+// row to have anything to edit.
 export default async function AdminEntriesPage() {
   // Both are authenticated calls; the layout already established there is a
   // session, so a failure here is a genuine error rather than a signed-out user.
@@ -16,11 +19,19 @@ export default async function AdminEntriesPage() {
 
   return (
     <main className="p-6">
-      <div className="mb-4 flex items-baseline justify-between">
+      <div className="mb-4 flex items-baseline justify-between gap-4">
         <h1 className="text-lg font-semibold">Drafts</h1>
-        <span className="text-sm text-gray-500">
-          {drafts.meta.total} {drafts.meta.total === 1 ? 'entry' : 'entries'}
-        </span>
+        <div className="flex items-baseline gap-4">
+          <span className="text-sm text-gray-500">
+            {drafts.meta.total} {drafts.meta.total === 1 ? 'entry' : 'entries'}
+          </span>
+          <Link
+            href="/admin/entries/new"
+            className="rounded bg-gray-900 px-3 py-1 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            New entry
+          </Link>
+        </div>
       </div>
 
       {drafts.data.length === 0 ? (
@@ -28,7 +39,11 @@ export default async function AdminEntriesPage() {
         // for a contributor it also means "none of yours" rather than "none at
         // all" — the API scopes the list to its caller.
         <p className="text-sm text-gray-600">
-          No drafts. Entries you create appear here until they are published.
+          No drafts.{' '}
+          <Link href="/admin/entries/new" className="underline">
+            Create an entry
+          </Link>{' '}
+          — it appears here until it is published.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -59,9 +74,17 @@ export default async function AdminEntriesPage() {
                     {new Date(entry.updatedAt).toLocaleDateString()}
                   </td>
                   <td className="py-2">
-                    {canPublish && (
-                      <PublishButton id={entry.id} nawatContent={entry.nawatContent} />
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/admin/entries/${entry.id}/edit`}
+                        className="text-sm text-gray-600 hover:underline"
+                      >
+                        Edit
+                      </Link>
+                      {canPublish && (
+                        <PublishButton id={entry.id} nawatContent={entry.nawatContent} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
