@@ -86,6 +86,35 @@ export type ApiPaginated<T> = { success: true; data: T[]; meta: PaginationMeta }
 export type ApiResponse<T> = ApiSuccess<T> | ApiError;
 
 // -----------------------------------------------------------------------------
+// OPTIMISTIC LOCK
+//
+// The `updatedAt` the client last read, sent back with the write it wants to
+// perform. The service makes the update conditional on it, so a row that moved
+// in between is refused (EDIT_CONFLICT) instead of overwritten.
+//
+// WHY THIS IS NEEDED AT ALL, since it looks like ceremony on a small project:
+// the editor sends EVERY field on every save, not a diff. So a save does not
+// merely overwrite what its author changed — it overwrites every field with
+// whatever that author's form last loaded. Two people on one translation is
+// then not a near-miss but a silent deletion: A opens a card, B adds an English
+// gloss and saves, A saves an unrelated fix, and B's gloss is written back to
+// null with no error anywhere.
+//
+// `updatedAt` rather than a version column because it already exists, already
+// moves on every write (Prisma @updatedAt), and is already returned by the
+// admin read shapes — so nothing needs a migration. It works as a version token
+// because the columns are `timestamp(3)`: millisecond precision, exactly what an
+// ISO-8601 string carries, so the round trip is lossless. A `timestamp(6)`
+// column would silently truncate and never match, which is why the precision is
+// stated here rather than assumed.
+//
+// REQUIRED, not optional. A precondition a client can omit is a precondition
+// that defaults to off, which is the behaviour being fixed.
+// -----------------------------------------------------------------------------
+
+export const OptimisticLockSchema = z.iso.datetime();
+
+// -----------------------------------------------------------------------------
 // ERROR CODE CONSTANTS
 // -----------------------------------------------------------------------------
 
@@ -96,6 +125,11 @@ export const API_ERROR_CODES = {
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
   CONFLICT: 'CONFLICT',
+  // A write whose precondition no longer holds: the row moved between the read
+  // that populated the form and the write that submits it. Distinct from
+  // CONFLICT, which covers uniqueness collisions — this one is recoverable by
+  // reloading, and the client is expected to say so rather than retry blindly.
+  EDIT_CONFLICT: 'EDIT_CONFLICT',
   RESTRICT_VIOLATION: 'RESTRICT_VIOLATION',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 

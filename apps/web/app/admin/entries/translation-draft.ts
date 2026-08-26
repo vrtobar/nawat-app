@@ -111,8 +111,17 @@ function emptyToNull(value: string): string | null {
 
 // dialectCode is absent because a dialect is immutable after creation — the
 // schema omits it, so sending one would be ignored.
-export function toUpdateTranslation(draft: TranslationDraft): UpdateTranslation {
+//
+// `expectedUpdatedAt` is passed in rather than carried on the draft: the draft
+// is form state, and this is not something the author edits. Keeping it out
+// also makes it obvious at the call site that the value must be the one most
+// recently seen from the server, not the one the form was first built from.
+export function toUpdateTranslation(
+  draft: TranslationDraft,
+  expectedUpdatedAt: string,
+): UpdateTranslation {
   return {
+    expectedUpdatedAt,
     // The one field with no null branch: a translation with no Spanish gloss
     // renders nowhere, so it is replaced or left alone, never emptied.
     contentEs: draft.contentEs.trim(),

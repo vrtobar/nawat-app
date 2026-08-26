@@ -5,6 +5,7 @@ import {
   type CreateFullEntry,
   type CreateTranslation,
   DictionaryEntryDetailSchema,
+  TranslationDetailSchema,
   type UpdateEntry,
   type UpdateTranslation,
   UserProfileSchema,
@@ -89,7 +90,15 @@ export function createFullEntry(body: CreateFullEntry) {
 // The response is discarded and the page revalidated instead, for the
 // resolution reason described on createFullEntry.
 export function updateEntry(id: string, body: UpdateEntry) {
-  return mutate(`/entries/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+  // Parsed now, where it used to be discarded, for one field: the new
+  // `updatedAt`. The form holds the value it loaded as its optimistic lock, so
+  // without refreshing it after a save the SECOND save of the same session
+  // would present a stale token and be refused as a conflict against itself.
+  return mutate(`/entries/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body,
+    schema: DictionaryEntryDetailSchema,
+  });
 }
 
 // POST /entries/:entryId/translations — adds a dialect to an existing entry.
@@ -108,7 +117,12 @@ export function createTranslation(entryId: string, body: CreateTranslation) {
 // editor renders that select disabled rather than sending a value the API
 // would ignore.
 export function updateTranslation(id: string, body: UpdateTranslation) {
-  return mutate(`/translations/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+  // Parsed for the refreshed `updatedAt` — see updateEntry.
+  return mutate(`/translations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body,
+    schema: TranslationDetailSchema,
+  });
 }
 
 // DELETE /translations/:id — ADMIN. Granular on purpose: publishing is

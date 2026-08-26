@@ -12,6 +12,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { isPrismaError, PRISMA_ERROR } from '../../common/prisma-error';
 import {
   dialectNotFound,
+  editConflict,
   entryNotFound,
   publishedEditForbidden,
   translationInUse,
@@ -72,6 +73,11 @@ export class TranslationsService {
     // live content is not changed without review; ADMIN edits published
     // directly. Read first to decide that and to tell a genuine not-found from a
     // gated-published one; a soft-deleted row is not found.
+    // The precondition is not a column — destructured out so it cannot be spread
+    // into `data`. Prisma's generated types reject an unknown key there, so
+    // forgetting this fails the typecheck rather than at runtime.
+    const { expectedUpdatedAt, ...changes } = input;
+
     // Ownership through the parent entry, in the WHERE rather than as a check
     // after the read — so a translation on another author's entry 404s
     // identically to one that does not exist.
@@ -82,10 +88,31 @@ export class TranslationsService {
     if (!existing) throw translationNotFound();
     if (existing.isPublished && role !== 'ADMIN') throw publishedEditForbidden();
 
-    await prisma.translation.updateMany({
-      where: { id, deletedAt: null },
-      data: { ...input, updaterId: userId },
+    // THE CONDITIONAL UPDATE IS THE AUTHORITY, not the read above. This is the
+    // path the editor exercises most, and the one where a lost update is worst:
+    // the form sends EVERY field, not a diff, so an unconditional write would
+    // push a stale blank over a gloss another contributor had just added, with
+    // nothing raised anywhere. Matching updatedAt makes that write match no rows.
+    const result = await prisma.translation.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        ...translationOwnership(role, userId),
+        updatedAt: new Date(expectedUpdatedAt),
+      },
+      data: { ...changes, updaterId: userId },
     });
+
+    // The read above established the row exists and is editable, so a miss here
+    // means updatedAt moved — or the row was deleted in between, which one extra
+    // read tells apart. Paid only on the failure path.
+    if (result.count === 0) {
+      const stillThere = await prisma.translation.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      throw stillThere ? editConflict('translation') : translationNotFound();
+    }
 
     const translation = await prisma.translation.findFirst({
       where: { id },

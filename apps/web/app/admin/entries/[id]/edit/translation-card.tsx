@@ -1,6 +1,7 @@
 'use client';
 
 import { type AdminTranslationDetail } from '@nahuat/shared';
+import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
 import { draftFrom, toUpdateTranslation, type TranslationDraft } from '../../translation-draft';
@@ -32,7 +33,13 @@ export function TranslationCard({
   canEdit: boolean;
   canDelete: boolean;
 }) {
+  const router = useRouter();
   const [draft, setDraft] = useState<TranslationDraft>(() => draftFrom(translation));
+  // The version this card is editing against. Advanced on every successful
+  // save, or the card's own second save would present the token from before its
+  // first and be refused as a conflict with itself.
+  const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(translation.updatedAt);
+  const [conflict, setConflict] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -46,13 +53,22 @@ export function TranslationCard({
   const save = () =>
     startTransition(async () => {
       setError(null);
+      setConflict(false);
       const result = await updateTranslationAction(
         entryId,
         translation.id,
-        toUpdateTranslation(draft),
+        toUpdateTranslation(draft, expectedUpdatedAt),
       );
-      if (result.ok) setSaved(true);
-      else setError(result.message);
+      if (result.ok) {
+        setSaved(true);
+        setExpectedUpdatedAt(result.updatedAt);
+        return;
+      }
+      // NOTHING THE AUTHOR TYPED IS DISCARDED on a conflict. Losing an edit to
+      // a message about losing an edit is the same data loss with better
+      // manners — they keep their text and choose whether to reload.
+      setConflict(result.conflict);
+      setError(result.message);
     });
 
   const remove = () =>
@@ -139,6 +155,24 @@ export function TranslationCard({
         </p>
       )}
 
+      {conflict && (
+        <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">{error}</p>
+          <p className="mt-1">
+            Someone else saved this translation while you were editing it. Your text is still here —
+            copy anything you need, then reload to see theirs.
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => router.refresh()}
+            className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 font-medium hover:bg-amber-100 disabled:opacity-50"
+          >
+            Reload this entry
+          </button>
+        </div>
+      )}
+
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
@@ -149,7 +183,7 @@ export function TranslationCard({
           {pending ? 'Saving…' : 'Save'}
         </button>
         {saved && <span className="text-xs text-gray-500">Saved</span>}
-        {error && <span className="text-xs text-red-700">{error}</span>}
+        {error && !conflict && <span className="text-xs text-red-700">{error}</span>}
         {!canEdit && (
           <span className="text-xs text-gray-500">Published — an administrator can edit this</span>
         )}

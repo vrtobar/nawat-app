@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { OptimisticLockSchema } from './api-response.schema';
 import { DialectSchema } from './dialect.schema';
 import { LocaleSchema } from './locale.schema';
 
@@ -124,7 +125,8 @@ export const UpdateTranslationSchema = CreateTranslationSchema.omit({
     exampleEn: createShape.exampleEn.unwrap().nullable(),
     audioUrl: createShape.audioUrl.unwrap().nullable(),
   })
-  .partial();
+  .partial()
+  .extend({ expectedUpdatedAt: OptimisticLockSchema });
 
 export type CreateTranslation = z.infer<typeof CreateTranslationSchema>;
 export type UpdateTranslation = z.infer<typeof UpdateTranslationSchema>;
