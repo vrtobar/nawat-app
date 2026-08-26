@@ -17,6 +17,7 @@ import {
   translationInUse,
   translationNotFound,
 } from './dictionary-errors';
+import { translationOwnership } from './ownership';
 import { toTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
 
 @Injectable()
@@ -71,8 +72,11 @@ export class TranslationsService {
     // live content is not changed without review; ADMIN edits published
     // directly. Read first to decide that and to tell a genuine not-found from a
     // gated-published one; a soft-deleted row is not found.
+    // Ownership through the parent entry, in the WHERE rather than as a check
+    // after the read — so a translation on another author's entry 404s
+    // identically to one that does not exist.
     const existing = await prisma.translation.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...translationOwnership(role, userId) },
       select: { isPublished: true },
     });
     if (!existing) throw translationNotFound();

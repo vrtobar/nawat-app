@@ -490,6 +490,48 @@ describe('EntriesService', () => {
       expect(entry.updateMany).not.toHaveBeenCalled();
     });
 
+    it('scopes a CONTRIBUTOR to their own rows in the WHERE, not after the read', async () => {
+      // The predicate has to be part of the query. If ownership were checked
+      // after reading the row, the read itself would already have confirmed the
+      // id exists — and this endpoint answers with the entry detail, so that is
+      // the difference between refusing an edit and handing over a draft.
+      entry.findFirst.mockResolvedValueOnce(null as never);
+
+      const rejection = service.update(
+        'ent_1',
+        { nawatContent: 'x' },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        // ENTRY_NOT_FOUND, identical to a genuinely missing id, so the caller
+        // cannot tell the two apart.
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+
+      expect(entry.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ent_1', deletedAt: null, creatorId: 'usr_1' },
+        }),
+      );
+      expect(entry.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('applies no ownership predicate for an ADMIN', async () => {
+      entry.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(detailRow() as never);
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.update('ent_1', { nawatContent: 'x' }, 'adm_1', 'ADMIN', 'es');
+
+      expect(entry.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ent_1', deletedAt: null } }),
+      );
+    });
+
     it('lets an ADMIN edit a published entry', async () => {
       entry.findFirst
         .mockResolvedValueOnce({ isPublished: true } as never)
