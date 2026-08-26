@@ -48,12 +48,16 @@ export function EntryEditor({
   const [headerPending, startHeaderTransition] = useTransition();
   const [headerError, setHeaderError] = useState<string | null>(null);
   const [headerSaved, setHeaderSaved] = useState(false);
+  // Advanced on each successful save — see TranslationCard for why the card's
+  // own second save would otherwise conflict with its first.
+  const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(entry.updatedAt);
 
   const saveHeader = () =>
     startHeaderTransition(async () => {
       setHeaderError(null);
       const trimmedImage = imageUrl.trim();
       const body: UpdateEntry = {
+        expectedUpdatedAt,
         nawatContent: nawatContent.trim(),
         // Sent explicitly rather than omitted. `type` is unwrapped from its
         // default on the update schema, so an absent key genuinely leaves the
@@ -64,8 +68,12 @@ export function EntryEditor({
         imageUrl: trimmedImage === '' ? null : trimmedImage,
       };
       const result = await updateEntryAction(entry.id, body);
-      if (result.ok) setHeaderSaved(true);
-      else setHeaderError(result.message);
+      if (result.ok) {
+        setHeaderSaved(true);
+        setExpectedUpdatedAt(result.updatedAt);
+        return;
+      }
+      setHeaderError(result.message);
     });
 
   // A dialect is unique per entry, so only the unused ones can be added.

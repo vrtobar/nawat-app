@@ -10,8 +10,27 @@ import {
   updateEntry,
   updateTranslation,
 } from '../../../../../lib/api/admin';
+import { ApiError } from '../../../../../lib/api/client';
 
-export type SaveResult = { ok: true } | { ok: false; message: string };
+// `updatedAt` comes back on success because the form holds it as its optimistic
+// lock and must advance it, or its own next save conflicts with itself.
+// `conflict` is separated from the message because the panel treats it
+// differently: an ordinary failure is a message, a conflict is an offer to
+// reload without discarding what the author typed.
+export type SaveResult =
+  { ok: true; updatedAt: string } | { ok: false; message: string; conflict: boolean };
+
+// The API answers a stale precondition with EDIT_CONFLICT. Read off the code
+// rather than the status, since 409 also covers uniqueness collisions, which
+// reloading would not fix.
+function toFailure(error: unknown, fallback: string): SaveResult {
+  const conflict = error instanceof ApiError && error.code === 'EDIT_CONFLICT';
+  return {
+    ok: false,
+    conflict,
+    message: error instanceof Error ? error.message : fallback,
+  };
+}
 
 // The editor's writes, one action per API call.
 //
@@ -36,13 +55,20 @@ function revalidateEntry(id: string) {
 }
 
 export async function updateEntryAction(id: string, body: UpdateEntry): Promise<SaveResult> {
+  let updated;
   try {
-    await updateEntry(id, body);
+    updated = await updateEntry(id, body);
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Could not save' };
+    return toFailure(error, 'Could not save');
   }
+  // `mutate` is typed nullable because several write routes answer with
+  // `data: null`. These pass a schema, so a null here would mean the API
+  // returned a success envelope with no body — checked rather than asserted,
+  // since an assertion would surface as a crash in the panel instead.
+  if (!updated) return { ok: false, conflict: false, message: 'The save returned no entry' };
+
   revalidateEntry(id);
-  return { ok: true };
+  return { ok: true, updatedAt: updated.updatedAt };
 }
 
 export async function updateTranslationAction(
@@ -50,19 +76,30 @@ export async function updateTranslationAction(
   translationId: string,
   body: UpdateTranslation,
 ): Promise<SaveResult> {
+  let updated;
   try {
-    await updateTranslation(translationId, body);
+    updated = await updateTranslation(translationId, body);
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Could not save' };
+    return toFailure(error, 'Could not save');
   }
+  if (!updated) {
+    return { ok: false, conflict: false, message: 'The save returned no translation' };
+  }
+
   revalidateEntry(entryId);
-  return { ok: true };
+  return { ok: true, updatedAt: updated.updatedAt };
 }
+
+// Creation and removal carry no optimistic lock: a create has no prior version
+// to be stale against (a repeated dialect collides on the unique constraint
+// instead), and a delete is idempotent in effect — removing a row someone else
+// already removed is the outcome the caller wanted.
+export type ActionResult = { ok: true } | { ok: false; message: string };
 
 export async function createTranslationAction(
   entryId: string,
   body: CreateTranslation,
-): Promise<SaveResult> {
+): Promise<ActionResult> {
   try {
     await createTranslation(entryId, body);
   } catch (error) {
@@ -78,7 +115,7 @@ export async function createTranslationAction(
 export async function deleteTranslationAction(
   entryId: string,
   translationId: string,
-): Promise<SaveResult> {
+): Promise<ActionResult> {
   try {
     await deleteTranslation(translationId);
   } catch (error) {
@@ -103,7 +140,7 @@ export async function deleteTranslationAction(
 // translations, which is precisely the operation wanted here. It is named for
 // what it does from the editor rather than reusing publishEntryAction, whose
 // revalidation targets only the list.
-export async function publishPendingTranslationsAction(entryId: string): Promise<SaveResult> {
+export async function publishPendingTranslationsAction(entryId: string): Promise<ActionResult> {
   try {
     await publishEntry(entryId);
   } catch (error) {

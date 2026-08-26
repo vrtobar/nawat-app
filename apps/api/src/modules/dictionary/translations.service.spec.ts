@@ -73,6 +73,11 @@ const input = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// The version the caller claims to have loaded. Mocks do not enforce the
+// WHERE, so its value is arbitrary — what the tests assert is that it REACHES
+// the query, and that a zero-row result becomes a conflict.
+const LOADED_AT = '2026-08-24T00:00:00.000Z';
+
 describe('TranslationsService', () => {
   const service = new TranslationsService();
 
@@ -143,7 +148,7 @@ describe('TranslationsService', () => {
 
       const result = await service.update(
         'tra_1',
-        { contentEs: 'varón' },
+        { contentEs: 'varón', expectedUpdatedAt: LOADED_AT },
         'usr_9',
         'CONTRIBUTOR',
         'es',
@@ -152,10 +157,59 @@ describe('TranslationsService', () => {
       TranslationDetailSchema.strict().parse(result);
       expect(translation.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tra_1', deletedAt: null },
+          // The lock reaches the WHERE, which is the whole mechanism: a row
+          // whose updatedAt has moved matches nothing and is not overwritten.
+          where: expect.objectContaining({
+            id: 'tra_1',
+            deletedAt: null,
+            updatedAt: new Date(LOADED_AT),
+          }),
           data: expect.objectContaining({ updaterId: 'usr_9' }),
         }),
       );
+    });
+
+    it('409s EDIT_CONFLICT when the row moved since the caller loaded it', async () => {
+      // The path where a lost update hurts most: the editor sends every field,
+      // not a diff, so an unconditional write here would push this caller's
+      // stale blanks over whatever the other author had just saved.
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never) // gate check
+        .mockResolvedValueOnce({ id: 'tra_1' } as never); // still there?
+      translation.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(ConflictException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'EDIT_CONFLICT' });
+      });
+    });
+
+    it('404s instead when the row was removed rather than edited', async () => {
+      translation.findFirst
+        .mockResolvedValueOnce({ isPublished: false } as never)
+        .mockResolvedValueOnce(null as never);
+      translation.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_9',
+        'CONTRIBUTOR',
+        'es',
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
+      });
     });
 
     it("scopes a CONTRIBUTOR through the parent entry's creator", async () => {
@@ -164,7 +218,13 @@ describe('TranslationsService', () => {
       // them.
       translation.findFirst.mockResolvedValueOnce(null as never);
 
-      const rejection = service.update('tra_1', { contentEs: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });
@@ -184,7 +244,13 @@ describe('TranslationsService', () => {
         .mockResolvedValueOnce(detailRow() as never);
       translation.updateMany.mockResolvedValue({ count: 1 } as never);
 
-      await service.update('tra_1', { contentEs: 'x' }, 'adm_1', 'ADMIN', 'es');
+      await service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'adm_1',
+        'ADMIN',
+        'es',
+      );
 
       expect(translation.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'tra_1', deletedAt: null } }),
@@ -194,7 +260,13 @@ describe('TranslationsService', () => {
     it('refuses a CONTRIBUTOR editing a published translation (FORBIDDEN), without writing', async () => {
       translation.findFirst.mockResolvedValueOnce({ isPublished: true } as never);
 
-      const rejection = service.update('tra_1', { contentEs: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(ForbiddenException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'FORBIDDEN' });
@@ -208,7 +280,13 @@ describe('TranslationsService', () => {
         .mockResolvedValueOnce(detailRow() as never);
       translation.updateMany.mockResolvedValue({ count: 1 } as never);
 
-      const result = await service.update('tra_1', { contentEs: 'x' }, 'adm_1', 'ADMIN', 'es');
+      const result = await service.update(
+        'tra_1',
+        { contentEs: 'x', expectedUpdatedAt: LOADED_AT },
+        'adm_1',
+        'ADMIN',
+        'es',
+      );
 
       TranslationDetailSchema.strict().parse(result);
       expect(translation.updateMany).toHaveBeenCalled();
@@ -217,7 +295,13 @@ describe('TranslationsService', () => {
     it('404s TRANSLATION_NOT_FOUND when no live row matches, without writing', async () => {
       translation.findFirst.mockResolvedValueOnce(null as never);
 
-      const rejection = service.update('nope', { phonetic: 'x' }, 'usr_1', 'CONTRIBUTOR', 'es');
+      const rejection = service.update(
+        'nope',
+        { phonetic: 'x', expectedUpdatedAt: LOADED_AT },
+        'usr_1',
+        'CONTRIBUTOR',
+        'es',
+      );
       await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
       await rejection.catch((error: { getResponse(): { code: string } }) => {
         expect(error.getResponse()).toMatchObject({ code: 'TRANSLATION_NOT_FOUND' });

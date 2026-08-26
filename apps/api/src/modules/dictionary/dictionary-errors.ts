@@ -46,6 +46,21 @@ export function publishedEditForbidden(): ForbiddenException {
   });
 }
 
+// A write whose precondition no longer holds: the row moved between the read
+// that filled the form and the write submitting it. Raised by both update paths.
+//
+// A CONFLICT rather than a 412, despite being a failed precondition, because
+// the client's recovery is to reload and reapply rather than to retry — and
+// because every other refusal in this module already answers in the same
+// envelope shape with a machine-readable code. The message names the recovery,
+// since the panel surfaces it verbatim.
+export function editConflict(resource: 'entry' | 'translation'): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.EDIT_CONFLICT,
+    message: `This ${resource} changed since you loaded it — reload and reapply your edit`,
+  });
+}
+
 // A translation cannot be removed while learning content references it — raised
 // by the single translation delete and by the entry cascade delete when any of
 // the entry's translations is in use. Count-only (the referencing modules are

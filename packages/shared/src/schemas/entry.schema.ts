@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { PaginationParamsSchema } from './api-response.schema';
+import { OptimisticLockSchema, PaginationParamsSchema } from './api-response.schema';
 import { LocaleSchema } from './locale.schema';
 import {
   AdminTranslationDetailSchema,
@@ -175,7 +175,9 @@ export const CreateEntrySchema = z.object({
 export const UpdateEntrySchema = CreateEntrySchema.extend({
   type: CreateEntrySchema.shape.type.unwrap(),
   imageUrl: CreateEntrySchema.shape.imageUrl.unwrap().nullable(),
-}).partial();
+})
+  .partial()
+  .extend({ expectedUpdatedAt: OptimisticLockSchema });
 
 // POST /entries/full — an entry and its first translations in one atomic
 // request. At least one translation: a full create with none is just POST
