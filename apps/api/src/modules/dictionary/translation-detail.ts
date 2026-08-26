@@ -83,6 +83,42 @@ export function toTranslationDetail(t: TranslationDetailRow, locale: Locale): Tr
   };
 }
 
+// The same shape, for the WRITE paths, where the strict resolver above cannot
+// be used.
+//
+// WHY THE STRICT ONE BREAKS HERE. resolveContent throws when the resolved
+// locale's column is null, deliberately: on the read paths the query filters
+// English-less rows out before the resolver sees them, so a null there really
+// would mean the query and the resolver had drifted apart. The write paths have
+// no such filter and cannot have one — they answer with ONE translation, so
+// filtering it out would leave nothing to return. The result was a 500 on an
+// ordinary action: adding or editing a Spanish-only translation with the locale
+// resolved to English threw AFTER the row had already been written, so the
+// author saw an error and the change existed anyway. Reachable by any caller,
+// not only an English-preference one, since ?locale= wins over every other
+// input to @ContentLocale.
+//
+// So this one falls back instead of throwing, and reports WHICH LANGUAGE IT
+// SERVED in `locale` — the field that exists to answer exactly that question.
+// contentEs is mandatory on every translation, so there is always something to
+// serve and the fallback cannot itself fail.
+//
+// The strict resolver is left alone on purpose. It guards a real invariant on
+// the read paths, and softening it there to fix a bug here would trade a
+// visible failure for a silent one.
+export function toWrittenTranslationDetail(
+  t: TranslationDetailRow,
+  preferred: Locale,
+): TranslationDetail {
+  const hasPreferred = preferred === 'en' ? t.contentEn !== null : true;
+  const served: Locale = hasPreferred ? preferred : 'es';
+
+  return {
+    ...toTranslationDetail(t, served),
+    locale: served,
+  };
+}
+
 // The admin projection. Same columns as TRANSLATION_DETAIL_SELECT — the
 // difference is entirely in the mapping, which hands both languages back
 // instead of resolving one. Declared separately rather than aliased so that

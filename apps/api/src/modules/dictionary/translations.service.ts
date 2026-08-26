@@ -19,7 +19,7 @@ import {
   translationNotFound,
 } from './dictionary-errors';
 import { translationOwnership } from './ownership';
-import { toTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
+import { toWrittenTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
 
 @Injectable()
 export class TranslationsService {
@@ -46,7 +46,9 @@ export class TranslationsService {
         data: { ...input, entryId, creatorId: userId, updaterId: userId },
         select: TRANSLATION_DETAIL_SELECT,
       });
-      return toTranslationDetail(created, locale);
+      // Falls back rather than throwing when the new row has no content in the
+      // resolved locale — see toWrittenTranslationDetail.
+      return toWrittenTranslationDetail(created, locale);
     } catch (error) {
       // One translation per (entry, dialect) — a second for the same dialect
       // collides on the unique constraint.
@@ -121,7 +123,7 @@ export class TranslationsService {
     // Unreachable barring a delete raced between the two reads; the guard keeps
     // the type honest rather than asserting non-null on a nullable findFirst.
     if (!translation) throw translationNotFound();
-    return toTranslationDetail(translation, locale);
+    return toWrittenTranslationDetail(translation, locale);
   }
 
   // Delete a translation (ADMIN). Blocked while any learning content references
