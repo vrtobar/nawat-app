@@ -48,7 +48,7 @@ const listRow = (overrides: Record<string, unknown> = {}) => ({
   updatedAt: new Date('2026-08-24T00:00:00Z'),
   creator: actor,
   updater: actor,
-  translations: [{ contentEn: 'man' }],
+  translations: [{ contentEn: 'man', isPublished: true }],
   ...overrides,
 });
 
@@ -185,6 +185,74 @@ describe('AdminEntriesService', () => {
       const result = await service.list(query({ page: 3, limit: 20 }), admin);
       expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]).toMatchObject({ skip: 40, take: 20 });
       expect(result.meta).toEqual({ total: 45, page: 3, limit: 20, totalPages: 3 });
+    });
+  });
+
+  describe("status 'pending-translations'", () => {
+    it('asks for live entries holding a translation that is not live', async () => {
+      entry.findMany.mockResolvedValue([] as never);
+      entry.count.mockResolvedValue(0 as never);
+
+      await service.list(query({ status: 'pending-translations' }), admin);
+
+      // Both halves matter. Without isPublished it would also return every
+      // draft entry, since none of their translations are published either —
+      // which is the queue this view exists to be separate from.
+      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]).toMatchObject({
+        where: expect.objectContaining({
+          isPublished: true,
+          translations: { some: { isPublished: false, deletedAt: null } },
+        }),
+      });
+    });
+
+    it('still scopes a CONTRIBUTOR to their own entries', async () => {
+      entry.findMany.mockResolvedValue([] as never);
+      entry.count.mockResolvedValue(0 as never);
+
+      await service.list(query({ status: 'pending-translations' }), contributor);
+
+      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]).toMatchObject({
+        where: expect.objectContaining({ creatorId: contributor.userId }),
+      });
+    });
+  });
+
+  describe('unpublishedTranslationCount', () => {
+    it('counts a dialect added after the entry went live', async () => {
+      // The state the list could not previously show: the entry is public, one
+      // of its translations is not, and the public reads exclude that
+      // translation in every locale.
+      entry.findMany.mockResolvedValue([
+        listRow({
+          isPublished: true,
+          translations: [
+            { contentEn: 'man', isPublished: true },
+            { contentEn: null, isPublished: false },
+          ],
+        }),
+      ] as never);
+
+      const { data } = await service.list(query(), admin);
+
+      expect(data[0]).toMatchObject({
+        isPublished: true,
+        translationCount: 2,
+        unpublishedTranslationCount: 1,
+      });
+    });
+
+    it('is zero when every translation is published', async () => {
+      entry.findMany.mockResolvedValue([
+        listRow({
+          isPublished: true,
+          translations: [{ contentEn: 'man', isPublished: true }],
+        }),
+      ] as never);
+
+      const { data } = await service.list(query(), admin);
+
+      expect(data[0]?.unpublishedTranslationCount).toBe(0);
     });
   });
 

@@ -13,7 +13,11 @@ import { useState, useTransition } from 'react';
 
 import { blankDraft, toCreateTranslation, type TranslationDraft } from '../../translation-draft';
 import { TranslationFields } from '../../translation-fields';
-import { createTranslationAction, updateEntryAction } from './actions';
+import {
+  createTranslationAction,
+  publishPendingTranslationsAction,
+  updateEntryAction,
+} from './actions';
 import { TranslationCard } from './translation-card';
 
 const labelClass = 'block text-xs font-medium uppercase tracking-wide text-gray-500';
@@ -67,6 +71,24 @@ export function EntryEditor({
   // A dialect is unique per entry, so only the unused ones can be added.
   const usedCodes = new Set(entry.translations.map((t) => t.dialect.code));
   const availableDialects = dialects.filter((dialect) => !usedCodes.has(dialect.code));
+
+  // Translations added after the entry went live. They are drafts, and the
+  // public reads exclude an unpublished translation in EVERY locale — so until
+  // these are published the dialect exists only in the panel.
+  const pending = entry.translations.filter((t) => !t.isPublished);
+  const hasPending = entry.isPublished && pending.length > 0;
+
+  const [publishPending, startPublishTransition] = useTransition();
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  const publishTranslations = () =>
+    startPublishTransition(async () => {
+      setPublishError(null);
+      const result = await publishPendingTranslationsAction(entry.id);
+      if (!result.ok) setPublishError(result.message);
+      // On success the cascade publishes them and the revalidated page renders
+      // without this button, so there is no state to reset.
+    });
 
   const [addDraft, setAddDraft] = useState<TranslationDraft | null>(null);
   const [addPending, startAddTransition] = useTransition();
@@ -178,6 +200,31 @@ export function EntryEditor({
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">Translations</h2>
 
+        {/* Only reachable from here. The list shows Unpublish for a live entry,
+            so the publish cascade — the thing that would promote these — has no
+            control anywhere else. Uses PATCH /entries/:id/publish unchanged:
+            it is a no-op on an already-published entry and cascades to exactly
+            its drafts. */}
+        {hasPending && (
+          <div className="flex items-center gap-3 rounded border border-amber-200 bg-amber-50 p-3">
+            <p className="flex-1 text-xs text-amber-800">
+              {pending.length === 1
+                ? '1 translation was added after this entry was published and is not live yet.'
+                : `${pending.length} translations were added after this entry was published and are not live yet.`}{' '}
+              They do not appear in the dictionary in any language.
+            </p>
+            <button
+              type="button"
+              disabled={publishPending || !isAdmin}
+              onClick={publishTranslations}
+              className="rounded border border-amber-300 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {publishPending ? 'Publishing…' : `Publish ${pending.length === 1 ? 'it' : 'them'}`}
+            </button>
+          </div>
+        )}
+        {publishError && <p className="text-xs text-red-700">{publishError}</p>}
+
         {/* Entry-level rather than per-card, because this is the case where the
             HEADWORD disappears rather than one sense of it. Publishing is still
             allowed with Spanish alone (ADR 0015 §2) — this states the cost,
@@ -195,6 +242,7 @@ export function EntryEditor({
             key={translation.id}
             entryId={entry.id}
             translation={translation}
+            entryPublished={entry.isPublished}
             canEdit={isAdmin || !translation.isPublished}
             // ADMIN-only on the API, so the button is not offered otherwise.
             canDelete={isAdmin}
