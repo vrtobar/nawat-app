@@ -643,6 +643,44 @@ describe('EntriesService', () => {
     });
   });
 
+  describe('unpublish', () => {
+    it('returns the entry to draft and demotes its published translations', async () => {
+      entry.updateMany.mockResolvedValue({ count: 1 } as never);
+      translationTable.updateMany.mockResolvedValue({ count: 2 } as never);
+      entry.findFirst.mockResolvedValue(detailRow() as never);
+
+      const result = await service.unpublish('ent_1', 'usr_9', 'es');
+
+      DictionaryEntryDetailSchema.strict().parse(result);
+      expect(entry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ent_1', deletedAt: null },
+          data: expect.objectContaining({ isPublished: false, updaterId: 'usr_9' }),
+        }),
+      );
+      // The exact mirror of publish's cascade: that one matches drafts, this one
+      // matches published rows, so neither re-stamps what is already correct.
+      expect(translationTable.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { entryId: 'ent_1', deletedAt: null, isPublished: true },
+          data: expect.objectContaining({ isPublished: false, updaterId: 'usr_9' }),
+        }),
+      );
+    });
+
+    it('404s ENTRY_NOT_FOUND when no live row matches, cascading to nothing', async () => {
+      entry.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const rejection = service.unpublish('nope', 'usr_1', 'es');
+      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
+      await rejection.catch((error: { getResponse(): { code: string } }) => {
+        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
+      });
+      expect(translationTable.updateMany).not.toHaveBeenCalled();
+      expect(entry.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe('delete', () => {
     // A translation.findMany row as the cascade selects it: id, isPublished, and
     // the _count of Restrict children.
