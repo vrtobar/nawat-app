@@ -221,14 +221,26 @@ export function EntryEditor({
                 : `${pending.length} translations were added after this entry was published and are not live yet.`}{' '}
               They do not appear in the dictionary in any language.
             </p>
-            <button
-              type="button"
-              disabled={publishPending || !isAdmin}
-              onClick={publishTranslations}
-              className="rounded border border-amber-300 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-            >
-              {publishPending ? 'Publishing…' : `Publish ${pending.length === 1 ? 'it' : 'them'}`}
-            </button>
+            {/* Information stays, the action goes. A contributor needs to know
+                their dialect is not reaching readers, but publishing is ADMIN —
+                so they get the sentence and not the button. Rendering it
+                disabled instead would invite a click and explain nothing, and
+                every other admin-only action in this panel is hidden rather
+                than greyed. */}
+            {isAdmin ? (
+              <button
+                type="button"
+                disabled={publishPending}
+                onClick={publishTranslations}
+                className="rounded border border-amber-300 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              >
+                {publishPending ? 'Publishing…' : `Publish ${pending.length === 1 ? 'it' : 'them'}`}
+              </button>
+            ) : (
+              <span className="whitespace-nowrap text-xs text-amber-800">
+                An administrator can publish {pending.length === 1 ? 'it' : 'them'}.
+              </span>
+            )}
           </div>
         )}
         {publishError && <p className="text-xs text-red-700">{publishError}</p>}

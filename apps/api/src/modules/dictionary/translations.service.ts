@@ -18,7 +18,6 @@ import {
   translationInUse,
   translationNotFound,
 } from './dictionary-errors';
-import { translationOwnership } from './ownership';
 import { toWrittenTranslationDetail, TRANSLATION_DETAIL_SELECT } from './translation-detail';
 
 @Injectable()
@@ -80,11 +79,11 @@ export class TranslationsService {
     // forgetting this fails the typecheck rather than at runtime.
     const { expectedUpdatedAt, ...changes } = input;
 
-    // Ownership through the parent entry, in the WHERE rather than as a check
-    // after the read — so a translation on another author's entry 404s
-    // identically to one that does not exist.
+    // NOT scoped to the caller's own rows — any contributor may edit any
+    // translation, which is the point of the change. The published-content gate
+    // below is the only per-row refusal left. See ./ownership.
     const existing = await prisma.translation.findFirst({
-      where: { id, deletedAt: null, ...translationOwnership(role, userId) },
+      where: { id, deletedAt: null },
       select: { isPublished: true },
     });
     if (!existing) throw translationNotFound();
@@ -96,12 +95,7 @@ export class TranslationsService {
     // push a stale blank over a gloss another contributor had just added, with
     // nothing raised anywhere. Matching updatedAt makes that write match no rows.
     const result = await prisma.translation.updateMany({
-      where: {
-        id,
-        deletedAt: null,
-        ...translationOwnership(role, userId),
-        updatedAt: new Date(expectedUpdatedAt),
-      },
+      where: { id, deletedAt: null, updatedAt: new Date(expectedUpdatedAt) },
       data: { ...changes, updaterId: userId },
     });
 

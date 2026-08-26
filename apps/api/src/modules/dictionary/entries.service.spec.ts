@@ -566,36 +566,10 @@ describe('EntriesService', () => {
       expect(call.data).not.toHaveProperty('expectedUpdatedAt');
     });
 
-    it('scopes a CONTRIBUTOR to their own rows in the WHERE, not after the read', async () => {
-      // The predicate has to be part of the query. If ownership were checked
-      // after reading the row, the read itself would already have confirmed the
-      // id exists — and this endpoint answers with the entry detail, so that is
-      // the difference between refusing an edit and handing over a draft.
-      entry.findFirst.mockResolvedValueOnce(null as never);
-
-      const rejection = service.update(
-        'ent_1',
-        { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
-        'usr_1',
-        'CONTRIBUTOR',
-        'es',
-      );
-      await expect(rejection).rejects.toBeInstanceOf(NotFoundException);
-      await rejection.catch((error: { getResponse(): { code: string } }) => {
-        // ENTRY_NOT_FOUND, identical to a genuinely missing id, so the caller
-        // cannot tell the two apart.
-        expect(error.getResponse()).toMatchObject({ code: 'ENTRY_NOT_FOUND' });
-      });
-
-      expect(entry.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'ent_1', deletedAt: null, creatorId: 'usr_1' },
-        }),
-      );
-      expect(entry.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('applies no ownership predicate for an ADMIN', async () => {
+    it('does not scope the update to the caller — any contributor may edit any entry', async () => {
+      // Ownership is attribution, not permission. The published-content gate is
+      // the only per-row refusal left; a contributor editing another author's
+      // DRAFT is now the intended behaviour, not a hole.
       entry.findFirst
         .mockResolvedValueOnce({ isPublished: false } as never)
         .mockResolvedValueOnce(detailRow() as never);
@@ -604,14 +578,16 @@ describe('EntriesService', () => {
       await service.update(
         'ent_1',
         { nawatContent: 'x', expectedUpdatedAt: LOADED_AT },
-        'adm_1',
-        'ADMIN',
+        'usr_1',
+        'CONTRIBUTOR',
         'es',
       );
 
-      expect(entry.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'ent_1', deletedAt: null } }),
-      );
+      expect(vi.mocked(entry.findFirst).mock.calls[0]?.[0]?.where).not.toHaveProperty('creatorId');
+      const updateWhere = vi.mocked(entry.updateMany).mock.calls[0]?.[0]?.where;
+      expect(updateWhere).not.toHaveProperty('creatorId');
+      // The optimistic lock survives the change — it was never the ownership check.
+      expect(updateWhere).toMatchObject({ updatedAt: new Date(LOADED_AT) });
     });
 
     it('lets an ADMIN edit a published entry', async () => {

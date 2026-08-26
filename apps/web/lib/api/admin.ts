@@ -26,13 +26,20 @@ export function getMe() {
 }
 
 // GET /admin/entries — entries including drafts, which no public read returns.
-// A CONTRIBUTOR sees only their own rows and an ADMIN sees every author's; the
-// scoping is the API's, applied from the token's subject, so there is nothing
-// to pass here and nothing this side could get wrong.
-export function listAdminEntries(params: { status?: AdminEntryStatus; page?: number } = {}) {
+//
+// UNSCOPED for every CONTRIBUTOR+ caller: ownership is attribution, not
+// permission, so anyone who may edit an entry may list it. `mine` narrows to
+// the caller's own authorship by choice — see the API's ./ownership for why it
+// counts creation and not edits.
+export function listAdminEntries(
+  params: { status?: AdminEntryStatus; page?: number; mine?: boolean } = {},
+) {
   return authedPage('/admin/entries', AdminEntryListItemSchema, {
     status: params.status,
     page: params.page,
+    // Omitted rather than sent as false when off: the API parses it with
+    // z.stringbool(), and an absent key is the clearer "no filter".
+    mine: params.mine ? true : undefined,
   });
 }
 

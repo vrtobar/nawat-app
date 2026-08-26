@@ -24,7 +24,6 @@ import {
   publishedEditForbidden,
   translationInUse,
 } from './dictionary-errors';
-import { entryOwnership } from './ownership';
 import {
   resolveContent,
   toTranslationDetail,
@@ -357,13 +356,11 @@ export class EntriesService {
     // forgetting this fails the typecheck rather than at runtime.
     const { expectedUpdatedAt, ...changes } = input;
 
-    // Ownership is part of the WHERE, so another author's entry comes back as
-    // nothing and 404s exactly like a missing id — the same refusal the admin
-    // read surface makes, and for the same reason: this endpoint returns the
-    // entry detail on success, so without it a contributor could confirm an id
-    // exists, and rewrite it, by guessing.
+    // NOT scoped to the caller's own rows. Any contributor may edit any entry —
+    // ownership is attribution, not permission — so the only per-row gate left
+    // here is the published-content one below. See ./ownership.
     const existing = await prisma.entry.findFirst({
-      where: { id, deletedAt: null, ...entryOwnership(role, userId) },
+      where: { id, deletedAt: null },
       select: { isPublished: true },
     });
     if (!existing) throw entryNotFound();
@@ -377,12 +374,7 @@ export class EntriesService {
     let result;
     try {
       result = await prisma.entry.updateMany({
-        where: {
-          id,
-          deletedAt: null,
-          ...entryOwnership(role, userId),
-          updatedAt: new Date(expectedUpdatedAt),
-        },
+        where: { id, deletedAt: null, updatedAt: new Date(expectedUpdatedAt) },
         data: {
           ...changes,
           // Regenerate the slug only when the headword changes; a rename can

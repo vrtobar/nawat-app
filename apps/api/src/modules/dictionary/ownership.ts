@@ -1,41 +1,36 @@
 import { type Prisma } from '@nahuat/database';
-import { type JwtClaims } from '@nahuat/shared';
 
-// Who a caller is allowed to touch, as a Prisma predicate.
+// "Mine" — the entries a contributor authored, as a Prisma predicate.
 //
-// Extracted rather than repeated because it is an authorization rule and there
-// are now three sites applying it — the admin read surface, the entry update and
-// the translation update. Three copies of a rule like this is how one of them
-// quietly stops matching the others.
+// THIS WAS AN AUTHORIZATION BOUNDARY AND IS NOW A VIEW FILTER. The distinction
+// is the whole point of the change around it, so it is recorded rather than
+// left to be inferred from the absence of callers.
 //
-// NEGATED AGAINST ADMIN rather than matched against CONTRIBUTOR: if a rank is
-// ever added between them, an unrecognised role is scoped to its own rows
-// instead of silently seeing everything.
+// It used to confine a CONTRIBUTOR's reads and writes to rows they created.
+// That model made cross-author contribution incoherent: a contributor could add
+// a dialect to another author's entry — POST /entries/:entryId/translations
+// never checked ownership — and then could neither see nor edit what they had
+// just written. Ownership now records WHO MADE a row, not who may change it,
+// because contributors leave and their entries must stay maintainable.
 //
-// Applied inside the WHERE, never as a check after the read. That is what makes
-// a cross-author row indistinguishable from a missing one — both come back as
-// nothing and raise the same 404 — so no endpoint here can be used to test
-// whether an id exists.
-export function entryOwnership(role: JwtClaims['role'], userId: string): Prisma.EntryWhereInput {
-  return role === 'ADMIN' ? {} : { creatorId: userId };
-}
-
-// The same rule reached through a translation's parent entry.
+// So nothing authorizes on this any more. It is opt-in, via ?mine=true, and the
+// reads are otherwise unscoped: a contributor sees every entry, because a
+// contributor may edit every entry, and a read scope narrower than the write
+// scope would let someone edit a row they cannot open.
 //
-// Scoped by the ENTRY's creator, not the translation's, so that what a
-// CONTRIBUTOR may write matches exactly what the admin read surface shows them
-// — GET /admin/entries scopes on entry.creatorId, and a writable row they
-// cannot see would be the stranger arrangement.
+// AUTHORED, NOT TOUCHED — created the entry, or created one of its
+// translations. Deliberately NOT "entries I have edited": `updaterId` records
+// the LAST writer, not every writer, so an updater-based filter would show a
+// caller their own work and then silently drop it the moment anyone else saved
+// that row. A view that loses your work because a colleague fixed a typo is
+// worse than one that answers a narrower question. The broader "everything I
+// have touched" needs the audit trail, which does not exist yet.
 //
-// Consequence worth naming: POST /entries/:entryId/translations has no
-// ownership check, so a contributor CAN add a dialect to another author's entry
-// and then not be able to edit it. That asymmetry predates this and is left
-// alone deliberately — whether cross-author contribution should be allowed at
-// all is a product question, and answering it by quietly tightening one write
-// path would settle it by accident.
-export function translationOwnership(
-  role: JwtClaims['role'],
-  userId: string,
-): Prisma.TranslationWhereInput {
-  return role === 'ADMIN' ? {} : { entry: { creatorId: userId } };
+// Unindexed on purpose: neither creator_id column carries an index, and this
+// adds a relation semi-join across both. At the current volume an index chosen
+// before there is a query plan worth reading would be a guess.
+export function authoredBy(userId: string): Prisma.EntryWhereInput {
+  return {
+    OR: [{ creatorId: userId }, { translations: { some: { creatorId: userId, deletedAt: null } } }],
+  };
 }
