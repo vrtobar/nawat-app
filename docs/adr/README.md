@@ -35,3 +35,4 @@ alongside the date of the record.
 | [15](0015-localized-content.md)                             | Localized content: storage, naming, resolution       | Accepted |
 | [16](0016-dictionary-entry-slugs.md)                        | Dictionary entry slugs                               | Accepted |
 | [17](0017-production-disposable-during-prelaunch.md)        | Production is disposable during pre-launch           | Accepted |
+| [18](0018-own-authentication-google-only.md)                | Authentication in-house, Google as the only provider | Accepted |

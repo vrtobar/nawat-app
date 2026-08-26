@@ -601,12 +601,17 @@ data "aws_iam_policy_document" "github_staging" {
     }
   }
 
-  # ec2:CreateAction confines this to tags applied during the two calls above.
-  # Consequence: a tag-only change to an existing gateway or address is a bare
-  # CreateTags with no CreateAction context and will be denied. Rare, and it
-  # fails loudly rather than silently.
+  # ec2:CreateAction confines this to tags applied during resource creation.
+  # Consequence: a tag-only change to an existing gateway, address or instance
+  # is a bare CreateTags with no CreateAction context and will be denied. Rare,
+  # and it fails loudly rather than silently.
+  #
+  # RunInstances is listed because the bastion is tagged by the same call that
+  # creates it. Note where this one bites: teardown never reaches it, so a
+  # missing entry here surfaces on the next bring-up rather than the destroy
+  # that preceded it.
   statement {
-    sid       = "StagingNatTagOnCreate"
+    sid       = "StagingTagOnCreate"
     effect    = "Allow"
     actions   = ["ec2:CreateTags"]
     resources = ["*"]
@@ -614,7 +619,61 @@ data "aws_iam_policy_document" "github_staging" {
     condition {
       test     = "StringEquals"
       variable = "ec2:CreateAction"
-      values   = ["CreateNatGateway", "AllocateAddress"]
+      values   = ["CreateNatGateway", "AllocateAddress", "RunInstances"]
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Bastion — modules/bastion, an EC2 instance instantiated from the
+  # application layer so a teardown removes it and it bills only while the
+  # environment is up.
+  #
+  # Split into three statements for the same reason the NAT grants above are:
+  # create and destroy cannot be constrained alike.
+  # ---------------------------------------------------------------------------
+
+  # The AMI is resolved from an AWS-owned public parameter rather than one of
+  # ours. Note the EMPTY account field in the ARN — that is what makes it AWS's
+  # parameter rather than this account's. An ARN carrying the account id here
+  # matches nothing and denies every plan.
+  statement {
+    sid       = "StagingBastionAmi"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/*"]
+  }
+
+  # Unscopable for the same reason as StagingNatProvision: the instance does
+  # not exist when RunInstances is authorized, so a resource-tag condition
+  # would evaluate against an untagged resource and deny every time. Bounded by
+  # region here, by DenyProductionEc2 below, and by the fact that the only role
+  # this document can pass to an instance is a nahuat-* one.
+  statement {
+    sid       = "StagingBastionProvision"
+    effect    = "Allow"
+    actions   = ["ec2:RunInstances"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+
+  # Fenced by tag rather than left on region alone: by the time an instance can
+  # be terminated it carries Environment from the provider's default_tags, so
+  # the condition that cannot work on create is available here.
+  statement {
+    sid       = "StagingBastionTerminate"
+    effect    = "Allow"
+    actions   = ["ec2:TerminateInstances"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Environment"
+      values   = ["staging"]
     }
   }
 
@@ -726,6 +785,28 @@ data "aws_iam_policy_document" "github_staging" {
     ]
   }
 
+  # An instance profile is a distinct IAM resource from the role it carries: its
+  # own ARN namespace, its own actions. StagingServiceRoles above therefore does
+  # not reach it, and modules/bastion needs both — the role for the SSM agent's
+  # permissions, the profile to attach that role to an instance. Same nahuat-*
+  # scoping, and DenyProductionResources below carves production out of it.
+  statement {
+    sid    = "StagingInstanceProfiles"
+    effect = "Allow"
+    actions = [
+      "iam:CreateInstanceProfile",
+      "iam:DeleteInstanceProfile",
+      "iam:GetInstanceProfile",
+      "iam:AddRoleToInstanceProfile",
+      "iam:RemoveRoleFromInstanceProfile",
+      "iam:TagInstanceProfile",
+      "iam:UntagInstanceProfile",
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/nahuat-*",
+    ]
+  }
+
   statement {
     sid    = "StagingServicePolicies"
     effect = "Allow"
@@ -753,6 +834,12 @@ data "aws_iam_policy_document" "github_staging" {
   # CLOSES: staging automation reaching production. This role is obtained by any
   # push to develop with no approval, and StagingTerraform grants compute and
   # data-service wildcards on Resource "*".
+  #
+  # The instance-profile ARN pairs with StagingInstanceProfiles above, and the
+  # pairing is the rule worth reading off this file: every Allow scoped to
+  # nahuat-* reaches production, because production's resources match that
+  # prefix too. Widening one of those Allows without extending this list is how
+  # a boundary opens silently.
   statement {
     sid     = "DenyProductionResources"
     effect  = "Deny"
@@ -769,6 +856,7 @@ data "aws_iam_policy_document" "github_staging" {
       "arn:aws:lambda:us-east-1:${data.aws_caller_identity.current.account_id}:function:nahuat-production-*",
       "arn:aws:sqs:us-east-1:${data.aws_caller_identity.current.account_id}:nahuat-production-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/nahuat-production-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/nahuat-production-*",
     ]
   }
 
