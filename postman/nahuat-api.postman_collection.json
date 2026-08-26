@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Nahuat API",
-    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables \u2014 every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat \u2014 Local** \u2192 http://localhost:3001\n- **Nahuat \u2014 Staging** \u2192 https://api.staging.nahuat.com\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, verified via JWKS against the tenant) \u2014 there is no local/HS256 bypass (ADR 13).\n\nThe token carries only `sub`. Since 2026-08-24 the API resolves the platform user id and role from its own database on every request, so a role change takes effect immediately rather than at the next login, and a deactivated account is refused on its next request with USER_DEACTIVATED. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Log into the web app for the environment you are targeting and copy the access token it sends to the API.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
+    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables — every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat — Local** → http://localhost:3001\n- **Nahuat — Staging** → https://api.staging.nahuat.com\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, verified via JWKS against the tenant) — there is no local/HS256 bypass (ADR 13).\n\nThe token carries only `sub`. Since 2026-08-24 the API resolves the platform user id and role from its own database on every request, so a role change takes effect immediately rather than at the next login, and a deactivated account is refused on its next request with USER_DEACTIVATED. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Log into the web app for the environment you are targeting and copy the access token it sends to the API.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -95,10 +95,10 @@
     },
     {
       "name": "Session",
-      "description": "Getting a token. /auth/access-token is mounted on the WEB app by the Auth0 SDK ({{webBaseUrl}}), not on the API ({{baseUrl}}) \u2014 the API never issues tokens, it only verifies them.\n\nIt authorises by SESSION COOKIE, so Postman needs the cookie the browser holds. Sign in at {{webBaseUrl}}, then copy the session cookie into Postman's Cookies manager for that domain (Cookies, under the Send button). Once it is there this request works and re-running it refreshes an expired token.\n\nIf you would rather not manage cookies, open {{webBaseUrl}}/auth/access-token in the browser and paste the `token` value into the environment by hand.",
+      "description": "Getting a token. /auth/access-token is mounted on the WEB app by the Auth0 SDK ({{webBaseUrl}}), not on the API ({{baseUrl}}) — the API never issues tokens, it only verifies them.\n\nIt authorises by SESSION COOKIE, so Postman needs the cookie the browser holds. Sign in at {{webBaseUrl}}, then copy the session cookie into Postman's Cookies manager for that domain (Cookies, under the Send button). Once it is there this request works and re-running it refreshes an expired token.\n\nIf you would rather not manage cookies, open {{webBaseUrl}}/auth/access-token in the browser and paste the `token` value into the environment by hand.",
       "item": [
         {
-          "name": "Get access token \u2192 saves {{token}}",
+          "name": "Get access token → saves {{token}}",
           "request": {
             "auth": {
               "type": "noauth"
@@ -109,7 +109,7 @@
               "host": ["{{webBaseUrl}}"],
               "path": ["auth", "access-token"]
             },
-            "description": "Returns { token, expiresAt } for the signed-in session and writes `token` into the active environment, so every authed request in this collection picks it up.\n\nThe token carries only `sub`. Your rank comes from your user row, which the API reads on every request \u2014 so changing a role in the database takes effect immediately and does NOT need a new token."
+            "description": "Returns { token, expiresAt } for the signed-in session and writes `token` into the active environment, so every authed request in this collection picks it up.\n\nThe token carries only `sub`. Your rank comes from your user row, which the API reads on every request — so changing a role in the database takes effect immediately and does NOT need a new token."
           },
           "event": [
             {
@@ -133,7 +133,7 @@
                   "",
                   "if (pm.response.code === 401 || pm.response.code === 302) {",
                   "    // No session cookie, or it expired. Postman does not follow the",
-                  "    // login redirect usefully \u2014 sign in in the browser first.",
+                  "    // login redirect usefully — sign in in the browser first.",
                   "    console.log('Not signed in. Sign in at the web app, then copy the session cookie into Postman.');",
                   "} else if (body && typeof body.token === 'string') {",
                   "    pm.environment.set('token', body.token);",
@@ -152,7 +152,7 @@
       ]
     },
     {
-      "name": "Dictionary \u2014 reads (public)",
+      "name": "Dictionary — reads (public)",
       "item": [
         {
           "name": "Browse entries",
@@ -178,7 +178,7 @@
                   "key": "type",
                   "value": "WORD",
                   "disabled": true,
-                  "description": "WORD | EXPRESSION (PHRASE is rejected \u2014 lesson-only)"
+                  "description": "WORD | EXPRESSION (PHRASE is rejected — lesson-only)"
                 },
                 {
                   "key": "partOfSpeech",
@@ -201,7 +201,7 @@
                   "key": "locale",
                   "value": "en",
                   "disabled": true,
-                  "description": "es (default) | en \u2014 resolves gloss/example language"
+                  "description": "es (default) | en — resolves gloss/example language"
                 }
               ]
             },
@@ -290,7 +290,7 @@
       ]
     },
     {
-      "name": "Dictionary \u2014 writes (CONTRIBUTOR / ADMIN)",
+      "name": "Dictionary — writes (CONTRIBUTOR / ADMIN)",
       "item": [
         {
           "name": "Create entry (CONTRIBUTOR)",
@@ -331,7 +331,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"ni\u00f1o | beb\u00e9\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[\u02c8kunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El ni\u00f1o duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
+              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"niño | bebé\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[ˈkunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El niño duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -358,7 +358,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nawatContent\": \"kunet\"\n}",
+              "raw": "{\n  \"expectedUpdatedAt\": \"{{entryUpdatedAt}}\",\n  \"nawatContent\": \"kunet\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -370,7 +370,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["entries", "{{entryId}}"]
             },
-            "description": "Partial update. Renaming regenerates the slug. Contributor edits of published content are gated."
+            "description": "Partial update. Renaming regenerates the slug. Contributor edits of published content are gated.\n\n**Requires `expectedUpdatedAt`** — the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
           }
         },
         {
@@ -383,6 +383,18 @@
               "path": ["entries", "{{entryId}}", "publish"]
             },
             "description": "Publish. Requires ADMIN."
+          }
+        },
+        {
+          "name": "Unpublish entry (ADMIN)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/entries/{{entryId}}/unpublish",
+              "host": ["{{baseUrl}}"],
+              "path": ["entries", "{{entryId}}", "unpublish"]
+            },
+            "description": "Returns a published entry to draft, cascading to its published translations — the mirror of Publish, which cascades to its drafts.\n\nExists because publishing was otherwise one-way: an entry published by mistake could only be resolved by deleting it and creating it again, losing its id, slug and attribution over what is usually a wrong gloss."
           }
         },
         {
@@ -414,7 +426,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"ni\u00f1o\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[\u02c8kunet]\"\n}",
+              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"niño\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[ˈkunet]\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -441,7 +453,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"contentEs\": \"ni\u00f1o | cr\u00edo\"\n}",
+              "raw": "{\n  \"expectedUpdatedAt\": \"{{translationUpdatedAt}}\",\n  \"contentEs\": \"ni\\u00f1o | muchacho\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -453,7 +465,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["translations", "{{translationId}}"]
             },
-            "description": "Partial. dialectCode is immutable after creation. Requires CONTRIBUTOR."
+            "description": "Partial. dialectCode is immutable after creation. Requires CONTRIBUTOR.\n\n**Requires `expectedUpdatedAt`** — the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
           }
         },
         {
@@ -553,6 +565,120 @@
             },
             "description": "Delete. Blocked if translations reference it (FK). Requires ADMIN."
           }
+        }
+      ]
+    },
+    {
+      "name": "Admin read surface (CONTRIBUTOR / ADMIN)",
+      "description": "The authenticated reads behind the authoring panel. They exist because every public read hardcodes `isPublished: true`, so no other endpoint can return a draft — and because content comes back UNRESOLVED here (contentEs and contentEn side by side), which is what lets an edit form round-trip it.\n\nUnscoped: any CONTRIBUTOR+ sees every entry, because any of them may edit every entry. `?mine=true` narrows to your own authorship by choice.",
+      "item": [
+        {
+          "name": "List entries → saves {{entryId}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/admin/entries?status=draft&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "entries"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "draft",
+                  "description": "draft (default) | pending-translations | published | all"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "mine",
+                  "value": "true",
+                  "disabled": true,
+                  "description": "Only entries you created, or carrying a translation you created"
+                },
+                {
+                  "key": "q",
+                  "value": "takat",
+                  "disabled": true,
+                  "description": "Case-insensitive substring on nawatContent, not the trigram search"
+                }
+              ]
+            },
+            "description": "`status=pending-translations` is the odd one: it reaches through the relation for PUBLISHED entries holding at least one translation that is not, which is where a dialect added after publishing lands. Those are excluded from the public reads in every locale, so the dialect exists only in the panel until someone publishes the entry again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Saves the first row's id so the requests below have something to act on.",
+                  "let body;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "",
+                  "pm.test('200 with a data array', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(body && body.data, 'no data array').to.be.an('array');",
+                  "});",
+                  "",
+                  "const first = body && body.data && body.data[0];",
+                  "if (first) {",
+                  "    pm.environment.set('entryId', first.id);",
+                  "    console.log('entryId =', first.id, '(' + first.nawatContent + ')');",
+                  "} else {",
+                  "    console.log('No rows for this status — nothing saved.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entry detail → saves {{entryUpdatedAt}} + {{translationId}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/admin/entries/{{entryId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "entries", "{{entryId}}"]
+            },
+            "description": "Unresolved content, both languages, under the same field names the write DTOs use — so a form PATCHes back exactly what it received.\n\n**Run this before either PATCH.** It saves the `updatedAt` values those requests need as their optimistic lock."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The two PATCH requests need the updatedAt they are editing against.",
+                  "// Saved here so the collection can be run top to bottom.",
+                  "let body;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "",
+                  "pm.test('200 with an entry', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(body && body.data && body.data.id, 'no entry').to.be.a('string');",
+                  "});",
+                  "",
+                  "const entry = body && body.data;",
+                  "if (entry) {",
+                  "    pm.environment.set('entryUpdatedAt', entry.updatedAt);",
+                  "    const t = (entry.translations || [])[0];",
+                  "    if (t) {",
+                  "        pm.environment.set('translationId', t.id);",
+                  "        pm.environment.set('translationUpdatedAt', t.updatedAt);",
+                  "    } else {",
+                  "        console.log('Entry has no translations — translation requests will 404.');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
