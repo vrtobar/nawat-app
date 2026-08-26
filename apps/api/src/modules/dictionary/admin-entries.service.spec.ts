@@ -188,6 +188,30 @@ describe('AdminEntriesService', () => {
     });
   });
 
+  describe('englishCount', () => {
+    it('counts the translations carrying English, not just whether all do', async () => {
+      // The case a boolean cannot express: the entry still appears to an English
+      // reader, with fewer senses than a Spanish reader sees.
+      entry.findMany.mockResolvedValue([
+        listRow({ translations: [{ contentEn: 'man' }, { contentEn: null }] }),
+      ] as never);
+
+      const { data } = await service.list(query(), admin);
+
+      expect(data[0]).toMatchObject({ englishCount: 1, translationCount: 2, hasEnglish: false });
+    });
+
+    it('reports zero when no translation has English, which is what hides the entry', async () => {
+      entry.findMany.mockResolvedValue([
+        listRow({ translations: [{ contentEn: null }, { contentEn: null }] }),
+      ] as never);
+
+      const { data } = await service.list(query(), admin);
+
+      expect(data[0]).toMatchObject({ englishCount: 0, translationCount: 2, hasEnglish: false });
+    });
+  });
+
   describe('hasEnglish', () => {
     it('is true only when every translation carries English', async () => {
       entry.findMany.mockResolvedValue([

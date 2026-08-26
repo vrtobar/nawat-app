@@ -12,9 +12,10 @@ import { entryNotFound } from './dictionary-errors';
 import { ADMIN_TRANSLATION_SELECT, toAdminTranslationDetail } from './translation-detail';
 
 // Columns a list row needs. The nested translations are selected for their
-// contentEn alone: translationCount and hasEnglish are computed from this array
-// rather than fetched per row, so the whole page costs one query. Selecting the
-// column (not a _count aggregate) is what makes hasEnglish answerable at all.
+// contentEn alone: translationCount, englishCount and hasEnglish are computed
+// from this array rather than fetched per row, so the whole page costs one
+// query. Selecting the column (not a _count aggregate) is what makes the
+// English counts answerable at all.
 const LIST_SELECT = {
   id: true,
   type: true,
@@ -135,6 +136,9 @@ export class AdminEntriesService {
 function toAdminListItem(entry: ListRow): AdminEntryListItem {
   const translations = entry.translations;
 
+  // Counted once and reused, so englishCount and hasEnglish cannot drift.
+  const englishCount = translations.filter((t) => t.contentEn !== null).length;
+
   return {
     id: entry.id,
     type: entry.type,
@@ -143,10 +147,11 @@ function toAdminListItem(entry: ListRow): AdminEntryListItem {
     imageUrl: entry.imageUrl,
     isPublished: entry.isPublished,
     translationCount: translations.length,
+    englishCount,
     // EVERY translation, and false when there are none — an entry with nothing
     // in it is not "complete in English". `.every` on an empty array is true,
-    // which is the trap this guards.
-    hasEnglish: translations.length > 0 && translations.every((t) => t.contentEn !== null),
+    // which is the trap this guards; comparing counts avoids it by construction.
+    hasEnglish: translations.length > 0 && englishCount === translations.length,
     creator: entry.creator,
     updater: entry.updater,
     createdAt: entry.createdAt.toISOString(),
