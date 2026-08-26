@@ -155,8 +155,27 @@ export const CreateEntrySchema = z.object({
   imageUrl: z.url().optional(),
 });
 
-// PATCH — all fields optional
-export const UpdateEntrySchema = CreateEntrySchema.partial();
+// PATCH — every field optional, and imageUrl additionally NULLABLE so it can
+// be removed. See UpdateTranslationSchema for the full reasoning: an absent key
+// means leave alone and an explicit null means clear (RFC 7396), because
+// `undefined` does not survive JSON.stringify and so cannot express the
+// difference on the wire.
+//
+// `nawatContent` and `type` are not nullable. An entry with no headword is not
+// an entry, and `type` has a default rather than an empty state — both can be
+// changed, neither can be emptied.
+//
+// `type` IS UNWRAPPED FROM ITS DEFAULT, and that is a bug fix rather than
+// tidying. `.partial()` makes a field optional but does not remove a
+// `.default()` underneath it, so the previous `CreateEntrySchema.partial()`
+// resolved a missing `type` to 'WORD' and handed it to the service's spread —
+// meaning any partial update, a rename included, silently rewrote an
+// EXPRESSION or a PHRASE into a WORD. Unwrapping leaves an absent `type`
+// absent. The default still applies where it belongs, on create.
+export const UpdateEntrySchema = CreateEntrySchema.extend({
+  type: CreateEntrySchema.shape.type.unwrap(),
+  imageUrl: CreateEntrySchema.shape.imageUrl.unwrap().nullable(),
+}).partial();
 
 // POST /entries/full — an entry and its first translations in one atomic
 // request. At least one translation: a full create with none is just POST
