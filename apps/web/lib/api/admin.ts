@@ -1,4 +1,14 @@
-import { AdminEntryListItemSchema, type AdminEntryStatus, UserProfileSchema } from '@nahuat/shared';
+import {
+  AdminEntryDetailSchema,
+  AdminEntryListItemSchema,
+  type AdminEntryStatus,
+  type CreateFullEntry,
+  type CreateTranslation,
+  DictionaryEntryDetailSchema,
+  type UpdateEntry,
+  type UpdateTranslation,
+  UserProfileSchema,
+} from '@nahuat/shared';
 
 import { authedItem, authedPage, mutate } from './client';
 
@@ -30,4 +40,72 @@ export function listAdminEntries(params: { status?: AdminEntryStatus; page?: num
 // revalidates the list rather than reconciling one row into it.
 export function publishEntry(id: string) {
   return mutate(`/entries/${encodeURIComponent(id)}/publish`, { method: 'PATCH' });
+}
+
+// GET /admin/entries/:id — the entry behind the editor, CONTRIBUTOR+.
+//
+// Content comes back UNRESOLVED: contentEs and contentEn side by side, under
+// the same field names CreateTranslationSchema uses. That is what lets the form
+// PATCH back exactly what it received with no mapping layer in between, and it
+// is why this endpoint exists rather than the public detail being reused.
+//
+// A row belonging to another author 404s rather than 403s — the API refuses to
+// be an existence oracle — so the caller maps ENTRY_NOT_FOUND to notFound()
+// and cannot distinguish the two cases. That is deliberate.
+export function getAdminEntry(id: string) {
+  return authedItem(`/admin/entries/${encodeURIComponent(id)}`, AdminEntryDetailSchema);
+}
+
+// POST /entries/full — a new entry and all its translations in one transaction.
+//
+// Used rather than POST /entries because an entry with no translations renders
+// nowhere: the public reads filter out rows with nothing to show, so a bare
+// entry would be created and then be invisible until a second request. The
+// schema requires at least one translation for the same reason.
+//
+// THE RESPONSE IS NOT THE NEW STATE. It is resolved to the caller's locale
+// (@ContentLocale), and the write projection drops translations lacking content
+// in that locale — so creating a Spanish-only entry as a contributor whose
+// locale is English returns an empty translations array. Only `id` is read from
+// it here, which no resolution affects.
+export function createFullEntry(body: CreateFullEntry) {
+  return mutate('/entries/full', {
+    method: 'POST',
+    body,
+    schema: DictionaryEntryDetailSchema,
+  });
+}
+
+// PATCH /entries/:id — the headword, type and image. Not the translations:
+// there is no whole-entry update, which is why the editor saves per section.
+// The response is discarded and the page revalidated instead, for the
+// resolution reason described on createFullEntry.
+export function updateEntry(id: string, body: UpdateEntry) {
+  return mutate(`/entries/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+}
+
+// POST /entries/:entryId/translations — adds a dialect to an existing entry.
+// dialectCode lives in the body and is fixed at creation; a dialect the entry
+// already carries collides on the unique constraint, so the caller offers only
+// the ones it does not have yet.
+export function createTranslation(entryId: string, body: CreateTranslation) {
+  return mutate(`/entries/${encodeURIComponent(entryId)}/translations`, {
+    method: 'POST',
+    body,
+  });
+}
+
+// PATCH /translations/:id — one translation. dialectCode is absent from
+// UpdateTranslationSchema because a dialect is immutable after creation: the
+// editor renders that select disabled rather than sending a value the API
+// would ignore.
+export function updateTranslation(id: string, body: UpdateTranslation) {
+  return mutate(`/translations/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+}
+
+// DELETE /translations/:id — ADMIN. Granular on purpose: publishing is
+// entry-level, but removing one wrong translation without touching the rest is
+// a real need.
+export function deleteTranslation(id: string) {
+  return mutate(`/translations/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
