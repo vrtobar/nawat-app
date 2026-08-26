@@ -40,10 +40,53 @@ export function TranslationCard({
   // first and be refused as a conflict with itself.
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(translation.updatedAt);
   const [conflict, setConflict] = useState(false);
+
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+
+  // ADOPTING A ROW THAT CHANGED UNDER US IS ALWAYS THE AUTHOR'S CHOICE.
+  //
+  // It cannot be done on a prop change alone, and the reason is not obvious: a
+  // SERVER ACTION RE-RENDERS THE CURRENT ROUTE AS PART OF ITS RESPONSE, failed
+  // ones included. So the very request that returns 409 also delivers the other
+  // author's newer row — and a card that reset itself whenever the prop moved
+  // would wipe the text of the person it had just told to copy it, and hide the
+  // message saying so. That was a real bug, briefly.
+  //
+  // So the reset runs only when Reload was clicked. It adopts what is in hand
+  // immediately, because the conflicting write usually arrived with the 409,
+  // and also takes the next differing row if the refresh turns up something
+  // newer still.
+  const adopt = (t: AdminTranslationDetail) => {
+    setDraft(draftFrom(t));
+    setExpectedUpdatedAt(t.updatedAt);
+    setSeenUpdatedAt(t.updatedAt);
+    setConflict(false);
+    setError(null);
+    setSaved(false);
+  };
+
+  // Tracked only so a moved row is noticed once, never acted on by itself. The
+  // row moving means someone else wrote while this author has text in the
+  // fields; the banner is already saying so, and they decide what happens next.
+  const [seenUpdatedAt, setSeenUpdatedAt] = useState(translation.updatedAt);
+  if (translation.updatedAt !== seenUpdatedAt) setSeenUpdatedAt(translation.updatedAt);
+
+  // Adopts the row in hand, which by this point is almost always the newer one
+  // — the failed save's own response carried it. The refresh then pulls
+  // anything newer still.
+  //
+  // Nothing arms a future adoption. An earlier version kept a flag set after
+  // the refresh, which meant a LATER save by someone else would silently
+  // replace whatever this author had typed since — the same data loss, delayed.
+  // If the refresh does turn up a newer row, the cost is one more 409 on the
+  // next save, which is a repeat of a message rather than lost work.
+  const reload = () => {
+    adopt(translation);
+    router.refresh();
+  };
 
   const change = (next: TranslationDraft) => {
     setDraft(next);
@@ -165,7 +208,7 @@ export function TranslationCard({
           <button
             type="button"
             disabled={pending}
-            onClick={() => router.refresh()}
+            onClick={reload}
             className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 font-medium hover:bg-amber-100 disabled:opacity-50"
           >
             Reload this entry
