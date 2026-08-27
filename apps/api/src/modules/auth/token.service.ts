@@ -10,12 +10,12 @@ import type { Env } from '../../config/env.validation';
 // THIS PROJECT'S OWN ACCESS TOKENS — signing and verification. See
 // docs/adr/0018.
 //
-// ONE LIBRARY SIGNS AND VERIFIES, and that is the point of doing it here
-// rather than leaving verification to passport-jwt's jsonwebtoken. The
-// algorithm pin below is the most security-critical line in this file; split
-// across two libraries it would exist twice, in two syntaxes, and the second
-// copy is the one that silently drifts. jose also models a key SET addressed
-// by `kid` directly, which is what rotation needs.
+// ONE LIBRARY SIGNS AND VERIFIES. The alternative considered was leaving
+// verification to passport-jwt's jsonwebtoken, which put the algorithm pin
+// below — the most security-critical line in this file — in two places, in two
+// syntaxes, where the second copy is the one that silently drifts. passport was
+// removed instead. jose also models a key SET addressed by `kid` directly,
+// which is what rotation needs.
 //
 // ⚠️ jose v6 IS ESM-ONLY AND THIS PACKAGE IS CommonJS. That combination works
 // here, and is not an oversight to be "fixed" by pinning back to jose v5: the

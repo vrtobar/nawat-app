@@ -1,11 +1,12 @@
-import type { UserProfile } from '@nahuat/shared';
-import { Controller, Post, Req, UnauthorizedException } from '@nestjs/common';
-import type { Request } from 'express';
-import { ExtractJwt } from 'passport-jwt';
+import { type SessionResponse, type StartSession, StartSessionSchema } from '@nahuat/shared';
+import { Body, Controller, Post } from '@nestjs/common';
 
-import { AllowMissingAccount } from '../../common/decorators/allow-missing-account.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthService } from './auth.service';
+import { GoogleIdentityService } from './google-identity.service';
+import { RefreshTokenService } from './refresh-token.service';
+import { TokenService } from './token.service';
 
 // THIS IS NOT `POST /auth/role` RETURNING. That endpoint was deleted on
 // 2026-08-24 and should stay deleted; every objection in docs/adr/0013 is about
@@ -13,52 +14,56 @@ import { AuthService } from './auth.service';
 //
 //   /auth/role                      /auth/session
 //   called by Auth0's servers       called by this project's web app
-//   before any token existed        after authentication, by the token holder
-//   authenticated by a shared       authenticated by the caller's own JWT,
-//     secret in a header              through the global guard
+//   authenticated by a shared       authenticated by an assertion Google
+//     secret in a header              signed for this application
 //   lived in a dashboard file       ships in this repository
 //   denied login on any failure     denies login only when there is genuinely
 //                                     no account to serve
-//
-// What it restores is the thing the Action was actually right about: an
-// account exists because someone logged in, at the moment they logged in.
-// Between the Action's deletion and this, accounts were created lazily by
-// JwtStrategy on the first authenticated request, which was residue from that
-// reversal rather than a decision — ADR 13 never argued for it. That left
-// "logged in" and "has an account" as separable states, and let a hard-deleted
-// user silently reappear.
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly googleIdentity: GoogleIdentityService,
+    private readonly tokenService: TokenService,
+    private readonly refreshTokens: RefreshTokenService,
+  ) {}
 
-  // Idempotent. The web callback calls it once per login; calling it again
-  // re-syncs the profile and moves lastLoginAt, which is harmless.
+  // Establishes a session from a completed Google sign-in.
   //
-  // Returns the same shape as GET /users/me so the caller needs no second
-  // request to learn who they are, and no second schema to parse it with.
-  @AllowMissingAccount()
+  // ⚠️ @Public() BECAUSE THE CALLER HAS NO TOKEN FROM US YET — this endpoint is
+  // where they get one. That is not an unauthenticated endpoint: it is
+  // authenticated by a different credential, one the global guard cannot check,
+  // so the handler checks it as its first act. Every token endpoint in OAuth
+  // has this shape for the same reason.
+  //
+  // It replaces @AllowMissingAccount(), which existed to let a verified caller
+  // with no account reach this route while the credential was an Auth0 access
+  // token the guard could verify. There is no such token any more, so the
+  // decorator has no consumer and was deleted with the strategy.
+  //
+  // Idempotent. The web callback calls it once per login; calling it again
+  // re-syncs the profile, moves lastLoginAt, and opens a NEW session — which is
+  // correct, since each sign-in is one.
+  @Public()
   @Post('session')
   async startSession(
-    @Req() req: Request,
-    @CurrentUser() user: { sub: string },
-  ): Promise<UserProfile> {
-    // The subject comes from the verified token via the guard, never from the
-    // body — a caller must not be able to name whose account to create.
-    //
-    // The raw token is read back off the request because /userinfo takes it as
-    // the credential. Same extractor the strategy was configured with, so this
-    // is the token that was actually verified rather than a re-derivation.
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-    if (token === null) {
-      // Unreachable — the guard extracted a token to get here — but typed as
-      // nullable, and an empty string would send a credential-less request to
-      // Auth0.
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Authentication required',
-      });
-    }
+    @Body(new ZodValidationPipe(StartSessionSchema)) body: StartSession,
+  ): Promise<SessionResponse> {
+    // Verification first, and nothing before it. Everything below trusts
+    // `identity` completely, so it must be the product of Google's signature
+    // rather than of the request body.
+    const identity = await this.googleIdentity.verify(body.idToken);
 
-    return this.authService.startSession(user.sub, token);
+    // Creates the account if this subject has never been seen, refuses a
+    // deactivated one, and re-syncs the profile otherwise.
+    const user = await this.authService.startSession(identity);
+
+    // Deliberately after startSession. Minting first would hand out a working
+    // credential and then refuse the login for a deactivated account, leaving
+    // a token in the caller's hands that names a user they cannot act as.
+    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(identity.sub);
+    const refreshToken = await this.refreshTokens.issue(user.id);
+
+    return { user, tokens: { accessToken, refreshToken, expiresIn } };
   }
 }

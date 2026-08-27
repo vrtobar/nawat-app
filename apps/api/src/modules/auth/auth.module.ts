@@ -1,29 +1,28 @@
 import { Module } from '@nestjs/common';
-import { PassportModule } from '@nestjs/passport';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleIdentityService } from './google-identity.service';
-import { JwtStrategy } from './jwt.strategy';
 import { RefreshTokenService } from './refresh-token.service';
 import { TokenService } from './token.service';
 
-// Registers the JWT strategy so the globally-bound JwtAuthGuard can resolve
-// it. No session support: the API is stateless and the Next.js app holds the
-// session cookie, so Passport's session serialisation would be dead weight.
+// NO PassportModule, and no strategy. This API verifies its own access tokens
+// with jose, in TokenService, and JwtAuthGuard calls it directly.
 //
-// One controller, POST /auth/session, called by this project's own web app
-// after a login completes. See auth.controller.ts for why that is not the
-// deleted POST /auth/role returning under a new name.
+// What passport provided was a strategy/guard split forced by one of its own
+// limitations: a strategy cannot see which route it is authenticating, which is
+// why verification and identity resolution had to live in different classes.
+// Without it the guard does both and can see the route while doing so — so the
+// separation that split protected is no longer something to protect.
+//
+// TokenService imports the signing key set in onModuleInit, so a malformed
+// JWT_SIGNING_KEYS fails the boot rather than the first login — the same
+// contract env.validation.ts gives every other setting.
 @Module({
-  imports: [PassportModule.register({ defaultStrategy: 'jwt', session: false })],
   controllers: [AuthController],
-  // TokenService imports the signing key set in onModuleInit, so a malformed
-  // JWT_SIGNING_KEYS fails the boot rather than the first login — the same
-  // contract env.validation.ts gives every other setting.
-  providers: [JwtStrategy, AuthService, TokenService, RefreshTokenService, GoogleIdentityService],
-  // JwtAuthGuard is bound globally in AppModule and resolves identity, so it
-  // needs this service.
+  providers: [AuthService, TokenService, RefreshTokenService, GoogleIdentityService],
+  // JwtAuthGuard is bound globally in AppModule and needs both: TokenService to
+  // verify, AuthService to resolve.
   exports: [AuthService, TokenService, RefreshTokenService, GoogleIdentityService],
 })
 export class AuthModule {}
