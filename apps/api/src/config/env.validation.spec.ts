@@ -5,12 +5,6 @@ import { validateEnv } from './env.validation';
 // Everything required unconditionally. Individual tests add the database and
 // Redis halves, which the superRefine accepts in either of two shapes.
 const baseEnv = {
-  AUTH0_DOMAIN: 'nahuat-platform-staging.us.auth0.com',
-  AUTH0_AUDIENCE: 'https://api.nahuat.com',
-  AUTH0_CLIENT_ID: 'client-id',
-  AUTH0_CLIENT_SECRET: 'client-secret',
-  AUTH0_MGMT_CLIENT_ID: 'mgmt-client-id',
-  AUTH0_MGMT_CLIENT_SECRET: 'mgmt-client-secret',
   // Not a real key — validateEnv only checks that the value is a non-empty
   // string. TokenService is what rejects one that does not decode to a usable
   // private JWK Set, and it does so at boot; see token.service.spec.ts.
