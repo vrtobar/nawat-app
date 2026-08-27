@@ -47,23 +47,45 @@ with `USER_DEACTIVATED`.
 
 ### Getting a token into `{{token}}`
 
-**Session → "Get access token → saves {{token}}"** does it for you: it calls
-`{{webBaseUrl}}/auth/access-token` and a post-response script writes the result
-into the active environment, so every authed request picks it up. Re-run it when
-the token expires (an hour) rather than minting anything by hand.
+**The API issues tokens now.** It is its own authorization server (ADR 18),
+where it previously only verified what Auth0 minted — so there is no longer a
+route on the web app to fetch one from, and no session cookie to copy into
+Postman.
 
-That endpoint is on the **web app**, not the API — the API only ever verifies
-tokens — and it authorises by **session cookie**. So Postman needs the cookie the
-browser holds:
+Locally, mint one directly:
 
-1. Sign in at `{{webBaseUrl}}` in the browser.
-2. Copy the session cookie into Postman's **Cookies** manager (under the Send
-   button) for that domain.
-3. Run the request. The console reports the expiry it saved.
+```bash
+npm run db:seed:dev                                      # the three dev users
+npm run --silent auth:token --workspace=api -- admin     # or contributor | user
+```
 
-If you would rather not manage cookies, open `{{webBaseUrl}}/auth/access-token`
-in the browser and paste the `token` value into the environment by hand — the
-same value, one more step.
+Paste it into `{{token}}`. The argument picks which seeded row the token names,
+and that row must exist, so run the seed first. Tokens last 12 hours.
+
+⚠️ **It is not a test double.** It signs with the same key the API verifies
+with, so it is indistinguishable from a token issued by a real sign-in. The only
+thing making it safe is that `JWT_SIGNING_KEYS` is per environment — the local
+key signs nothing staging or production will accept.
+
+Against **staging** that shortcut is unavailable, so you need a real sign-in:
+sign in at `{{webBaseUrl}}`, take the `id_token` from the callback, put it in
+`{{googleIdToken}}` and run **Session → Start session**. That writes both
+`{{token}}` and `{{refreshToken}}`.
+
+**Why local and staging differ on secrecy.** In the Local environment `token`
+and `refreshToken` are ordinary variables — the local token is signed by a key
+that exists only on your machine, with `iss`/`aud` of `localhost:3001`, so it
+authenticates against nothing else and hiding it protects nothing. In Staging
+they are marked secret, because a staging token is a real credential and this
+directory is committed to a public repository: the type is what keeps the value
+out of the file when the environment is exported. Never paste a deployed
+environment's token into the Local one to save a step.
+
+**Refresh** then rotates the pair without another sign-in. It is single-use:
+the token you send dies as this returns, and sending the same one twice is
+treated as theft and revokes the entire session. That is worth doing once
+deliberately — run Refresh twice in a row and watch every authed request start
+failing.
 
 **A token does not carry your rank.** It carries only `sub` — which is
 `User.id`, this API's own identifier — and the API reads role from that row on
