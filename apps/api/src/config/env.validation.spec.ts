@@ -11,6 +11,12 @@ const baseEnv = {
   AUTH0_CLIENT_SECRET: 'client-secret',
   AUTH0_MGMT_CLIENT_ID: 'mgmt-client-id',
   AUTH0_MGMT_CLIENT_SECRET: 'mgmt-client-secret',
+  // Not a real key — validateEnv only checks that the value is a non-empty
+  // string. TokenService is what rejects one that does not decode to a usable
+  // private JWK Set, and it does so at boot; see token.service.spec.ts.
+  JWT_SIGNING_KEYS: 'base64-encoded-jwk-set',
+  JWT_ISSUER: 'https://api.nahuat.com',
+  JWT_AUDIENCE: 'https://api.nahuat.com',
   S3_BUCKET: 'nahuat-assets',
   CDN_URL: 'https://cdn.nahuat.com',
 };
@@ -78,5 +84,26 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...baseEnv, ...localDb, ...localRedis, CDN_URL: 'cdn.nahuat.com' }),
     ).toThrow('Environment validation failed');
+  });
+
+  // The signing key has no default and must not acquire one — see the schema.
+  // This test is what fails if someone adds `.optional()` or a fallback to make
+  // a local run boot, which is exactly the change that would let two
+  // environments mint interchangeable tokens.
+  it.each<keyof typeof baseEnv>(['JWT_SIGNING_KEYS', 'JWT_ISSUER', 'JWT_AUDIENCE'])(
+    'refuses to boot without %s',
+    (key) => {
+      const { [key]: _omitted, ...withoutKey } = baseEnv;
+
+      expect(() => validateEnv({ ...withoutKey, ...localDb, ...localRedis })).toThrow(
+        'Environment validation failed',
+      );
+    },
+  );
+
+  it('defaults the access token lifetime to one hour', () => {
+    const env = validateEnv({ ...baseEnv, ...localDb, ...localRedis });
+
+    expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(3600);
   });
 });

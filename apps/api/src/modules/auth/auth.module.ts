@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { TokenService } from './token.service';
 
 // Registers the JWT strategy so the globally-bound JwtAuthGuard can resolve
 // it. No session support: the API is stateless and the Next.js app holds the
@@ -15,9 +16,12 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [PassportModule.register({ defaultStrategy: 'jwt', session: false })],
   controllers: [AuthController],
-  providers: [JwtStrategy, AuthService],
+  // TokenService imports the signing key set in onModuleInit, so a malformed
+  // JWT_SIGNING_KEYS fails the boot rather than the first login — the same
+  // contract env.validation.ts gives every other setting.
+  providers: [JwtStrategy, AuthService, TokenService],
   // JwtAuthGuard is bound globally in AppModule and resolves identity, so it
   // needs this service.
-  exports: [AuthService],
+  exports: [AuthService, TokenService],
 })
 export class AuthModule {}

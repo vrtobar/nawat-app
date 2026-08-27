@@ -53,6 +53,33 @@ const EnvSchema = z
     AUTH0_MGMT_CLIENT_ID: z.string().min(1),
     AUTH0_MGMT_CLIENT_SECRET: z.string().min(1),
 
+    // In-house access tokens (docs/adr/0018). This API is the authorization
+    // server: it signs the tokens it verifies, and the private key never
+    // leaves this process.
+    //
+    // A base64-encoded JWK Set of PRIVATE RSA keys. The first key signs and
+    // every key verifies, which is what makes rotation a one-variable change —
+    // see token.service.ts. `npm run auth:keygen` produces the value.
+    //
+    // REQUIRED, with no development default, and that is the point: a signing
+    // key that falls back to something when unset is a signing key an
+    // environment can accidentally share, and every token it minted would
+    // verify everywhere. The Auth0-era AUTH0_ISSUER_URL escape hatch above
+    // exists because pointing verification at a mock issuer adds no branch to
+    // the running service; a defaulted key would.
+    JWT_SIGNING_KEYS: z.string().min(1),
+
+    // `iss` and `aud` on every token this API mints, and the values it demands
+    // when verifying one. Both are checked: without `aud`, a token minted by
+    // this issuer for some other consumer would be accepted here.
+    JWT_ISSUER: z.url(),
+    JWT_AUDIENCE: z.string().min(1),
+
+    // ~1 hour, per docs/adr/0018. Short because the refresh token carries the
+    // session — see the RefreshToken store — so a stolen access token expires
+    // on its own rather than lasting the length of a login.
+    ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+
     // Uploads / CDN
     S3_BUCKET: z.string().min(1),
     CDN_URL: z.url(),
