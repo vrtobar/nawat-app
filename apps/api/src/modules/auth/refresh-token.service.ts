@@ -72,7 +72,7 @@ export class RefreshTokenService {
   // Every refusal below revokes the whole family rather than the single row.
   // An expired or abandoned session has no reason to keep its other tokens
   // alive, and a reused one must not.
-  async rotate(presented: string): Promise<{ userId: string; refreshToken: string }> {
+  async rotate(presented: string): Promise<{ subject: string; refreshToken: string }> {
     const tokenHash = RefreshTokenService.hash(presented);
 
     const existing = await prisma.refreshToken.findUnique({
@@ -85,11 +85,13 @@ export class RefreshTokenService {
         idleExpiresAt: true,
         usedAt: true,
         revokedAt: true,
-        // Free here — the row is being read anyway — and it closes a gap that
-        // would otherwise let a deactivated account refresh indefinitely. Its
-        // access tokens are refused on every request, so nothing is granted;
-        // but the session would never end and its rows would accumulate.
-        user: { select: { isActive: true, deletedAt: true } },
+        // Free here — the row is being read anyway. `auth0Id` is the subject
+        // the replacement access token is minted for, and the two flags close a
+        // gap that would otherwise let a deactivated account refresh
+        // indefinitely: its access tokens are refused on every request, so
+        // nothing is granted, but the session would never end and its rows
+        // would accumulate.
+        user: { select: { auth0Id: true, isActive: true, deletedAt: true } },
       },
     });
 
@@ -182,7 +184,7 @@ export class RefreshTokenService {
       throw this.refuse();
     }
 
-    return { userId: existing.userId, refreshToken: token };
+    return { subject: existing.user.auth0Id, refreshToken: token };
   }
 
   // Ends the session a token belongs to. Used by logout.
