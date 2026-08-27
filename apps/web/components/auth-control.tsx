@@ -1,6 +1,6 @@
 import type { Locale } from '@nahuat/shared';
 
-import { auth0 } from '../lib/auth0';
+import { auth } from '../auth';
 
 // Four strings, inlined. The app has no message catalogue yet — the landing
 // page's copy is hardcoded too — and introducing one for a login link would be
@@ -26,58 +26,49 @@ export async function AuthControl({
   returnTo,
 }: {
   locale: Locale;
-  // Where Auth0 sends the browser back to. Defaults to the locale's home page
+  // Where the sign-in sends the browser back to. Defaults to the locale's home page
   // rather than the current URL: a server component cannot see the pathname,
   // and threading it through would mean a middleware header on every request
   // for a nicety. Pages that care can pass their own.
   returnTo?: string;
 }) {
-  const session = await auth0.getSession();
+  const session = await auth();
   const copy = COPY[locale];
   const destination = returnTo ?? `/${locale}`;
   const target = encodeURIComponent(destination);
 
   if (!session) {
     return (
-      <a href={`/auth/login?returnTo=${target}`} className="text-sm font-medium hover:underline">
+      <a
+        href={`/auth/signin?callbackUrl=${target}`}
+        className="text-sm font-medium hover:underline"
+      >
         {copy.login}
       </a>
     );
   }
 
-  // `name` is optional on the ID token — email OTP supplies none — and email is
-  // optional in the SDK's type even though every connection in use returns one.
-  // Falling through to `sub` keeps this from rendering an empty string, which
-  // would look like a broken header rather than a signed-in one.
-  const label = session.user.name ?? session.user.email ?? session.user.sub;
+  // The profile the API returned, not Google's. `name` is optional because
+  // Google does not always supply one, and the API falls back to the email when
+  // writing the row — so this only falls through if the session predates a
+  // profile being stored at all.
+  const label = session.profile?.name ?? session.profile?.email ?? '';
 
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="text-gray-600">{label}</span>
       {/*
-        No returnTo, unlike the login link above, and the asymmetry is the point.
+        A callbackUrl IS passed now, where the Auth0 version could not.
 
-        Login's returnTo is resolved inside this app — onCallback in lib/auth0.ts
-        does `new URL(ctx.returnTo, base)`, so a relative path is fine. Logout's
-        is handed to Auth0 verbatim as post_logout_redirect_uri, and Auth0
-        rejects anything that is not an absolute URL. Passing `/es` here produced
-        an invalid_request error page instead of a logout.
-
-        Omitting it makes the SDK fall back to APP_BASE_URL. Each environment's
-        base URL has to be listed in the tenant's Allowed Logout URLs, which is
-        one entry per environment rather than one per locale — verified against
-        staging, where the round trip completes and lands on /es.
-
-        The locale survives without being passed: logout clears the session
-        cookie, not LOCALE_COOKIE, and proxy.ts reads that before Accept-Language
-        when it redirects `/` to a locale.
+        Auth0 handed logout's destination to the tenant verbatim as
+        post_logout_redirect_uri, which had to be absolute and had to appear in
+        the tenant's Allowed Logout URLs — a dashboard list this repository
+        could not see, and the cause of a failed logout on 2026-08-25. Signing
+        out is entirely local now: there is no third party to redirect through
+        and no list to be absent from, so a relative path back to the current
+        locale simply works.
       */}
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages --
-          /auth/* is a middleware route, not a page; <Link> would try a
-          client-side transition to a route that does not exist. Same
-          exemption as app/admin/layout.tsx. The rule only starts firing
-          now because the href became a static string. */}
-      <a href="/auth/logout" className="font-medium hover:underline">
+      <a href={`/auth/signout?callbackUrl=${target}`} className="font-medium hover:underline">
         {copy.logout}
       </a>
     </div>

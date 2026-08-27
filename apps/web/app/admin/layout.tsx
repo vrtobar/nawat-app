@@ -4,9 +4,9 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+import { auth } from '../../auth';
 import { getMe } from '../../lib/api/admin';
 import { ApiError } from '../../lib/api/client';
-import { auth0 } from '../../lib/auth0';
 
 // Not indexed, and not a mistake to state twice: the panel is behind a session
 // anyway, but a crawler that somehow reaches it should not retain the URL.
@@ -26,11 +26,11 @@ export const metadata: Metadata = {
 // reaching these pages; what the gate buys is a redirect to login instead of a
 // wall of 401s, and an honest "not permitted" instead of an empty table.
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth0.getSession();
+  const session = await auth();
 
   // No session at all — send them to log in and come back here.
   if (!session) {
-    redirect(`/auth/login?returnTo=${encodeURIComponent('/admin/entries')}`);
+    redirect(`/auth/signin?callbackUrl=${encodeURIComponent('/admin/entries')}`);
   }
 
   // One request to learn the role, from the same row the API authorizes

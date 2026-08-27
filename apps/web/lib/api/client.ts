@@ -5,8 +5,11 @@ import {
   type ApiSuccess,
   ApiSuccessSchema,
   type PaginationMeta,
-  type UserProfile,
-  UserProfileSchema,
+  type RefreshResponse,
+  RefreshResponseSchema,
+  type SessionResponse,
+  SessionResponseSchema,
+  type TokenPair,
 } from '@nahuat/shared';
 import { z } from 'zod';
 
@@ -127,14 +130,47 @@ export async function fetchPage<T extends z.ZodType>(
 // first one. The API's POST /auth/session; see its controller for why that is
 // not the deleted POST /auth/role.
 //
-// THE ONLY CALL THAT TAKES AN EXPLICIT TOKEN. Every other authed helper reads
-// it with getApiToken(), which reads the session — and this runs inside
-// onCallback, before the session exists. The token is the one the SDK has just
-// exchanged the authorization code for.
-export async function startSession(token: string): Promise<UserProfile> {
-  const body = await requestJson('/auth/session', { method: 'POST', token });
-  const parsed = ApiSuccessSchema(UserProfileSchema).parse(body) as ApiSuccess<UserProfile>;
+// THE CREDENTIAL IS IN THE BODY, NOT A BEARER HEADER, and it is Google's ID
+// token rather than anything this system issued. That is the whole shape of
+// the exchange: the caller has no token from the API yet, which is what this
+// endpoint exists to fix. Everything below it reads a token with
+// getApiToken(); these two cannot, because they run before or after there is
+// a session to read.
+export async function startSession(idToken: string): Promise<SessionResponse> {
+  const body = await requestJson('/auth/session', {
+    method: 'POST',
+    body: { idToken },
+  });
+  const parsed = ApiSuccessSchema(SessionResponseSchema).parse(body) as ApiSuccess<SessionResponse>;
   return parsed.data;
+}
+
+// Exchanges a refresh token for a new pair.
+//
+// SINGLE USE. The token sent here is dead when this returns, and presenting it
+// again is treated as theft and revokes the whole session — so the caller must
+// store what comes back, not keep what it sent.
+export async function refreshSession(refreshToken: string): Promise<TokenPair> {
+  const body = await requestJson('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken },
+  });
+  const parsed = ApiSuccessSchema(RefreshResponseSchema).parse(body) as ApiSuccess<RefreshResponse>;
+  return parsed.data.tokens;
+}
+
+// Ends the session a refresh token belongs to, server-side.
+//
+// Failure is swallowed on purpose. This runs while signing out, and the local
+// session is being destroyed either way — reporting an error would leave the
+// user on a page telling them logout failed when, from their side, it did not.
+// The token expires on its own if the call never lands.
+export async function endSession(refreshToken: string): Promise<void> {
+  try {
+    await requestJson('/auth/logout', { method: 'POST', body: { refreshToken } });
+  } catch (error) {
+    console.error(`[auth] logout failed: ${String(error)}`);
+  }
 }
 
 // A single authenticated item.
