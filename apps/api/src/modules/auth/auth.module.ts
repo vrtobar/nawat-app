@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { RefreshTokenService } from './refresh-token.service';
 import { TokenService } from './token.service';
 
 // Registers the JWT strategy so the globally-bound JwtAuthGuard can resolve
@@ -19,9 +20,9 @@ import { TokenService } from './token.service';
   // TokenService imports the signing key set in onModuleInit, so a malformed
   // JWT_SIGNING_KEYS fails the boot rather than the first login — the same
   // contract env.validation.ts gives every other setting.
-  providers: [JwtStrategy, AuthService, TokenService],
+  providers: [JwtStrategy, AuthService, TokenService, RefreshTokenService],
   // JwtAuthGuard is bound globally in AppModule and resolves identity, so it
   // needs this service.
-  exports: [AuthService, TokenService],
+  exports: [AuthService, TokenService, RefreshTokenService],
 })
 export class AuthModule {}

@@ -101,9 +101,11 @@ describe('validateEnv', () => {
     },
   );
 
-  it('defaults the access token lifetime to one hour', () => {
+  it('defaults the token lifetimes to one hour, 30 days and 14 days idle', () => {
     const env = validateEnv({ ...baseEnv, ...localDb, ...localRedis });
 
     expect(env.ACCESS_TOKEN_TTL_SECONDS).toBe(3600);
+    expect(env.REFRESH_TOKEN_ABSOLUTE_TTL_DAYS).toBe(30);
+    expect(env.REFRESH_TOKEN_IDLE_TTL_DAYS).toBe(14);
   });
 });
