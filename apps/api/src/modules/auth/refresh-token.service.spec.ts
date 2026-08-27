@@ -47,7 +47,7 @@ const stored = (overrides: Record<string, unknown> = {}) => ({
   idleExpiresAt: future(10),
   usedAt: null,
   revokedAt: null,
-  user: { auth0Id: 'google|1', isActive: true, deletedAt: null },
+  user: { isActive: true, deletedAt: null },
   ...overrides,
 });
 
@@ -120,11 +120,11 @@ describe('RefreshTokenService', () => {
       const familyExpiresAt = future(20);
       refreshToken.findUnique.mockResolvedValue(stored({ familyExpiresAt }) as never);
 
-      const { subject, refreshToken: next } = await service.rotate('presented');
+      const { userId, refreshToken: next } = await service.rotate('presented');
 
-      // The subject the replacement access token will be minted for, read from
-      // the joined user row rather than from anything the caller sent.
-      expect(subject).toBe('google|1');
+      // Whose session this is, for minting the replacement access token — read
+      // from the stored row, never from anything the caller sent.
+      expect(userId).toBe('usr_1');
 
       const queued = transaction.mock.calls[0]![0] as unknown as unknown[];
       const createArg = refreshToken.create.mock.calls[0]![0] as {
@@ -218,8 +218,8 @@ describe('RefreshTokenService', () => {
     });
 
     it.each([
-      ['deactivated', { auth0Id: 'google|1', isActive: false, deletedAt: null }],
-      ['soft-deleted', { auth0Id: 'google|1', isActive: true, deletedAt: new Date() }],
+      ['deactivated', { isActive: false, deletedAt: null }],
+      ['soft-deleted', { isActive: true, deletedAt: new Date() }],
     ])('refuses and ends the session for a %s account', async (_label, user) => {
       refreshToken.findUnique.mockResolvedValue(stored({ user }) as never);
 

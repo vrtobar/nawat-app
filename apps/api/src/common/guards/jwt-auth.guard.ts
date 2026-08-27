@@ -66,7 +66,7 @@ export class JwtAuthGuard implements CanActivate {
     // exactly the diagnosis a caller needs: expired means refresh and retry,
     // bad signature means the client is wrong. Nothing in that path touches the
     // database or an external service, so there is no operator detail in it.
-    const { sub } = await this.tokenService.verifyAccessToken(token);
+    const { userId } = await this.tokenService.verifyAccessToken(token);
 
     // THEN IDENTITY, and it is a separate statement because the rules differ.
     // This one reads the database, so an unexpected throw can carry a message
@@ -74,7 +74,7 @@ export class JwtAuthGuard implements CanActivate {
     // client. Only a deliberate refusal this codebase constructed, with a
     // payload it chose, is allowed through.
     try {
-      request.user = await this.authService.resolveIdentity(sub);
+      request.user = await this.authService.resolveIdentity(userId);
     } catch (error) {
       if (error instanceof HttpException) {
         // ACCOUNT_NOT_PROVISIONED (401) and USER_DEACTIVATED (403). The status

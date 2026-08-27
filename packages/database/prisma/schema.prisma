@@ -50,8 +50,26 @@ model Level {
 // =============================================================================
 
 model User {
-  id      String @id @default(cuid())
-  auth0Id String @unique @map("auth0_id")
+  id       String   @id @default(cuid())
+  // WHO VOUCHED FOR THIS PERSON, and the identifier they used. Replaced
+  // `auth0Id` when authentication moved in-house (docs/adr/0018).
+  //
+  // TWO COLUMNS RATHER THAN ONE NAMED AFTER THE PROVIDER. A single `googleId`
+  // would be a schema that has to be migrated to state something it could have
+  // stated from the start, and it is already inaccurate: the seeded
+  // development users are not Google subjects. Adding a provider later needs a
+  // value in the enum and a verifier — no migration, and nothing in the token
+  // path changes.
+  //
+  // ⚠️ STILL ONE IDENTITY PER PERSON, and that is the real limit — not the
+  // naming. Two providers for one human cannot be expressed here, so account
+  // LINKING would need an `identities` table keyed the way this pair is, with
+  // a userId. That is deliberately not built: linking means deciding that a
+  // matching email proves the same person, which is an account-takeover
+  // question rather than a schema one, and the current answer is to refuse
+  // (see EMAIL_ALREADY_REGISTERED).
+  provider Provider
+  subject  String
 
   // Set once, at account creation, and never re-synced. It is the unique key,
   // so following a change at the identity provider could collide with another
@@ -121,7 +139,20 @@ model User {
   createdTranslations Translation[] @relation("TranslationCreator")
   updatedTranslations Translation[] @relation("TranslationUpdater")
 
+  // The identity, and the reason `subject` carries no unique constraint of its
+  // own: two providers may legitimately issue the same string, and only the
+  // pair is guaranteed distinct.
+  @@unique([provider, subject])
   @@map("users")
+}
+
+// Who authenticated a user. SEED exists because the development seed writes
+// rows that never sign in — they hold authored content so that a fresh
+// database has something to show, and giving them a real provider's name would
+// be a lie the schema tells about where they came from.
+enum Provider {
+  GOOGLE
+  SEED
 }
 
 // A refresh token, hashed. One row per token; one FAMILY per login session.

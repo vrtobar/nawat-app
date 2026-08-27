@@ -13,7 +13,7 @@ export type Role = z.infer<typeof RoleSchema>;
 // -----------------------------------------------------------------------------
 // USER PROFILE
 // Returned from /users/me.
-// Sensitive fields excluded: auth0Id, deletedAt, updatedAt.
+// Sensitive fields excluded: googleId, deletedAt, updatedAt.
 // username is nullable and stays null: nothing generates it, because nothing
 // displays it. See BACKLOG — user-published flashcard sets or a leaderboard
 // are what would give it a consumer.
@@ -41,15 +41,20 @@ export type UserProfile = z.infer<typeof UserProfileSchema>;
 
 // -----------------------------------------------------------------------------
 // RESOLVED IDENTITY
-// What JwtStrategy.validate() attaches to the request as `user`, and what
-// RolesGuard, @CurrentUser and @ContentLocale read.
+// What JwtAuthGuard attaches to the request as `user`, and what RolesGuard,
+// @CurrentUser and @ContentLocale read.
 //
-// NOT A TOKEN PAYLOAD, despite the name. Only `sub` comes from the access
-// token; role, userId and locale are read from the database on each request.
-// Auth0 stamped them as namespaced custom claims until 2026-08-24 — see
-// docs/adr/0013 for why that was reversed. The shape is unchanged from that
-// era on purpose: every consumer reads the same fields, so the source could
-// move without touching any of them.
+// NOT A TOKEN PAYLOAD, despite the name. Every field is read from the database
+// on each request; the token contributes only the id used to look them up.
+// Auth0 stamped role and userId onto the token as namespaced custom claims
+// until 2026-08-24 — see docs/adr/0013 for why that was reversed.
+//
+// `sub` was dropped in docs/adr/0018 and is not coming back. It held the
+// identity provider's subject, which was a different value from `userId` and
+// so worth carrying separately. The access token's subject is now User.id
+// itself, making the two identical — and a duplicated field is one that will
+// eventually disagree with itself. Nothing outside the auth module ever read
+// it.
 //
 // email and name stay absent. An access token carries only `sub` and the
 // standard registered claims — requiring a profile here rejected every genuine
@@ -64,7 +69,6 @@ export type UserProfile = z.infer<typeof UserProfileSchema>;
 // -----------------------------------------------------------------------------
 
 export const JwtClaimsSchema = z.object({
-  sub: z.string(), // Auth0 user id, e.g. google-oauth2|1038929...
   role: RoleSchema, // User.role
   userId: z.string(), // User.id — the Nawat platform id
   locale: LocaleSchema, // User.locale

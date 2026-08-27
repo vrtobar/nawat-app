@@ -76,7 +76,7 @@ describe('UsersService', () => {
     await expect(getProfile({ lastActiveAt: null })).resolves.toMatchObject({ lastActiveAt: null });
   });
 
-  it('never returns deletedAt, isActive, or auth0Id', async () => {
+  it('never returns deletedAt, isActive, or googleId', async () => {
     // Selected in order to decide, not to disclose. getProfile's strict parse
     // would already reject any of these; the explicit checks name the fields
     // that must never reach a client.
@@ -84,7 +84,7 @@ describe('UsersService', () => {
 
     expect(profile).not.toHaveProperty('deletedAt');
     expect(profile).not.toHaveProperty('isActive');
-    expect(profile).not.toHaveProperty('auth0Id');
+    expect(profile).not.toHaveProperty('googleId');
   });
 
   it('rejects a token whose user row is gone', async () => {

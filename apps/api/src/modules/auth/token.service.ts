@@ -153,18 +153,26 @@ export class TokenService implements OnModuleInit {
     );
   }
 
-  // Mints an access token for a verified subject.
+  // Mints an access token for a user.
   //
-  // `sub` is Google's subject and nothing else rides along. Role, userId and
-  // locale are deliberately NOT claims: they were, under Auth0's Post Login
-  // Action, and docs/adr/0013 records why that was reversed — a role change or
-  // a deactivation could not take effect until the user signed in again. The
-  // API reads all three from its own database on every request, so putting
-  // them here would reintroduce a second, staler copy of the answer.
-  async signAccessToken(sub: string): Promise<{ accessToken: string; expiresIn: number }> {
+  // ⚠️ THE SUBJECT IS User.id, NOT THE IDENTITY PROVIDER'S SUBJECT. RFC 7519
+  // defines `sub` as the principal, locally unique to the ISSUER — and the
+  // issuer is this API, so its own user id is the correct value. Carrying
+  // Google's subject instead would leak an upstream detail into a credential
+  // this system mints, and would stop being unambiguous the moment a second
+  // provider existed, since identity is keyed on (provider, subject) rather
+  // than on the subject alone. This way, adding a provider changes the login
+  // path and nothing about tokens.
+  //
+  // Role and locale are deliberately NOT claims. They were, under Auth0's Post
+  // Login Action, and docs/adr/0013 records why that was reversed — a role
+  // change or a deactivation could not take effect until the user signed in
+  // again. Both are read from the database on every request, so putting them
+  // here would reintroduce a second, staler copy of the answer.
+  async signAccessToken(userId: string): Promise<{ accessToken: string; expiresIn: number }> {
     const accessToken = await new SignJWT({})
       .setProtectedHeader({ alg: 'RS256', kid: this.signingKid })
-      .setSubject(sub)
+      .setSubject(userId)
       .setIssuer(this.issuer)
       .setAudience(this.audience)
       .setIssuedAt()
@@ -181,7 +189,7 @@ export class TokenService implements OnModuleInit {
   // request path still runs the Auth0-era JwtStrategy — but when the guard
   // takes this over there is one implementation of the check, exercised by the
   // tests as a whole rather than as parameters asserted in isolation.
-  async verifyAccessToken(token: string): Promise<{ sub: string }> {
+  async verifyAccessToken(token: string): Promise<{ userId: string }> {
     try {
       const { payload } = await jwtVerify(
         token,
@@ -211,7 +219,7 @@ export class TokenService implements OnModuleInit {
         throw new Error('token has no subject');
       }
 
-      return { sub };
+      return { userId: sub };
     } catch (error) {
       throw new UnauthorizedException({
         code: API_ERROR_CODES.UNAUTHORIZED,

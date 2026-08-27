@@ -70,7 +70,7 @@ export class AuthController {
     // Deliberately after startSession. Minting first would hand out a working
     // credential and then refuse the login for a deactivated account, leaving
     // a token in the caller's hands that names a user they cannot act as.
-    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(identity.sub);
+    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(user.id);
     const refreshToken = await this.refreshTokens.issue(user.id);
 
     return { user, tokens: { accessToken, refreshToken, expiresIn } };
@@ -93,9 +93,9 @@ export class AuthController {
   ): Promise<RefreshResponse> {
     // Single-use. The presented token is spent by this call, the successor is
     // returned below, and presenting the old one again revokes the session.
-    const { subject, refreshToken } = await this.refreshTokens.rotate(body.refreshToken);
+    const { userId, refreshToken } = await this.refreshTokens.rotate(body.refreshToken);
 
-    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(subject);
+    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(userId);
 
     return { tokens: { accessToken, refreshToken, expiresIn } };
   }

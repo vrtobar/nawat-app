@@ -9,7 +9,7 @@ export class UsersService {
   async findProfile(userId: string): Promise<UserProfile> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      // Columns listed explicitly rather than returning the row. auth0Id and
+      // Columns listed explicitly rather than returning the row. googleId and
       // deletedAt are not the client's business, and a select-all would start
       // leaking whatever the next migration adds.
       select: { ...USER_PROFILE_SELECT, deletedAt: true, isActive: true },

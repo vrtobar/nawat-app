@@ -86,12 +86,14 @@ const SeedFileSchema = z.object({
 // real vocabulary is entered later through the API, which is what carries
 // individual authorship.
 //
-// Synthetic and unmistakable on purpose. `seed|` is not an Auth0 connection
-// prefix so it can never collide with a real `sub`, and `.invalid` is
-// reserved by RFC 2606 so the address can never be delivered to. Created only
-// on the dev path, so production never grows this row.
+// Synthetic and unmistakable on purpose. The SEED provider cannot collide with
+// a real subject no matter what Google issues — the identity is the PAIR, so a
+// seeded row and a Google row are distinct even if the subjects matched — and
+// `.invalid` is reserved by RFC 2606 so the address can never be delivered to.
+// Created only on the dev path, so production never grows this row.
 const SEED_AUTHOR = {
-  auth0Id: 'seed|dev-content',
+  provider: 'SEED',
+  subject: 'dev-content',
   email: 'seed@nahuat.invalid',
   name: 'Seed (sample content)',
   role: 'CONTRIBUTOR',
@@ -107,7 +109,8 @@ const SEED_AUTHOR = {
 
 async function seedDevUsers(): Promise<void> {
   for (const user of DEV_USERS) {
-    // Upsert on auth0Id, matching how a real login resolves a user. `update`
+    // Upsert on the identity pair, matching how a real login resolves a user.
+    // `update`
     // carries role deliberately: changing a rung in this list should take
     // effect on a re-seed rather than silently keeping the old one.
     //
@@ -116,14 +119,14 @@ async function seedDevUsers(): Promise<void> {
     // would strand existing attribution. On a new database this never
     // matters: no row matches, `create` runs, and the pinned id is used.
     const row = await prisma.user.upsert({
-      where: { auth0Id: user.auth0Id },
+      where: { provider_subject: { provider: user.provider, subject: user.subject } },
       create: user,
       update: { email: user.email, name: user.name, role: user.role },
       select: { id: true },
     });
 
     // Which leaves one way to end up wrong: a row that already exists under
-    // this auth0Id with some other id — a database seeded before these ids
+    // this identity with some other id — a database seeded before these ids
     // were pinned, or a pinned id edited in the list above. The upsert would
     // report success while the id silently stayed stale, and the failure
     // would surface much later as a foreign key violation on the first write
@@ -131,16 +134,16 @@ async function seedDevUsers(): Promise<void> {
     // say exactly how to fix it.
     if (row.id !== user.id) {
       throw new Error(
-        `Dev user "${user.auth0Id}" exists with id "${row.id}", expected "${user.id}". ` +
+        `Dev user "${user.subject}" exists with id "${row.id}", expected "${user.id}". ` +
           `Tokens minted for this user would fail on write. Delete the row and re-seed: ` +
-          `DELETE FROM users WHERE auth0_id = '${user.auth0Id}';`,
+          `DELETE FROM users WHERE provider = '${user.provider}' AND subject = '${user.subject}';`,
       );
     }
   }
 
   console.log(
     `dev users: ${DEV_USERS.length} (${DEV_USERS.map((u) => u.role).join(', ')}) ` +
-      `— local mock-issuer logins, dev/staging only`,
+      `— for "npm run auth:token", dev/staging only`,
   );
 }
 
@@ -160,7 +163,9 @@ async function seedDevContent(): Promise<void> {
   }
 
   const author = await prisma.user.upsert({
-    where: { auth0Id: SEED_AUTHOR.auth0Id },
+    where: {
+      provider_subject: { provider: SEED_AUTHOR.provider, subject: SEED_AUTHOR.subject },
+    },
     create: SEED_AUTHOR,
     update: {},
   });
