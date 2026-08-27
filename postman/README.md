@@ -65,36 +65,31 @@ If you would rather not manage cookies, open `{{webBaseUrl}}/auth/access-token`
 in the browser and paste the `token` value into the environment by hand — the
 same value, one more step.
 
-**A token does not carry your rank.** It carries only `sub`; the API reads role
-from your user row on every request. Changing a role in the database applies to
-the next request, with no new token and no re-login.
+**A token does not carry your rank.** It carries only `sub` — which is
+`User.id`, this API's own identifier — and the API reads role from that row on
+every request. Changing a role in the database applies to the next request,
+with no new token and no re-login.
 
-- **Authed routes locally → mint a token from the mock issuer.** A local OIDC
-  issuer stands in for the tenant, swapping the _issuer_ and not the _strategy_
-  — the API still verifies RS256 against a JWKS endpoint with issuer and
-  audience pinned, so ADR 13 is intact.
+- **Authed routes locally → mint one with `auth:token`.** It signs with the
+  same key the API verifies with, so the token is indistinguishable from one
+  issued by a browser sign-in — no dev bypass and no second code path.
 
-  The minted token supplies only the `sub`; which rung you get is whatever the
+  The token supplies only the subject; which rung you get is whatever the
   matching seeded user's row says, so changing a role in the database takes
   effect on the next request without minting anything new.
 
   ```bash
   npm run db:seed:dev                     # creates the three dev users
-  npm run auth:mock --workspace=api       # leave running; serves JWKS on :8080
   npm run --silent auth:token --workspace=api -- admin
   ```
 
-  Add both lines to `apps/api/.env.local` and restart the API:
+  Paste it into the Local environment's `token`. `admin`, `contributor` and
+  `user` select which seeded user the token names, and the row must exist, so
+  run the seed first. Tokens last 12 hours; mint another.
 
-  ```
-  AUTH0_ISSUER_URL=http://localhost:8080/
-  AUTH0_JWKS_URI=http://localhost:8080/jwks
-  ```
-
-  Paste the minted token into the Local environment's `token`. `admin`,
-  `contributor` and `user` select which seeded user the token names. Tokens
-  expire after an hour; mint another. The issuer must stay running — the API
-  fetches its JWKS on every unseen `kid`.
+  This replaces the local mock OIDC issuer, deleted with the move to in-house
+  authentication (ADR 18) — the API now accepts only tokens signed by its own
+  key set, so a mock issuer cannot produce a usable one.
 
 There is no longer an internal endpoint for Auth0 to call. `POST /auth/role`,
 the `x-internal-secret` header and the Post Login Action behind them were all
