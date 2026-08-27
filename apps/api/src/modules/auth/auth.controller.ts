@@ -1,5 +1,14 @@
-import { type SessionResponse, type StartSession, StartSessionSchema } from '@nahuat/shared';
-import { Body, Controller, Post } from '@nestjs/common';
+import {
+  type Logout,
+  LogoutSchema,
+  type RefreshResponse,
+  type RefreshSession,
+  RefreshSessionSchema,
+  type SessionResponse,
+  type StartSession,
+  StartSessionSchema,
+} from '@nahuat/shared';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 
 import { Public } from '../../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -65,5 +74,50 @@ export class AuthController {
     const refreshToken = await this.refreshTokens.issue(user.id);
 
     return { user, tokens: { accessToken, refreshToken, expiresIn } };
+  }
+
+  // Exchanges a refresh token for a new pair.
+  //
+  // @Public() for the same reason as the route above, and a sharper one: the
+  // caller's access token has very likely expired — that is why they are here.
+  // Requiring a valid one would make refresh fail in exactly the case it
+  // exists to serve. The refresh token IS the credential, and rotate() is what
+  // authenticates it.
+  //
+  // 200 rather than 201: nothing is created that the caller can address.
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  async refresh(
+    @Body(new ZodValidationPipe(RefreshSessionSchema)) body: RefreshSession,
+  ): Promise<RefreshResponse> {
+    // Single-use. The presented token is spent by this call, the successor is
+    // returned below, and presenting the old one again revokes the session.
+    const { subject, refreshToken } = await this.refreshTokens.rotate(body.refreshToken);
+
+    const { accessToken, expiresIn } = await this.tokenService.signAccessToken(subject);
+
+    return { tokens: { accessToken, refreshToken, expiresIn } };
+  }
+
+  // Ends this session, and only this one.
+  //
+  // Takes the refresh token rather than reading the caller's access token,
+  // because the access token names a USER and this has to name a SESSION.
+  // Signing someone out of every device is a different act and will be a
+  // different endpoint; conflating them is how a Log out link ends a session on
+  // a phone somebody else is holding.
+  //
+  // Deliberately succeeds for a token that does not exist. Logging out is not a
+  // place to tell a caller whether a credential was real, and what they asked
+  // for — that this token stops working — is true either way.
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  async logout(@Body(new ZodValidationPipe(LogoutSchema)) body: Logout): Promise<void> {
+    // No @HttpCode(204): TransformInterceptor wraps every success in the
+    // envelope, and a 204 must carry no body. The same reasoning as the delete
+    // routes in the dictionary module.
+    await this.refreshTokens.revokeFamily(body.refreshToken);
   }
 }
