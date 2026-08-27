@@ -13,6 +13,10 @@ export * from './schemas/locale.schema';
 // Users
 export * from './schemas/user.schema';
 
+// Authentication — the contracts between the web tier and this API as the
+// authorization server. After user.schema, which it builds on.
+export * from './schemas/auth.schema';
+
 // Dictionary
 export * from './schemas/dialect.schema';
 export * from './schemas/translation.schema';
