@@ -37,7 +37,6 @@ definition, and the loader no-ops.
 | `http://localhost:3001/api/health/ready` | Readiness — checks the database                         |
 | `localhost:5432`                         | Postgres, database `nahuat_dev`, user/password `nahuat` |
 | `localhost:6379`                         | Valkey                                                  |
-| `localhost:8080`                         | Mock OIDC issuer, only while `auth:mock` is running     |
 
 Auth0 mounts its own routes on the web app; they are not localized and never
 pass through the locale redirect:
@@ -291,11 +290,6 @@ TOKEN='eyJ...'   # from http://localhost:3000/auth/access-token
 curl -s http://localhost:3001/api/v1/users/me -H "Authorization: Bearer $TOKEN"
 ```
 
-**If a real token 401s on the issuer or an unknown `kid`,** `AUTH0_ISSUER_URL`
-and `AUTH0_JWKS_URI` are still set in `apps/api/.env.local` from the mock issuer
-below. Comment them out and restart the API. Unset _is_ the deployed
-configuration; they are not a fallback for missing configuration.
-
 **The Accept/Decline consent screen is expected on localhost.** Requesting a
 custom API `audience` triggers it, and Auth0 does not skip consent for a
 `localhost` callback even though the application is first-party. Staging and
@@ -362,33 +356,27 @@ one-liner rather than dropping into a prompt.
 
 ### Hand-testing without a browser
 
-The mock OIDC issuer mints a token for a seeded user offline, which is useful
-for curl, Postman and scripts. It swaps the _issuer_, not the _strategy_ — the
-API still verifies RS256 against a JWKS endpoint with issuer and audience
-pinned, so there is still no dev bypass.
+`auth:token` mints a real access token for a seeded user, which is useful for
+curl, Postman and scripts. It signs with the same key the API verifies with, so
+there is no dev bypass and no second code path — the token is indistinguishable
+from one issued by a browser sign-in.
 
 ```bash
 npm run db:seed:dev                                      # the three dev users
-npm run auth:mock --workspace=api                        # leave running
 npm run --silent auth:token --workspace=api -- admin     # or contributor | user
 ```
 
-Point the API at it in `apps/api/.env.local`, then restart:
+**It replaces the mock OIDC issuer**, deleted with the move to in-house
+authentication (ADR 18). That existed because Auth0's servers cannot reach
+`localhost`; Google permits `localhost` redirect URIs, and the API now accepts
+only tokens signed by its own key set, so a mock issuer could not produce a
+usable token however it were configured.
 
-```
-AUTH0_ISSUER_URL=http://localhost:8080/
-AUTH0_JWKS_URI=http://localhost:8080/jwks
-```
+**The token supplies only the subject, which is `User.id`.** Which rung you get
+is whatever the matching row says, so `admin`, `contributor` and `user` select a
+seeded user rather than a claim — changing a role in the database takes effect
+without minting anything new. The row must exist, so run the seed first.
 
-Two variables rather than one, because Auth0 serves its keys at
-`/.well-known/jwks.json` and the mock serves them at `/jwks`. Both are optional
-and default to the Auth0 tenant, so staging and production set neither.
-
-**The token only supplies the `sub`.** Which rung you get is whatever the
-matching user's row says, so `admin`, `contributor` and `user` select a seeded
-user rather than a claim — changing a role in the database takes effect without
-minting anything new.
-
-The signing key is cached in `apps/api/.mock-oidc-key.json` (gitignored) so
-restarting the issuer does not invalidate tokens already minted. Delete it to
-rotate.
+⚠️ **These tokens are as real as any other**, and the only thing making them
+safe is that `JWT_SIGNING_KEYS` is per environment: the local key signs nothing
+any deployed environment will accept.
