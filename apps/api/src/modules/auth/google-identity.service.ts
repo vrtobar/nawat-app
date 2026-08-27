@@ -71,13 +71,20 @@ export class GoogleIdentityService {
   // sail through everything downstream and create an account under their
   // identity.
   //
-  // ⚠️ THE NONCE IS NOT CHECKED HERE, and cannot be. Auth.js generates it and
-  // validates it during the code exchange, against state this API does not
-  // hold. What stands in its place is narrow but real: an ID token for this
+  // ⚠️ THE NONCE IS NOT CHECKED HERE, and cannot be. It is generated and
+  // validated by the web tier during the code exchange, against state this API
+  // does not hold — so the binding between an ID token and the request that
+  // asked for it is established there or nowhere.
+  //
+  // THAT IS A DEPENDENCY ON CONFIGURATION IN ANOTHER APPLICATION, which is
+  // worth naming because it was briefly untrue: Auth.js defaults to
+  // `checks: ["pkce"]` and adds neither state nor nonce unless asked, so the
+  // protection this comment assumed was absent until apps/web/auth.ts spelled
+  // the checks out. Nothing failed while it was missing.
+  //
+  // What stands in its place here is narrow but real: an ID token for this
   // client is only ever issued to a caller holding the client secret, which
   // lives solely in the web tier, and it is short-lived and audience-bound.
-  // Stated plainly so that nobody later reads the absence as an oversight and
-  // nobody assumes a protection that is not here.
   async verify(idToken: string): Promise<GoogleIdentity> {
     let claims: unknown;
 
