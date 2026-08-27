@@ -80,6 +80,13 @@ const EnvSchema = z
     // on its own rather than lasting the length of a login.
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
+    // The session, in two deadlines. The absolute one belongs to the login and
+    // survives every rotation; the idle one belongs to the token in hand and
+    // resets each time it is used. Both defaults follow docs/adr/0018, which
+    // took them from what Auth0 issues with rotation enabled.
+    REFRESH_TOKEN_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(30),
+    REFRESH_TOKEN_IDLE_TTL_DAYS: z.coerce.number().int().positive().default(14),
+
     // Uploads / CDN
     S3_BUCKET: z.string().min(1),
     CDN_URL: z.url(),
