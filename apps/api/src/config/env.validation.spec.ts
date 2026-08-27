@@ -17,6 +17,7 @@ const baseEnv = {
   JWT_SIGNING_KEYS: 'base64-encoded-jwk-set',
   JWT_ISSUER: 'https://api.nahuat.com',
   JWT_AUDIENCE: 'https://api.nahuat.com',
+  GOOGLE_CLIENT_ID: '1234567890-abcdef.apps.googleusercontent.com',
   S3_BUCKET: 'nahuat-assets',
   CDN_URL: 'https://cdn.nahuat.com',
 };

@@ -87,6 +87,17 @@ const EnvSchema = z
     REFRESH_TOKEN_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(30),
     REFRESH_TOKEN_IDLE_TTL_DAYS: z.coerce.number().int().positive().default(14),
 
+    // The Google OAuth client this API accepts ID tokens for — the `aud` every
+    // one of them must carry. Per environment, so a token minted for the local
+    // client is not valid against staging.
+    //
+    // THE CLIENT SECRET IS DELIBERATELY ABSENT. The web tier performs the code
+    // exchange and is the only place that needs it; this API only ever
+    // verifies an assertion Google already signed, which takes the public
+    // client id and Google's published keys. So a compromise here yields no
+    // credential that can obtain a Google identity.
+    GOOGLE_CLIENT_ID: z.string().min(1),
+
     // Uploads / CDN
     S3_BUCKET: z.string().min(1),
     CDN_URL: z.url(),
