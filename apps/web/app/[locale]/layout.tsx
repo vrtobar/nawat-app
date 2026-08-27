@@ -4,7 +4,6 @@ import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 
 import { AuthControl } from '../../components/auth-control';
-import { AuthNotice } from '../../components/auth-notice';
 import { isLocale, LOCALES } from '../../lib/locale';
 
 // Fixes the locale set: any other [locale] value falls through to notFound()
@@ -44,9 +43,7 @@ export default async function LocaleLayout({
         {/* Suspense because useSearchParams suspends. The layout is already
             dynamic, so this costs nothing today, but without it any future
             attempt to prerender a route under here fails to build. */}
-        <Suspense fallback={null}>
-          <AuthNotice locale={locale} />
-        </Suspense>
+        <Suspense fallback={null}></Suspense>
         {children}
       </body>
     </html>
