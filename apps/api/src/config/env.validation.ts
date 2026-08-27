@@ -31,28 +31,6 @@ const EnvSchema = z
     REDIS_HOST: z.string().min(1).optional(),
     REDIS_PORT: z.coerce.number().int().optional(),
 
-    // Auth0
-    AUTH0_DOMAIN: z.string().min(1),
-    AUTH0_AUDIENCE: z.string().min(1),
-
-    // Both default to the Auth0 tenant derived from AUTH0_DOMAIN, so staging
-    // and production set neither and behave exactly as before. They exist so
-    // local development can point the *issuer* at a mock OIDC provider that
-    // mints RS256 tokens with arbitrary claims — the strategy is unchanged and
-    // still trusts only RS256-via-JWKS. Swapping the issuer is not the rejected
-    // NODE_ENV/HS256 bypass: no branch is added to the running service, which
-    // is the property docs/adr/0013 protects.
-    //
-    // Two variables rather than one because the paths genuinely differ: Auth0
-    // serves /.well-known/jwks.json, oauth2-mock-server serves /jwks, so the
-    // JWKS URI cannot simply be derived from the issuer.
-    AUTH0_ISSUER_URL: z.url().optional(),
-    AUTH0_JWKS_URI: z.url().optional(),
-    AUTH0_CLIENT_ID: z.string().min(1),
-    AUTH0_CLIENT_SECRET: z.string().min(1),
-    AUTH0_MGMT_CLIENT_ID: z.string().min(1),
-    AUTH0_MGMT_CLIENT_SECRET: z.string().min(1),
-
     // In-house access tokens (docs/adr/0018). This API is the authorization
     // server: it signs the tokens it verifies, and the private key never
     // leaves this process.
