@@ -164,10 +164,13 @@ export const API_ERROR_CODES = {
   // Auth / users
   USER_NOT_FOUND: 'USER_NOT_FOUND',
   USER_DEACTIVATED: 'USER_DEACTIVATED',
-  // A second Auth0 identity — a different connection, so a different `sub` —
-  // presenting an email address that already belongs to a user row. Auth0 keys
-  // identity on connection + subject; this API keys it on auth0Id and holds a
-  // unique constraint on email, so the two cannot both exist.
+  // A Google subject presenting an email address that already belongs to
+  // another row. Rarer with one provider than it was with two — the Auth0-era
+  // case was one person signing in with Google and with an email code,
+  // producing two subjects for one human — but not impossible: a Workspace
+  // address can be deleted and reissued to a new account, which carries a new
+  // `sub`. Identity is keyed on googleId, and email holds its own unique
+  // constraint, so the two rows cannot coexist.
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   // A verified token whose subject has no account. Since 2026-08-25 accounts
   // are created at login by POST /auth/session and nowhere else, so this means

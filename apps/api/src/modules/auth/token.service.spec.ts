@@ -95,7 +95,7 @@ describe('TokenService', () => {
       const service = build(encode([keyA, keyB]));
       await service.onModuleInit();
 
-      const { accessToken } = await service.signAccessToken('google|123');
+      const { accessToken } = await service.signAccessToken('usr_1');
       const header = JSON.parse(
         Buffer.from(accessToken.split('.')[0] as string, 'base64url').toString('utf8'),
       ) as { alg: string; kid: string };
@@ -108,13 +108,13 @@ describe('TokenService', () => {
       const service = build(encode([keyA]));
       await service.onModuleInit();
 
-      const { accessToken, expiresIn } = await service.signAccessToken('google|123');
+      const { accessToken, expiresIn } = await service.signAccessToken('usr_1');
       expect(expiresIn).toBe(TTL);
 
       const publicKey = (await importJWK(publicHalf(keyA), 'RS256')) as CryptoKey;
       const { payload } = await jwtVerify(accessToken, publicKey);
 
-      expect(payload.sub).toBe('google|123');
+      expect(payload.sub).toBe('usr_1');
       expect(payload.iss).toBe(ISSUER);
       expect(payload.aud).toBe(AUDIENCE);
       expect(payload.exp).toBeDefined();
@@ -131,8 +131,8 @@ describe('TokenService', () => {
       const service = build(encode([keyA]));
       await service.onModuleInit();
 
-      const { accessToken } = await service.signAccessToken('google|123');
-      await expect(service.verifyAccessToken(accessToken)).resolves.toEqual({ sub: 'google|123' });
+      const { accessToken } = await service.signAccessToken('usr_1');
+      await expect(service.verifyAccessToken(accessToken)).resolves.toEqual({ userId: 'usr_1' });
     });
 
     // The rotation contract: the set signs with the first key and verifies
@@ -140,20 +140,20 @@ describe('TokenService', () => {
     it('accepts a token signed by a NON-signing key still in the set', async () => {
       const before = build(encode([keyB]));
       await before.onModuleInit();
-      const { accessToken } = await before.signAccessToken('google|123');
+      const { accessToken } = await before.signAccessToken('usr_1');
 
       const afterRotation = build(encode([keyA, keyB]));
       await afterRotation.onModuleInit();
 
       await expect(afterRotation.verifyAccessToken(accessToken)).resolves.toEqual({
-        sub: 'google|123',
+        userId: 'usr_1',
       });
     });
 
     it('rejects a token whose key has been rotated out', async () => {
       const before = build(encode([keyB]));
       await before.onModuleInit();
-      const { accessToken } = await before.signAccessToken('google|123');
+      const { accessToken } = await before.signAccessToken('usr_1');
 
       const afterRemoval = build(encode([keyA]));
       await afterRemoval.onModuleInit();
@@ -170,7 +170,7 @@ describe('TokenService', () => {
       const signingKey = (await importJWK(keyA, 'RS256')) as CryptoKey;
       const token = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256' })
-        .setSubject('google|123')
+        .setSubject('usr_1')
         .setIssuer(ISSUER)
         .setAudience(AUDIENCE)
         .setExpirationTime('1h')
@@ -193,7 +193,7 @@ describe('TokenService', () => {
       const pem = await exportSPKI((await importJWK(publicHalf(keyA), 'RS256')) as CryptoKey);
       const forged = await new SignJWT({})
         .setProtectedHeader({ alg: 'HS256', kid: keyA.kid })
-        .setSubject('google|attacker')
+        .setSubject('usr_attacker')
         .setIssuer(ISSUER)
         .setAudience(AUDIENCE)
         .setExpirationTime('1h')
@@ -209,7 +209,7 @@ describe('TokenService', () => {
       const strangerKey = (await importJWK(keyB, 'RS256')) as CryptoKey;
       const token = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256', kid: keyA.kid })
-        .setSubject('google|attacker')
+        .setSubject('usr_attacker')
         .setIssuer(ISSUER)
         .setAudience(AUDIENCE)
         .setExpirationTime('1h')
@@ -228,7 +228,7 @@ describe('TokenService', () => {
       const signingKey = (await importJWK(keyA, 'RS256')) as CryptoKey;
       const token = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256', kid: keyA.kid })
-        .setSubject('google|123')
+        .setSubject('usr_1')
         .setIssuer(claims.iss)
         .setAudience(claims.aud)
         .setExpirationTime('1h')
@@ -244,7 +244,7 @@ describe('TokenService', () => {
       const signingKey = (await importJWK(keyA, 'RS256')) as CryptoKey;
       const token = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256', kid: keyA.kid })
-        .setSubject('google|123')
+        .setSubject('usr_1')
         .setIssuer(ISSUER)
         .setAudience(AUDIENCE)
         .setExpirationTime(Math.floor(Date.now() / 1000) - 60)

@@ -6,7 +6,7 @@ import type { AuthService } from '../../modules/auth/auth.service';
 import type { TokenService } from '../../modules/auth/token.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
-const CLAIMS = { sub: 'google|1', userId: 'usr_1', role: 'USER', locale: 'es' };
+const CLAIMS = { userId: 'usr_1', role: 'USER', locale: 'es' };
 
 interface Harness {
   guard: JwtAuthGuard;
@@ -26,7 +26,7 @@ const build = ({
   authorization = 'Bearer a.b.c',
 }: { isPublic?: boolean; authorization?: string | null } = {}): Harness => {
   const getAllAndOverride = vi.fn().mockReturnValue(isPublic);
-  const verifyAccessToken = vi.fn().mockResolvedValue({ sub: 'google|1' });
+  const verifyAccessToken = vi.fn().mockResolvedValue({ userId: 'usr_1' });
   const resolveIdentity = vi.fn().mockResolvedValue(CLAIMS);
 
   const request: { headers: Record<string, string>; user?: unknown } = {
@@ -92,8 +92,8 @@ describe('JwtAuthGuard', () => {
       await expect(guard.canActivate(context)).resolves.toBe(true);
 
       expect(verifyAccessToken).toHaveBeenCalledWith('the.access.token');
-      // The subject comes from the VERIFIED token, never from the request.
-      expect(resolveIdentity).toHaveBeenCalledWith('google|1');
+      // The user id comes from the VERIFIED token, never from the request.
+      expect(resolveIdentity).toHaveBeenCalledWith('usr_1');
       expect(request.user).toEqual(CLAIMS);
     });
 

@@ -9,11 +9,20 @@ vi.mock('@nahuat/database', () => ({
   prisma: {
     user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() },
   },
+  // The generated enum, not a stand-in. The service uses it to name the
+  // provider on every identity lookup, so a mock that omitted it would fail
+  // only at the call site and say nothing about why.
+  Provider: { GOOGLE: 'GOOGLE', SEED: 'SEED' },
 }));
 
 const user = vi.mocked(prisma.user);
 
-const SUB = 'google-oauth2|1038929';
+const SUB = '104829571094857109485';
+const USER_ID = 'usr_1';
+
+// What findUnique receives for an identity lookup: the pair, never the subject
+// alone.
+const IDENTITY = { provider_subject: { provider: 'GOOGLE', subject: SUB } };
 
 // A P2002 shaped the way the pg driver adapter reports it. Prisma's documented
 // meta.target is undefined under that adapter; the columns live on the
@@ -90,17 +99,19 @@ describe('AuthService', () => {
     it('returns the identity from the database, not from the token', async () => {
       user.findUnique.mockResolvedValue(row({ role: 'ADMIN', locale: 'EN' }) as never);
 
-      const result = await service.resolveIdentity(SUB);
+      const result = await service.resolveIdentity(USER_ID);
 
-      expect(result).toEqual({ sub: SUB, userId: 'usr_1', role: 'ADMIN', locale: 'en' });
+      expect(result).toEqual({ userId: 'usr_1', role: 'ADMIN', locale: 'en' });
       expect(() => JwtClaimsSchema.strict().parse(result)).not.toThrow();
     });
 
-    it('looks the user up by auth0Id', async () => {
+    // A primary-key read. The access token's subject IS User.id, so resolution
+    // never needs to know which provider vouched for the person.
+    it('looks the user up by primary key', async () => {
       user.findUnique.mockResolvedValue(row() as never);
-      await service.resolveIdentity(SUB);
+      await service.resolveIdentity(USER_ID);
       expect(user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { auth0Id: SUB } }),
+        expect.objectContaining({ where: { id: USER_ID } }),
       );
     });
 
@@ -108,13 +119,13 @@ describe('AuthService', () => {
     // a deactivated user kept a working token until it expired.
     it('refuses a soft-deleted account', async () => {
       user.findUnique.mockResolvedValue(row({ deletedAt: new Date() }) as never);
-      await expect(service.resolveIdentity(SUB)).rejects.toBeInstanceOf(ForbiddenException);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('USER_DEACTIVATED');
+      await expect(service.resolveIdentity(USER_ID)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('USER_DEACTIVATED');
     });
 
     it('refuses an inactive account', async () => {
       user.findUnique.mockResolvedValue(row({ isActive: false }) as never);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('USER_DEACTIVATED');
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('USER_DEACTIVATED');
     });
 
     // A regression guard, not a description: putting a network call back on
@@ -125,7 +136,7 @@ describe('AuthService', () => {
       const fetchSpy = vi.spyOn(globalThis, 'fetch');
       user.findUnique.mockResolvedValue(row() as never);
 
-      await service.resolveIdentity(SUB);
+      await service.resolveIdentity(USER_ID);
 
       expect(fetchSpy).not.toHaveBeenCalled();
       fetchSpy.mockRestore();
@@ -139,8 +150,8 @@ describe('AuthService', () => {
     it('refuses with ACCOUNT_NOT_PROVISIONED rather than creating one', async () => {
       user.findUnique.mockResolvedValue(null as never);
 
-      await expect(service.resolveIdentity(SUB)).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('ACCOUNT_NOT_PROVISIONED');
+      await expect(service.resolveIdentity(USER_ID)).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('ACCOUNT_NOT_PROVISIONED');
       expect(user.create).not.toHaveBeenCalled();
     });
   });
@@ -157,7 +168,7 @@ describe('AuthService', () => {
 
       expect(user.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { auth0Id: SUB },
+          where: IDENTITY,
           data: expect.objectContaining({
             name: 'Ada Renamed',
             lastLoginAt: expect.any(Date),
@@ -214,7 +225,8 @@ describe('AuthService', () => {
       expect(user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            auth0Id: SUB,
+            provider: 'GOOGLE',
+            subject: SUB,
             email: 'a@b.com',
             name: 'Ada',
             pictureUrl: 'https://img/a.png',
@@ -240,7 +252,7 @@ describe('AuthService', () => {
     // insert. The loser re-reads what the winner wrote. The first findUnique is
     // the initial miss; the second is the recovery read.
     it('recovers from a concurrent insert by re-reading', async () => {
-      user.create.mockRejectedValue(uniqueViolation(['auth0_id']) as never);
+      user.create.mockRejectedValue(uniqueViolation(['provider', 'subject']) as never);
       user.findUnique
         .mockResolvedValueOnce(null as never)
         .mockResolvedValueOnce(
@@ -260,8 +272,8 @@ describe('AuthService', () => {
     // and with an email code produce different `sub` values for one person. The
     // second arrives here as a new user whose email is already taken.
     //
-    // The original code assumed every P2002 was a race on auth0_id, re-read by
-    // auth0Id, found nothing, and let Prisma's NotFoundError — carrying the
+    // The original code assumed every P2002 was a race on google_id, re-read by
+    // googleId, found nothing, and let Prisma's NotFoundError — carrying the
     // query and absolute source paths — reach the client as a 401 body.
     it('refuses a second identity whose email is already registered', async () => {
       user.create.mockRejectedValue(uniqueViolation(['email']) as never);

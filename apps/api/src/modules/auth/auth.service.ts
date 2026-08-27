@@ -1,4 +1,4 @@
-import { prisma } from '@nahuat/database';
+import { prisma, Provider } from '@nahuat/database';
 import { API_ERROR_CODES, type JwtClaims, type UserProfile } from '@nahuat/shared';
 import {
   ConflictException,
@@ -34,10 +34,15 @@ import type { GoogleIdentity } from './google-identity.service';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  // Called once per authenticated request by JwtStrategy.validate(), after the
-  // signature, issuer, audience and expiry have already passed. One indexed
-  // read on users.auth0Id (unique btree); a request that gets this far is
-  // about to query the database for its actual work anyway.
+  // Called once per authenticated request by JwtAuthGuard, after the signature,
+  // issuer, audience and expiry have already passed. A primary-key read; a
+  // request that gets this far is about to query the database for its actual
+  // work anyway.
+  //
+  // TAKES User.id, NOT THE PROVIDER'S SUBJECT. The access token's `sub` is this
+  // system's own user id — see token.service.ts — so identity resolution never
+  // has to know which provider vouched for the person. That is what makes
+  // adding a second provider a change to the login path alone.
   //
   // A PURE READ as of 2026-08-25. It used to provision a missing row here, and
   // that had two problems. It made "logged in" and "has an account" different
@@ -47,17 +52,18 @@ export class AuthService {
   // re-created them** on their next request: the soft-delete gate below cannot
   // see a row that is gone. Accounts are now created at login by
   // startSession(), and a missing row here is a fault.
-  async resolveIdentity(auth0Id: string): Promise<JwtClaims> {
+  async resolveIdentity(userId: string): Promise<JwtClaims> {
     const existing = await prisma.user.findUnique({
-      where: { auth0Id },
+      where: { id: userId },
       select: { id: true, role: true, locale: true, deletedAt: true, isActive: true },
     });
 
     if (!existing) {
       // 401, not 404: the credential is valid and the caller is who they say
-      // they are — there is simply no account behind the subject. Signing in
+      // they are — there is simply no account behind it any more, which means
+      // the row was hard-deleted while the token was still live. Signing in
       // again fixes it, because that is the path that creates one.
-      this.logger.warn(`no account for verified sub "${auth0Id}"`);
+      this.logger.warn(`no account for verified user id "${userId}"`);
       throw new UnauthorizedException({
         code: API_ERROR_CODES.ACCOUNT_NOT_PROVISIONED,
         message: 'No account exists for this sign-in. Please sign in again.',
@@ -76,7 +82,6 @@ export class AuthService {
     }
 
     return {
-      sub: auth0Id,
       userId: existing.id,
       role: existing.role,
       locale: LOCALE_TO_WIRE[existing.locale],
@@ -95,10 +100,12 @@ export class AuthService {
   // it. Telling someone at sign-in that their account is disabled is a better
   // answer than letting them in and failing every subsequent request.
   async startSession(identity: GoogleIdentity): Promise<UserProfile> {
-    const auth0Id = identity.sub;
+    // The PAIR, not the subject alone. `subject` carries no unique constraint
+    // of its own, because two providers may legitimately issue the same string.
+    const where = { provider_subject: { provider: Provider.GOOGLE, subject: identity.sub } };
 
     const existing = await prisma.user.findUnique({
-      where: { auth0Id },
+      where,
       select: { id: true, deletedAt: true, isActive: true },
     });
 
@@ -115,7 +122,7 @@ export class AuthService {
       // the collision would surface as a failed login for someone who changed
       // nothing.
       const updated = await prisma.user.update({
-        where: { auth0Id },
+        where,
         data: {
           name: identity.name ?? identity.email,
           pictureUrl: identity.picture ?? null,
@@ -138,12 +145,11 @@ export class AuthService {
   // the email attached to their row, and email is a unique column — so choosing
   // it is choosing whose row you collide with.
   private async provision(identity: GoogleIdentity): Promise<UserProfile> {
-    const auth0Id = identity.sub;
-
     try {
       const created = await prisma.user.create({
         data: {
-          auth0Id,
+          provider: Provider.GOOGLE,
+          subject: identity.sub,
           email: identity.email,
           // name is non-nullable in the database and Google does not always
           // supply one; the email stands in.
@@ -158,8 +164,8 @@ export class AuthService {
 
       return toUserProfile(created);
     } catch (error) {
-      // WHICH unique constraint matters. `users` holds three — auth0_id, email
-      // and username — and the original code assumed any P2002 here meant a
+      // WHICH unique constraint matters. `users` holds three — the
+      // (provider, subject) pair, email and username — and the original code assumed any P2002 here meant a
       // concurrent insert of the same subject. It does not.
       const fields = uniqueViolationFields(error);
 
@@ -177,7 +183,9 @@ export class AuthService {
       // The message deliberately does not say the address is registered.
       // Doing so would confirm to any caller which emails have accounts here.
       if (fields.includes('email')) {
-        this.logger.warn(`email already registered under a different auth0Id (sub "${auth0Id}")`);
+        this.logger.warn(
+          `email already registered under a different subject (sub "${identity.sub}")`,
+        );
         throw new ConflictException({
           code: API_ERROR_CODES.EMAIL_ALREADY_REGISTERED,
           message:
@@ -199,7 +207,9 @@ export class AuthService {
       // be a worse bug than the one being fixed.
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) {
         const raced = await prisma.user.findUnique({
-          where: { auth0Id },
+          where: {
+            provider_subject: { provider: Provider.GOOGLE, subject: identity.sub },
+          },
           select: USER_PROFILE_SELECT,
         });
 
@@ -214,9 +224,9 @@ export class AuthService {
         }
 
         this.logger.error(
-          `unique violation on user create for sub "${auth0Id}" ` +
+          `unique violation on user create for sub "${identity.sub}" ` +
             `(fields: ${fields.length > 0 ? fields.join(', ') : 'unreadable'}) ` +
-            `and no row is readable under that auth0Id`,
+            `and no row is readable under that subject`,
         );
         throw new UnauthorizedException({
           code: API_ERROR_CODES.UNAUTHORIZED,
