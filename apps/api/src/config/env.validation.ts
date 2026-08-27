@@ -66,8 +66,21 @@ const EnvSchema = z
     REFRESH_TOKEN_IDLE_TTL_DAYS: z.coerce.number().int().positive().default(14),
 
     // The Google OAuth client this API accepts ID tokens for — the `aud` every
-    // one of them must carry. Per environment, so a token minted for the local
-    // client is not valid against staging.
+    // one of them must carry.
+    //
+    // ⚠️ ONE CLIENT PER ENVIRONMENT, and it is not an incidental detail. A
+    // single client listing localhost, staging and production redirect URIs
+    // works, and was briefly how this was set up — but it makes this value
+    // identical everywhere, so an ID token obtained against local development
+    // satisfies production's audience check too. That is the
+    // cross-environment token validity docs/adr/0018 exists to end, rebuilt in
+    // a smaller form. The sharper cost is the client SECRET: with one client,
+    // anyone who can run this application locally holds production's OAuth
+    // credential.
+    //
+    // Separate clients make the coupling structurally impossible rather than
+    // merely unused, which is the same reasoning as JWT_SIGNING_KEYS below
+    // having no default.
     //
     // THE CLIENT SECRET IS DELIBERATELY ABSENT. The web tier performs the code
     // exchange and is the only place that needs it; this API only ever
