@@ -1,6 +1,10 @@
 # 11. Polyglot queue consumers, packaged as container images
 
-- **Status:** Accepted
+- **Status:** Accepted; the set of consumers it describes is superseded by
+  [ADR 19](0019-asynchronous-tier-anchored-on-media-processing.md), which deletes
+  three of the four and anchors the tier on media processing. The language and
+  packaging decisions below stand, and ADR 19 gives them the technical
+  justification this record says they lacked.
 - **Date:** 2026-08-16
 - **Applies to:** `apps/workers/`, `infra/terraform/global/main.tf`, and the
   unbuilt `modules/messaging`
