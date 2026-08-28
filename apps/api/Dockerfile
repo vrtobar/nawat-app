@@ -11,7 +11,7 @@
 # and why prisma/ + prisma.config.ts ship in the final image.
 # =============================================================================
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 WORKDIR /app
 
 # --- deps: install with only manifests present (max layer-cache hits) --------
