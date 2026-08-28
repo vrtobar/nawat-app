@@ -3,12 +3,17 @@
 - **Status:** Accepted
 - **Date:** 2026-08-25
 - **Applies to:** `apps/api/src/modules/auth/`, `apps/api/src/common/guards/`,
-  `apps/web/lib/auth0.ts`, `apps/web/proxy.ts`
-- **Supersedes:** [ADR 5](0005-auth0-tenant-separation.md) once implemented —
-  tenant separation stops being a question when there is no tenant
+  `apps/web/auth.ts`, `apps/web/proxy.ts`
+- **Supersedes:** [ADR 5](0005-auth0-tenant-separation.md) — implemented
+  2026-08-27; tenant separation stops being a question when there is no tenant
 - **Amends:** [ADR 13](0013-authentication-and-authorization.md). Its
   authorization half survives intact; only token issuance and verification
   change
+- **Amended 2026-08-27: IMPLEMENTED, and five things differ from what this
+  record decided.** Read "Amendment: what actually shipped" at the end before
+  treating any part of the Decision below as a description of the running
+  system. In particular the Decision says the API performs the code exchange,
+  and it does not.
 - **Amended 2026-08-26:** the timing is no longer open — this is the next
   substantial piece of work, because every authenticated surface built before the
   swap is built twice. See "Amendment: scheduled next, and how" below, which
@@ -292,3 +297,126 @@ resulting credential to the API. Fewer redirects, and it is what most consumer
 applications do — but it moves the flow into client-side JavaScript, and the
 server-side code exchange keeps the client secret and the exchange itself out of
 the browser entirely.
+
+## Amendment: what actually shipped
+
+_Added 2026-08-27, after the swap was built and verified end to end with a real
+Google sign-in._ Five things differ from the Decision above. Each is recorded
+with the reason, because in every case the original had an argument behind it
+and the argument is the part worth keeping.
+
+### Auth.js performs the code exchange, not the API
+
+**The Decision above is wrong about this**, and it contradicted itself. It says
+the web app "posts [the authorization code] to the API" and that "the API
+exchanges the code" — while the Consequences argue for Auth.js on the grounds
+that it handles `state`, PKCE and session cookies. Those cannot both hold: if
+the API performs the exchange, Auth.js is not in the flow and handles none of
+them. The web tier would have hand-written the authorize URL, the `state`
+cookie and the PKCE verifier — precisely the code this record calls "most likely
+to be quietly wrong".
+
+So Auth.js owns the browser-facing dance and holds the client secret, and the
+API receives Google's **ID token** rather than an authorization code.
+
+**The property the Decision's table was actually protecting is untouched.** That
+table is about where the SIGNING key lives, and it still lives in one process:
+the API issues and verifies its own tokens, and the web tier cannot mint one.
+"Who calls Google's token endpoint" was a detail underneath that claim, not the
+claim.
+
+**What it costs, stated plainly:** the API cannot check the ID token's `nonce`,
+because it holds none of the flow's state. That binding exists only in the web
+tier, which makes it a dependency on another application's configuration — see
+the `checks` note below for why that is not theoretical.
+
+### passport is removed entirely
+
+Not anticipated by this record, which assumed the existing verification
+plumbing would survive with a new issuer.
+
+Two things made removing it clearly correct once the API held its own key set.
+Passport reports verification failures on `info` and anything the strategy threw
+on `err`, under different rules about what may be shown to a caller — and
+merging those rules had already put a Prisma error, with its failing query and
+absolute source paths, into a client response. And the strategy/guard split
+that [ADR 13](0013-authentication-and-authorization.md) records existed only
+because a passport strategy cannot see which route it is authenticating; remove
+passport and the guard does both while seeing the route.
+
+`@AllowMissingAccount` went with it. It existed so a verified caller with no
+account could reach `POST /auth/session`; that endpoint now authenticates a
+Google assertion instead of an API token, so it is `@Public` and verifies in the
+handler.
+
+### Identity is keyed on `(provider, subject)`, not a renamed column
+
+The Consequences say `users.auth0Id` "should be renamed — `subject` or
+`googleId`". Renaming to `googleId` would have named the next vendor and been
+wrong the same way; the column already held non-Google values, since the
+development seed writes rows that never sign in.
+
+So the provider became something the schema STATES: a `Provider` enum and a
+`@@unique([provider, subject])`. Adding a provider now needs an enum value and
+a verifier, with no migration — which is what makes this record's own claim
+about Facebook ("adding it later is a self-contained change") true rather than
+aspirational.
+
+⚠️ **Still one identity per person, and that is the real limit** — not the
+naming, which is what the original framing obscured. Two providers for one human
+cannot be expressed, so account LINKING would need an `identities` table keyed
+the way this pair is. Deliberately not built: linking means deciding that a
+matching email proves the same person, which is an account-takeover question
+rather than a schema one, and the current answer is to refuse
+(`EMAIL_ALREADY_REGISTERED`).
+
+### The access token's subject is `User.id`
+
+Forced by the compound key, and more correct anyway. With identity keyed on the
+pair, a token carrying only the provider's subject is ambiguous once a second
+provider exists, and would need a `provider` claim to disambiguate — putting the
+provider back inside the credential.
+
+RFC 7519 defines `sub` as the principal, locally unique **to the issuer**, and
+the issuer is this API. Carrying Google's subject was leaking an upstream detail
+into a credential this system mints. Identity resolution became a primary-key
+read, and adding a provider now changes nothing about tokens at all.
+
+`JwtClaims` lost its `sub` field as a consequence: it held the provider subject
+precisely because that was a DIFFERENT value from `userId`, and they are now
+identical. Nothing outside the auth module ever read it.
+
+### Auth.js is pre-1.0, and its defaults do not match why it was chosen
+
+This record recommends Auth.js without noting that v5 has no stable release. The
+implementation pins an exact beta (`5.0.0-beta.32`) rather than a caret range,
+so a breaking beta cannot arrive through a routine install.
+
+⚠️ **More importantly: `checks` defaults to `["pkce"]` alone.** Auth.js adds
+`state` only when a redirect proxy is configured, and never adds `nonce`. Two of
+the three protections named above as the reason for preferring a library were
+therefore absent by default — and a sign-in works exactly as well without them,
+so nothing failed to indicate it. Found by reading the authorize URL, not by any
+test or symptom.
+
+`apps/web/auth.ts` now spells all three out. **The general lesson is worth more
+than the fix:** choosing a library for the things it handles does not mean it
+handles them, and a default that silently omits a security control is
+indistinguishable from one that applies it until someone looks.
+
+### What did not change
+
+The parts of the Decision that survive intact, so their absence from this list
+is not read as doubt: the API issues and verifies its own tokens with the
+signing key in one process; Google is the only provider; email OTP is dropped;
+RS256 with a `kid` and a key set; a ~1 hour access token with a rotating 30-day
+refresh token and reuse detection; logout clearing two session layers rather
+than three.
+
+One operational point the record did not anticipate: **one Google OAuth client
+per environment**, not one client listing three redirect URIs. A shared client
+makes the client id identical everywhere, so an ID token obtained locally
+satisfies production's audience check — and puts production's client secret on
+every machine that runs the application locally. Authorized JavaScript origins
+stay empty, which is what the rejected browser-side alternative looks like when
+it is not taken.
