@@ -119,7 +119,20 @@ case "$action" in
     ;;
 
   list)
-    aws s3 ls "s3://$BUCKET/$PREFIX/" --human-readable
+    # Counted with list-objects-v2 rather than testing `aws s3 ls`'s exit code,
+    # which is 1 both when a prefix matches nothing and when the call actually
+    # fails. An empty bucket is the normal state of a new one, not an error, and
+    # collapsing the two would report "no exports" for an access denial — the
+    # one case where a wrong answer is dangerous, since the next step is a
+    # teardown.
+    count="$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$PREFIX/" \
+      --query 'length(Contents || `[]`)' --output text)"
+
+    if [ "$count" -eq 0 ]; then
+      echo "No exports in s3://$BUCKET/$PREFIX/"
+    else
+      aws s3 ls "s3://$BUCKET/$PREFIX/" --human-readable
+    fi
     ;;
 
   *)
