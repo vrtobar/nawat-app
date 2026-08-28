@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { slugifyNawat } from '@nahuat/shared';
 
-import { PrismaClient } from '../src/generated/prisma/client';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client';
 import { buildDatabaseUrl } from '../src/url';
 import { ExportFileSchema, FORMAT_VERSION } from './content-file';
 
@@ -125,81 +125,170 @@ async function main(): Promise<void> {
     update: {},
   });
 
-  let entryCount = 0;
-  let translationCount = 0;
+  const entryCount = file.entries.length;
+  const translationCount = file.entries.reduce((n, e) => n + e.translations.length, 0);
 
-  // One transaction. A restore that stops halfway leaves a dictionary that is
-  // neither the old one nor the new one, and the operator has no way to tell
-  // which rows made it — the situation this whole mechanism exists to avoid.
-  await prisma.$transaction(async (tx) => {
-    for (const entry of file.entries) {
-      // Publication state comes from the file, not forced true as in seed.ts.
-      // A draft that was a draft when exported has to come back a draft, or a
-      // restore publishes work that was deliberately unpublished.
-      const record = await tx.entry.upsert({
-        where: { nawatContent: entry.nawatContent },
-        create: {
-          nawatContent: entry.nawatContent,
-          // Derived, not carried. The slug is a function of the headword, so
-          // exporting it would be a second copy that could disagree with the
-          // first — and slugifyNawat is the one definition of that function.
-          slug: slugifyNawat(entry.nawatContent),
-          type: entry.type,
-          imageUrl: entry.imageUrl ?? null,
-          isPublished: entry.isPublished,
-          creatorId: author.id,
-          updaterId: author.id,
-        },
-        update: {
-          type: entry.type,
-          imageUrl: entry.imageUrl ?? null,
-          isPublished: entry.isPublished,
-          updaterId: author.id,
-        },
-        select: { id: true },
-      });
-      entryCount += 1;
+  // Batched, not row-by-row, and the reason is round trips rather than
+  // elegance. The first version upserted each entry and each translation
+  // individually: 91 statements for a 42-entry fixture, which finished inside
+  // Prisma's default 5 s transaction timeout on a local socket and blew it at
+  // 6201 ms through a bastion tunnel. Raising the timeout would have hidden
+  // that, not fixed it — the cost is linear in rows, so a dictionary of 20,000
+  // entries is ~40,000 round trips and tens of minutes with a write
+  // transaction held open. This shape issues a FIXED number of statements per
+  // chunk, so duration follows the size of the file rather than the latency of
+  // the link.
+  //
+  // Prisma still owns id and updatedAt generation, which is why new rows go in
+  // through createMany rather than a raw INSERT: `id` is `@default(cuid())` and
+  // `updatedAt` is `@updatedAt`, both client-side, and neither column has a
+  // database default. Generating cuids here would mean reimplementing their
+  // spec to keep new ids indistinguishable from existing ones. Only the UPDATE
+  // half is raw, because Prisma has no bulk update that varies values per row.
+  const CHUNK = 500;
 
-      for (const t of entry.translations) {
-        await tx.translation.upsert({
-          where: {
-            entryId_dialectCode: { entryId: record.id, dialectCode: t.dialectCode },
-          },
-          create: {
-            entryId: record.id,
-            dialectCode: t.dialectCode,
-            contentEs: t.contentEs,
-            contentEn: t.contentEn ?? null,
-            phonetic: t.phonetic ?? null,
-            partOfSpeech: t.partOfSpeech ?? null,
-            exampleNawat: t.exampleNawat ?? null,
-            exampleEs: t.exampleEs ?? null,
-            exampleEn: t.exampleEn ?? null,
-            audioUrl: t.audioUrl ?? null,
-            isPublished: t.isPublished,
-            creatorId: author.id,
-            updaterId: author.id,
-          },
-          // Every field, not just the two seed.ts updates. A re-import is meant
-          // to bring rows back to the file's state; leaving a field out would
-          // silently keep whatever the database had.
-          update: {
-            contentEs: t.contentEs,
-            contentEn: t.contentEn ?? null,
-            phonetic: t.phonetic ?? null,
-            partOfSpeech: t.partOfSpeech ?? null,
-            exampleNawat: t.exampleNawat ?? null,
-            exampleEs: t.exampleEs ?? null,
-            exampleEn: t.exampleEn ?? null,
-            audioUrl: t.audioUrl ?? null,
-            isPublished: t.isPublished,
-            updaterId: author.id,
-          },
+  await prisma.$transaction(
+    async (tx) => {
+      for (let i = 0; i < file.entries.length; i += CHUNK) {
+        const chunk = file.entries.slice(i, i + CHUNK);
+        const names = chunk.map((e) => e.nawatContent);
+
+        const existing = await tx.entry.findMany({
+          where: { nawatContent: { in: names } },
+          select: { id: true, nawatContent: true },
         });
-        translationCount += 1;
+        const idByName = new Map(existing.map((e) => [e.nawatContent, e.id]));
+
+        const toCreate = chunk.filter((e) => !idByName.has(e.nawatContent));
+        const toUpdate = chunk.filter((e) => idByName.has(e.nawatContent));
+
+        if (toCreate.length > 0) {
+          await tx.entry.createMany({
+            data: toCreate.map((e) => ({
+              nawatContent: e.nawatContent,
+              // Derived, not carried. The slug is a function of the headword,
+              // so exporting it would be a second copy that could disagree.
+              slug: slugifyNawat(e.nawatContent),
+              type: e.type,
+              imageUrl: e.imageUrl ?? null,
+              isPublished: e.isPublished,
+              creatorId: author.id,
+              updaterId: author.id,
+            })),
+          });
+        }
+
+        if (toUpdate.length > 0) {
+          // image_key, audio_key and deleted_at are absent on purpose: they are
+          // not in the export format, so an UPDATE naming them would clear S3
+          // pointers and undelete rows that a restore has no business touching.
+          await tx.$executeRaw`
+            UPDATE entries AS e
+            SET type       = v.type::"EntryType",
+                image_url  = v.image_url,
+                is_published = v.is_published,
+                updater_id = v.updater_id,
+                updated_at = NOW()
+            FROM (VALUES ${Prisma.join(
+              toUpdate.map(
+                (e) =>
+                  Prisma.sql`(${e.nawatContent}::text, ${e.type}::text, ${
+                    e.imageUrl ?? null
+                  }::text, ${e.isPublished}::boolean, ${author.id}::text)`,
+              ),
+            )}) AS v(nawat_content, type, image_url, is_published, updater_id)
+            WHERE e.nawat_content = v.nawat_content
+          `;
+        }
+
+        // Re-read only what was created; the rest are already mapped.
+        if (toCreate.length > 0) {
+          const created = await tx.entry.findMany({
+            where: { nawatContent: { in: toCreate.map((e) => e.nawatContent) } },
+            select: { id: true, nawatContent: true },
+          });
+          for (const e of created) idByName.set(e.nawatContent, e.id);
+        }
+
+        // ---- translations for this chunk of entries ----
+        const rows = chunk.flatMap((e) =>
+          e.translations.map((t) => ({ ...t, entryId: idByName.get(e.nawatContent)! })),
+        );
+        if (rows.length === 0) continue;
+
+        const entryIds = [...new Set(rows.map((r) => r.entryId))];
+        const existingTx = await tx.translation.findMany({
+          where: { entryId: { in: entryIds } },
+          select: { entryId: true, dialectCode: true },
+        });
+        const seen = new Set(existingTx.map((t) => `${t.entryId}\u0000${t.dialectCode}`));
+
+        const txCreate = rows.filter((r) => !seen.has(`${r.entryId}\u0000${r.dialectCode}`));
+        const txUpdate = rows.filter((r) => seen.has(`${r.entryId}\u0000${r.dialectCode}`));
+
+        if (txCreate.length > 0) {
+          await tx.translation.createMany({
+            data: txCreate.map((t) => ({
+              entryId: t.entryId,
+              dialectCode: t.dialectCode,
+              contentEs: t.contentEs,
+              contentEn: t.contentEn ?? null,
+              phonetic: t.phonetic ?? null,
+              partOfSpeech: t.partOfSpeech ?? null,
+              exampleNawat: t.exampleNawat ?? null,
+              exampleEs: t.exampleEs ?? null,
+              exampleEn: t.exampleEn ?? null,
+              audioUrl: t.audioUrl ?? null,
+              isPublished: t.isPublished,
+              creatorId: author.id,
+              updaterId: author.id,
+            })),
+          });
+        }
+
+        // Every field the format carries, not a subset: a re-import is meant to
+        // bring rows back to the file's state, and a column left out of the SET
+        // silently keeps whatever the database had.
+        for (let j = 0; j < txUpdate.length; j += CHUNK) {
+          const part = txUpdate.slice(j, j + CHUNK);
+          await tx.$executeRaw`
+            UPDATE translations AS t
+            SET content_es     = v.content_es,
+                content_en     = v.content_en,
+                phonetic       = v.phonetic,
+                part_of_speech = v.part_of_speech::"PartOfSpeech",
+                example_nawat  = v.example_nawat,
+                example_es     = v.example_es,
+                example_en     = v.example_en,
+                audio_url      = v.audio_url,
+                is_published   = v.is_published,
+                updater_id     = v.updater_id,
+                updated_at     = NOW()
+            FROM (VALUES ${Prisma.join(
+              part.map(
+                (t) =>
+                  Prisma.sql`(${t.entryId}::text, ${t.dialectCode}::text, ${
+                    t.contentEs
+                  }::text, ${t.contentEn ?? null}::text, ${t.phonetic ?? null}::text, ${
+                    t.partOfSpeech ?? null
+                  }::text, ${t.exampleNawat ?? null}::text, ${t.exampleEs ?? null}::text, ${
+                    t.exampleEn ?? null
+                  }::text, ${t.audioUrl ?? null}::text, ${t.isPublished}::boolean, ${
+                    author.id
+                  }::text)`,
+              ),
+            )}) AS v(entry_id, dialect_code, content_es, content_en, phonetic,
+                     part_of_speech, example_nawat, example_es, example_en,
+                     audio_url, is_published, updater_id)
+            WHERE t.entry_id = v.entry_id AND t.dialect_code = v.dialect_code
+          `;
+        }
       }
-    }
-  });
+    },
+    // Generous, but no longer load-bearing: the statement count per chunk is
+    // fixed, so this covers a slow link rather than a long queue of round trips.
+    { timeout: 300_000, maxWait: 15_000 },
+  );
 
   console.log(
     `imported ${entryCount} entries, ${translationCount} translations from ${path} ` +
