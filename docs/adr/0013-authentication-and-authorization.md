@@ -3,6 +3,14 @@
 - **Status:** Accepted
 - **Date:** 2026-08-16 (records decisions taken 2026-08-15)
 - **Applies to:** `apps/api/src/common/guards/`, `apps/api/src/modules/auth/`
+- **Amended 2026-08-27:** the ISSUER changed and passport was removed. The
+  authorization model below — ranked roles, `@Roles`, `@Public`, identity
+  resolved from the database per request — is unchanged and is now the older
+  half of this record. What changed: this API issues the tokens it verifies
+  (RS256 with a `kid` and a key set, no JWKS fetch), and `JwtStrategy` is
+  deleted along with `@AllowMissingAccount`. See "Amendment: the verifier
+  changed, the model did not" below and
+  [ADR 18](0018-own-authentication-google-only.md).
 - **Amended 2026-08-17:** `REVIEWER` was removed from the role ladder. The
   decision below — ranked roles rather than capabilities — is unchanged; the
   ladder is three rungs instead of four. See the note in Consequences.
@@ -525,3 +533,43 @@ multi-strategy orchestration, so this was genuinely close. Passport was chosen
 because it is the convention a NestJS reviewer expects, and the cost of the
 convention here is one extra dependency rather than a second definition of
 anything.
+
+## Amendment: the verifier changed, the model did not
+
+_Added 2026-08-27._ [ADR 18](0018-own-authentication-google-only.md) moved token
+issuance in-house. Almost everything in this record is about what happens AFTER
+a token verifies, and none of that moved — which is the point worth recording,
+because the decision that survived a change of identity provider is the one that
+was drawn in the right place.
+
+**Unchanged:** ranked roles rather than capabilities; `@Roles` and `@Public`
+with authentication as the default; identity, role and locale read from the
+database on every authenticated request rather than carried as claims; the
+deactivation gate taking effect on the caller's next request; RS256 only, with
+no symmetric path and no `NODE_ENV` bypass.
+
+**Changed — the verifier.** The API holds its own RS256 key set and verifies
+against it directly, rather than fetching an issuer's JWKS. "The issuer is
+configurable, the strategy is not" (amended 2026-08-23) is now moot in both
+halves: `AUTH0_ISSUER_URL`, `AUTH0_JWKS_URI` and the mock OIDC issuer they
+existed for are all deleted, because Google permits `localhost` redirect URIs
+and local development runs the same flow as everywhere else.
+
+**Changed — passport is gone**, and with it the split this record describes
+under "Verification and identity resolution are separate". That separation was
+never a preference: a passport strategy cannot see which route it is
+authenticating, which is why identity resolution had to live in the guard, and
+why resolving it in the strategy made `POST /auth/session` unreachable by
+exactly the callers it serves. Without passport the guard does both AND sees the
+route, so the constraint that forced the split is gone rather than the split
+being abandoned.
+
+`@AllowMissingAccount` is deleted for the same reason. It marked the one route
+that had to be reachable by a verified caller with no account; that route now
+authenticates a Google assertion rather than an API token, so it is `@Public`
+and verifies in the handler.
+
+**Changed — `JwtClaims` lost `sub`.** It carried the identity provider's
+subject, which was a different value from `userId` and so worth keeping
+separately. The access token's subject is now `User.id` itself, making the two
+identical. Every other field is as this record left it.

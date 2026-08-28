@@ -10,6 +10,13 @@
     "incremental": true,
     "verbatimModuleSyntax": false,
     "noEmit": true,
+    // A Next.js app emits nothing consumers import, so declarations serve no
+    // purpose here — and requiring them makes any dependency whose exported
+    // types reference its own internals a typecheck failure (TS2883). next-auth
+    // v5's `auth` helper is one: its inferred type names types under
+    // node_modules that this project cannot re-export.
+    "declaration": false,
+    "declarationMap": false,
     "plugins": [{ "name": "next" }]
   }
 }

@@ -1,7 +1,6 @@
 import { prisma } from '@nahuat/database';
 import { JwtClaimsSchema } from '@nahuat/shared';
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthService } from './auth.service';
@@ -10,14 +9,20 @@ vi.mock('@nahuat/database', () => ({
   prisma: {
     user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() },
   },
+  // The generated enum, not a stand-in. The service uses it to name the
+  // provider on every identity lookup, so a mock that omitted it would fail
+  // only at the call site and say nothing about why.
+  Provider: { GOOGLE: 'GOOGLE', SEED: 'SEED' },
 }));
 
 const user = vi.mocked(prisma.user);
 
-// Only AUTH0_DOMAIN is read, and only to build the /userinfo URL.
-const config = { get: () => 'tenant.auth0.com' } as unknown as ConfigService<never, true>;
+const SUB = '104829571094857109485';
+const USER_ID = 'usr_1';
 
-const SUB = 'google-oauth2|1038929';
+// What findUnique receives for an identity lookup: the pair, never the subject
+// alone.
+const IDENTITY = { provider_subject: { provider: 'GOOGLE', subject: SUB } };
 
 // A P2002 shaped the way the pg driver adapter reports it. Prisma's documented
 // meta.target is undefined under that adapter; the columns live on the
@@ -55,13 +60,18 @@ const profileRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-// A fetch stub standing in for Auth0's /userinfo.
-const userinfo = (body: unknown, ok = true, status = 200) =>
-  vi.fn().mockResolvedValue({
-    ok,
-    status,
-    json: () => Promise.resolve(body),
-  });
+// A verified Google identity, as GoogleIdentityService returns it. The profile
+// arrives with the credential now, so there is no /userinfo stub here and no
+// network at all on this path — the tests that covered its four failure modes
+// were deleted with it, and the token's own verification is covered in
+// google-identity.service.spec.ts.
+const identity = (overrides: Record<string, unknown> = {}) => ({
+  sub: SUB,
+  email: 'a@b.com',
+  name: 'Ada',
+  picture: 'https://img/a.png',
+  ...overrides,
+});
 
 const errorCode = async (promise: Promise<unknown>): Promise<string> => {
   try {
@@ -78,7 +88,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    service = new AuthService(config);
+    service = new AuthService();
   });
 
   afterEach(() => {
@@ -89,17 +99,19 @@ describe('AuthService', () => {
     it('returns the identity from the database, not from the token', async () => {
       user.findUnique.mockResolvedValue(row({ role: 'ADMIN', locale: 'EN' }) as never);
 
-      const result = await service.resolveIdentity(SUB);
+      const result = await service.resolveIdentity(USER_ID);
 
-      expect(result).toEqual({ sub: SUB, userId: 'usr_1', role: 'ADMIN', locale: 'en' });
+      expect(result).toEqual({ userId: 'usr_1', role: 'ADMIN', locale: 'en' });
       expect(() => JwtClaimsSchema.strict().parse(result)).not.toThrow();
     });
 
-    it('looks the user up by auth0Id', async () => {
+    // A primary-key read. The access token's subject IS User.id, so resolution
+    // never needs to know which provider vouched for the person.
+    it('looks the user up by primary key', async () => {
       user.findUnique.mockResolvedValue(row() as never);
-      await service.resolveIdentity(SUB);
+      await service.resolveIdentity(USER_ID);
       expect(user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { auth0Id: SUB } }),
+        expect.objectContaining({ where: { id: USER_ID } }),
       );
     });
 
@@ -107,26 +119,27 @@ describe('AuthService', () => {
     // a deactivated user kept a working token until it expired.
     it('refuses a soft-deleted account', async () => {
       user.findUnique.mockResolvedValue(row({ deletedAt: new Date() }) as never);
-      await expect(service.resolveIdentity(SUB)).rejects.toBeInstanceOf(ForbiddenException);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('USER_DEACTIVATED');
+      await expect(service.resolveIdentity(USER_ID)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('USER_DEACTIVATED');
     });
 
     it('refuses an inactive account', async () => {
       user.findUnique.mockResolvedValue(row({ isActive: false }) as never);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('USER_DEACTIVATED');
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('USER_DEACTIVATED');
     });
 
-    // resolveIdentity never reaches Auth0 now — it cannot create anything, so
-    // it has no reason to. Kept as a regression guard: putting a network call
-    // back on the per-request path is the mistake this design exists to avoid.
-    it('never calls /userinfo', async () => {
-      const fetchSpy = userinfo({});
-      vi.stubGlobal('fetch', fetchSpy);
+    // A regression guard, not a description: putting a network call back on
+    // the per-request path is the mistake this whole design exists to avoid,
+    // and it would be invisible until something slow made it a latency
+    // problem.
+    it('makes no network call at all', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
       user.findUnique.mockResolvedValue(row() as never);
 
-      await service.resolveIdentity(SUB);
+      await service.resolveIdentity(USER_ID);
 
       expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
     });
   });
 
@@ -137,8 +150,8 @@ describe('AuthService', () => {
     it('refuses with ACCOUNT_NOT_PROVISIONED rather than creating one', async () => {
       user.findUnique.mockResolvedValue(null as never);
 
-      await expect(service.resolveIdentity(SUB)).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(await errorCode(service.resolveIdentity(SUB))).toBe('ACCOUNT_NOT_PROVISIONED');
+      await expect(service.resolveIdentity(USER_ID)).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(await errorCode(service.resolveIdentity(USER_ID))).toBe('ACCOUNT_NOT_PROVISIONED');
       expect(user.create).not.toHaveBeenCalled();
     });
   });
@@ -147,19 +160,15 @@ describe('AuthService', () => {
   // between the Post Login Action's deletion and this, so a name or avatar
   // changed upstream never propagated.
   describe('a returning user', () => {
-    beforeEach(() => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com', name: 'Ada Renamed' }));
-    });
-
     it('re-syncs the profile and stamps lastLoginAt', async () => {
       user.findUnique.mockResolvedValue({ id: 'usr_1', deletedAt: null, isActive: true } as never);
       user.update.mockResolvedValue(profileRow({ name: 'Ada Renamed' }) as never);
 
-      const result = await service.startSession(SUB, 'tok');
+      const result = await service.startSession(identity({ name: 'Ada Renamed' }));
 
       expect(user.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { auth0Id: SUB },
+          where: IDENTITY,
           data: expect.objectContaining({
             name: 'Ada Renamed',
             lastLoginAt: expect.any(Date),
@@ -177,7 +186,7 @@ describe('AuthService', () => {
       user.findUnique.mockResolvedValue({ id: 'usr_1', deletedAt: null, isActive: true } as never);
       user.update.mockResolvedValue(profileRow() as never);
 
-      await service.startSession(SUB, 'tok');
+      await service.startSession(identity());
 
       const data = user.update.mock.calls[0]?.[0]?.data as Record<string, unknown>;
       expect(data).not.toHaveProperty('email');
@@ -187,7 +196,7 @@ describe('AuthService', () => {
     it('refuses a deactivated account instead of recording a login', async () => {
       user.findUnique.mockResolvedValue({ id: 'usr_1', deletedAt: null, isActive: false } as never);
 
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('USER_DEACTIVATED');
+      expect(await errorCode(service.startSession(identity()))).toBe('USER_DEACTIVATED');
       expect(user.update).not.toHaveBeenCalled();
     });
 
@@ -198,7 +207,7 @@ describe('AuthService', () => {
         isActive: true,
       } as never);
 
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('USER_DEACTIVATED');
+      expect(await errorCode(service.startSession(identity()))).toBe('USER_DEACTIVATED');
       expect(user.update).not.toHaveBeenCalled();
     });
   });
@@ -208,19 +217,16 @@ describe('AuthService', () => {
       user.findUnique.mockResolvedValue(null as never);
     });
 
-    it('creates the row from the Auth0 profile', async () => {
-      vi.stubGlobal(
-        'fetch',
-        userinfo({ sub: SUB, email: 'a@b.com', name: 'Ada', picture: 'https://img/a.png' }),
-      );
+    it("creates the row from the ID token's own claims", async () => {
       user.create.mockResolvedValue(profileRow({ id: 'usr_new' }) as never);
 
-      const result = await service.startSession(SUB, 'tok');
+      const result = await service.startSession(identity());
 
       expect(user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            auth0Id: SUB,
+            provider: 'GOOGLE',
+            subject: SUB,
             email: 'a@b.com',
             name: 'Ada',
             pictureUrl: 'https://img/a.png',
@@ -231,68 +237,29 @@ describe('AuthService', () => {
       expect(result).toMatchObject({ id: 'usr_new', role: 'USER', locale: 'es' });
     });
 
-    it('sends the access token as the /userinfo credential', async () => {
-      const fetchSpy = userinfo({ sub: SUB, email: 'a@b.com' });
-      vi.stubGlobal('fetch', fetchSpy);
+    // Google does not always supply a name, and name is non-nullable.
+    it('falls back to the email when Google supplies no name', async () => {
       user.create.mockResolvedValue(profileRow({ id: 'u' }) as never);
 
-      await service.startSession(SUB, 'the-token');
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        'https://tenant.auth0.com/userinfo',
-        expect.objectContaining({ headers: { authorization: 'Bearer the-token' } }),
-      );
-    });
-
-    // Email OTP supplies no name, and name is non-nullable in the schema.
-    it('falls back to the email when the connection supplies no name', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
-      user.create.mockResolvedValue(profileRow({ id: 'u' }) as never);
-
-      await service.startSession(SUB, 'tok');
+      await service.startSession(identity({ name: undefined }));
 
       expect(user.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ name: 'a@b.com' }) }),
       );
     });
 
-    // A row created under the wrong identity would be nearly impossible to
-    // notice afterwards.
-    it('refuses when /userinfo describes a different subject', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: 'auth0|someone-else', email: 'a@b.com' }));
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('UNAUTHORIZED');
-      expect(user.create).not.toHaveBeenCalled();
-    });
-
-    it('refuses when the profile carries no email', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB }));
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('UNAUTHORIZED');
-      expect(user.create).not.toHaveBeenCalled();
-    });
-
-    it('refuses when /userinfo returns an error status', async () => {
-      vi.stubGlobal('fetch', userinfo(null, false, 401));
-      await expect(service.startSession(SUB, 'tok')).rejects.toBeInstanceOf(UnauthorizedException);
-    });
-
-    it('refuses when /userinfo is unreachable', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ETIMEDOUT')));
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('UNAUTHORIZED');
-    });
-
     // A page load fires several requests at once, so two can both miss and both
     // insert. The loser re-reads what the winner wrote. The first findUnique is
     // the initial miss; the second is the recovery read.
     it('recovers from a concurrent insert by re-reading', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
-      user.create.mockRejectedValue(uniqueViolation(['auth0_id']) as never);
+      user.create.mockRejectedValue(uniqueViolation(['provider', 'subject']) as never);
       user.findUnique
         .mockResolvedValueOnce(null as never)
         .mockResolvedValueOnce(
           profileRow({ id: 'usr_winner', role: 'CONTRIBUTOR', locale: 'EN' }) as never,
         );
 
-      const result = await service.startSession(SUB, 'tok');
+      const result = await service.startSession(identity());
 
       expect(result).toMatchObject({
         id: 'usr_winner',
@@ -305,24 +272,22 @@ describe('AuthService', () => {
     // and with an email code produce different `sub` values for one person. The
     // second arrives here as a new user whose email is already taken.
     //
-    // The original code assumed every P2002 was a race on auth0_id, re-read by
-    // auth0Id, found nothing, and let Prisma's NotFoundError — carrying the
+    // The original code assumed every P2002 was a race on google_id, re-read by
+    // googleId, found nothing, and let Prisma's NotFoundError — carrying the
     // query and absolute source paths — reach the client as a 401 body.
     it('refuses a second identity whose email is already registered', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'taken@b.com' }));
       user.create.mockRejectedValue(uniqueViolation(['email']) as never);
 
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('EMAIL_ALREADY_REGISTERED');
+      expect(await errorCode(service.startSession(identity()))).toBe('EMAIL_ALREADY_REGISTERED');
     });
 
     it('does not name the connection that owns the address', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'taken@b.com' }));
       user.create.mockRejectedValue(uniqueViolation(['email']) as never);
 
       // Confirming which connection holds an address would confirm the address
       // is registered at all — an enumeration oracle on a public login page.
       try {
-        await service.startSession(SUB, 'tok');
+        await service.startSession(identity());
         expect.unreachable('should have thrown');
       } catch (error) {
         const payload = (error as { getResponse: () => { message: string } }).getResponse();
@@ -334,29 +299,26 @@ describe('AuthService', () => {
     // uniqueViolationFields reaches into an adapter-specific error shape and
     // returns [] if Prisma ever moves it. A genuine race must still recover.
     it('still recovers from a race when the violated fields cannot be read', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
       user.create.mockRejectedValue(Object.assign(new Error('dup'), { code: 'P2002' }) as never);
       user.findUnique
         .mockResolvedValueOnce(null as never)
         .mockResolvedValueOnce(profileRow({ id: 'usr_winner' }) as never);
 
-      const result = await service.startSession(SUB, 'tok');
+      const result = await service.startSession(identity());
       expect(result).toMatchObject({ id: 'usr_winner' });
     });
 
     // Whatever this is, it is not something to guess at — and it must not leak.
     it('refuses cleanly when a unique violation leaves no readable row', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
       user.create.mockRejectedValue(uniqueViolation(['username']) as never);
       user.findUnique.mockResolvedValue(null as never);
 
-      expect(await errorCode(service.startSession(SUB, 'tok'))).toBe('UNAUTHORIZED');
+      expect(await errorCode(service.startSession(identity()))).toBe('UNAUTHORIZED');
     });
 
     it('rethrows a create failure that is not a unique violation', async () => {
-      vi.stubGlobal('fetch', userinfo({ sub: SUB, email: 'a@b.com' }));
       user.create.mockRejectedValue(new Error('connection lost') as never);
-      await expect(service.startSession(SUB, 'tok')).rejects.toThrow('connection lost');
+      await expect(service.startSession(identity())).rejects.toThrow('connection lost');
     });
   });
 });

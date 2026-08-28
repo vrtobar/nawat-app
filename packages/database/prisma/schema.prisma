@@ -50,8 +50,26 @@ model Level {
 // =============================================================================
 
 model User {
-  id      String @id @default(cuid())
-  auth0Id String @unique @map("auth0_id")
+  id       String   @id @default(cuid())
+  // WHO VOUCHED FOR THIS PERSON, and the identifier they used. Replaced
+  // `auth0Id` when authentication moved in-house (docs/adr/0018).
+  //
+  // TWO COLUMNS RATHER THAN ONE NAMED AFTER THE PROVIDER. A single `googleId`
+  // would be a schema that has to be migrated to state something it could have
+  // stated from the start, and it is already inaccurate: the seeded
+  // development users are not Google subjects. Adding a provider later needs a
+  // value in the enum and a verifier — no migration, and nothing in the token
+  // path changes.
+  //
+  // ⚠️ STILL ONE IDENTITY PER PERSON, and that is the real limit — not the
+  // naming. Two providers for one human cannot be expressed here, so account
+  // LINKING would need an `identities` table keyed the way this pair is, with
+  // a userId. That is deliberately not built: linking means deciding that a
+  // matching email proves the same person, which is an account-takeover
+  // question rather than a schema one, and the current answer is to refuse
+  // (see EMAIL_ALREADY_REGISTERED).
+  provider Provider
+  subject  String
 
   // Set once, at account creation, and never re-synced. It is the unique key,
   // so following a change at the identity provider could collide with another
@@ -113,6 +131,7 @@ model User {
   userUnitProgress   UserUnitProgress[]
   userActivity       UserActivity[]
   auditLogs          AuditLog[]
+  refreshTokens      RefreshToken[]
 
   // Attribution
   createdEntries      Entry[]       @relation("EntryCreator")
@@ -120,7 +139,77 @@ model User {
   createdTranslations Translation[] @relation("TranslationCreator")
   updatedTranslations Translation[] @relation("TranslationUpdater")
 
+  // The identity, and the reason `subject` carries no unique constraint of its
+  // own: two providers may legitimately issue the same string, and only the
+  // pair is guaranteed distinct.
+  @@unique([provider, subject])
   @@map("users")
+}
+
+// Who authenticated a user. SEED exists because the development seed writes
+// rows that never sign in — they hold authored content so that a fresh
+// database has something to show, and giving them a real provider's name would
+// be a lie the schema tells about where they came from.
+enum Provider {
+  GOOGLE
+  SEED
+}
+
+// A refresh token, hashed. One row per token; one FAMILY per login session.
+//
+// WHY THIS TABLE EXISTS AT ALL, since identity is already resolved from the
+// database on every authenticated request: that revokes an ACCOUNT, and cannot
+// revoke a SESSION. "Sign out my other devices", or ending one stolen session
+// without disabling the person entirely, has no expression without a record of
+// which sessions exist. See docs/adr/0018.
+model RefreshToken {
+  id String @id @default(cuid())
+
+  // THE SESSION. Every token rotated out of one login shares this, so
+  // revocation — whether deliberate or triggered by reuse detection — acts on
+  // the family rather than on a single token, which by then is already spent.
+  familyId String @map("family_id")
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // SHA-256 of the token, never the token. Not bcrypt or argon2, and the
+  // reason is not only cost: those are deliberately slow to make guessing a
+  // human-chosen password expensive, and this value is 32 bytes of CSPRNG
+  // output with nothing to guess. A salted hash is also unsearchable — the
+  // refresh path would have to scan every row and compare one by one, where a
+  // deterministic digest is a unique-index seek.
+  tokenHash String @unique @map("token_hash")
+
+  // ABSOLUTE expiry, carried unchanged through every rotation because it
+  // belongs to the family rather than to this row. Reset on each refresh, a
+  // session refreshed hourly would never end and the cap would mean nothing.
+  familyExpiresAt DateTime @map("family_expires_at")
+
+  // IDLE expiry, belonging to this row: the deadline for using THIS token
+  // before the session is treated as abandoned.
+  idleExpiresAt DateTime @map("idle_expires_at")
+
+  // Set when the token is spent, by a conditional update predicated on it
+  // still being null. That condition is what makes rotation single-use under
+  // concurrency — two simultaneous refreshes would otherwise both observe null
+  // and both succeed, which is not merely a double issue but a hole in the
+  // reuse detection below.
+  usedAt DateTime? @map("used_at")
+
+  // Set when the family is revoked: logout, or a spent token presented a
+  // second time.
+  revokedAt DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Reuse detection and logout both act on the whole family, so this index
+  // serves the only write that matters on the refresh path.
+  @@index([familyId])
+  // "Sign out everywhere", and the cleanup of a deactivated account's
+  // sessions.
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 // Locales content can be served in. Uppercase to match every other enum here;

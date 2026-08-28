@@ -1,250 +1,240 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthService } from '../../modules/auth/auth.service';
+import type { TokenService } from '../../modules/auth/token.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
-const guardWith = (isPublic: boolean) => {
+const CLAIMS = { userId: 'usr_1', role: 'USER', locale: 'es' };
+
+interface Harness {
+  guard: JwtAuthGuard;
+  context: never;
+  request: { headers: Record<string, string>; user?: unknown };
+  getAllAndOverride: ReturnType<typeof vi.fn>;
+  verifyAccessToken: ReturnType<typeof vi.fn>;
+  resolveIdentity: ReturnType<typeof vi.fn>;
+}
+
+// `authorization: null` means the header is absent. Not `undefined`, which a
+// default parameter would silently replace with the default value — a trap
+// this file walked into once already, turning three "no header" cases into
+// assertions about the happy path.
+const build = ({
+  isPublic = false,
+  authorization = 'Bearer a.b.c',
+}: { isPublic?: boolean; authorization?: string | null } = {}): Harness => {
   const getAllAndOverride = vi.fn().mockReturnValue(isPublic);
-  const resolveIdentity = vi.fn();
+  const verifyAccessToken = vi.fn().mockResolvedValue({ userId: 'usr_1' });
+  const resolveIdentity = vi.fn().mockResolvedValue(CLAIMS);
+
+  const request: { headers: Record<string, string>; user?: unknown } = {
+    headers: authorization === null ? {} : { authorization },
+  };
+
   const guard = new JwtAuthGuard(
     { getAllAndOverride } as unknown as Reflector,
-    {
-      resolveIdentity,
-    } as unknown as AuthService,
+    { verifyAccessToken } as unknown as TokenService,
+    { resolveIdentity } as unknown as AuthService,
   );
-  return { guard, getAllAndOverride, resolveIdentity };
+
+  const context = {
+    getHandler: () => undefined,
+    getClass: () => undefined,
+    switchToHttp: () => ({ getRequest: () => request }),
+  } as never;
+
+  return { guard, context, request, getAllAndOverride, verifyAccessToken, resolveIdentity };
 };
 
-const context = {
-  getHandler: () => undefined,
-  getClass: () => undefined,
-} as never;
+const payloadOf = async (promise: Promise<unknown>): Promise<Record<string, unknown>> => {
+  try {
+    await promise;
+    throw new Error('expected a rejection, but it resolved');
+  } catch (error) {
+    return (error as UnauthorizedException).getResponse() as Record<string, unknown>;
+  }
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe('JwtAuthGuard', () => {
-  it('lets a @Public route through without authenticating', async () => {
-    // The ECS probe carries no credentials. If this regresses, the container
-    // fails its own health check and the circuit breaker rolls back a working
-    // deploy — with the application itself fine.
-    const { guard } = guardWith(true);
+  describe('@Public', () => {
+    it('lets a public route through without authenticating', async () => {
+      // The ECS probe carries no credentials. If this regresses, the container
+      // fails its own health check and the circuit breaker rolls back a working
+      // deploy — with the application itself fine.
+      const { guard, context, verifyAccessToken } = build({ isPublic: true, authorization: null });
 
-    await expect(guard.canActivate(context)).resolves.toBe(true);
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(verifyAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('checks both handler and class metadata', async () => {
+      // The health controller marks the whole class, not the method.
+      const { guard, context, getAllAndOverride } = build({ isPublic: true });
+
+      await guard.canActivate(context);
+
+      expect(getAllAndOverride).toHaveBeenCalledWith('isPublic', [undefined, undefined]);
+    });
   });
 
-  it('checks both handler and class metadata', async () => {
-    // The health controller marks the whole class, not the method.
-    const { guard, getAllAndOverride } = guardWith(true);
-
-    await guard.canActivate(context);
-
-    expect(getAllAndOverride).toHaveBeenCalledWith('isPublic', [undefined, undefined]);
-  });
-
-  // THE COMPOSITION THIS FILE EXISTS TO PIN. Identity resolution lived in the
-  // strategy until 2026-08-25, which made POST /auth/session unreachable by
-  // anyone without an account — the endpoint that creates one. Nothing caught
-  // it: the service and the strategy were each correct in isolation, and only a
-  // real sign-in with a new address surfaced the deadlock.
-  describe('account resolution', () => {
-    const authenticated = (allowMissingAccount: boolean) => {
-      const request: { user: unknown } = { user: { sub: 'google-oauth2|1' } };
-      const ctx = {
-        getHandler: () => undefined,
-        getClass: () => undefined,
-        switchToHttp: () => ({ getRequest: () => request }),
-      } as never;
-
-      const getAllAndOverride = vi
-        .fn()
-        .mockImplementation((key: string) => (key === 'isPublic' ? false : allowMissingAccount));
-      const resolveIdentity = vi.fn().mockResolvedValue({
-        sub: 'google-oauth2|1',
-        userId: 'usr_1',
-        role: 'USER',
-        locale: 'es',
+  describe('the bearer header', () => {
+    it('passes the token to verification and the verified subject to resolution', async () => {
+      const { guard, context, request, verifyAccessToken, resolveIdentity } = build({
+        authorization: 'Bearer the.access.token',
       });
 
-      const guard = new JwtAuthGuard(
-        { getAllAndOverride } as unknown as Reflector,
-        {
-          resolveIdentity,
-        } as unknown as AuthService,
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+
+      expect(verifyAccessToken).toHaveBeenCalledWith('the.access.token');
+      // The user id comes from the VERIFIED token, never from the request.
+      expect(resolveIdentity).toHaveBeenCalledWith('usr_1');
+      expect(request.user).toEqual(CLAIMS);
+    });
+
+    it('accepts the scheme in any case, as RFC 7235 defines it', async () => {
+      const { guard, context, verifyAccessToken } = build({ authorization: 'bEaReR a.b.c' });
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(verifyAccessToken).toHaveBeenCalledWith('a.b.c');
+    });
+
+    it.each([
+      ['absent', null],
+      ['empty', ''],
+      ['schemeless', 'a.b.c'],
+      ['the wrong scheme', 'Basic a.b.c'],
+      ['Bearer with no token', 'Bearer'],
+      ['Bearer with an empty token', 'Bearer '],
+      // Taking the second segment regardless would accept this.
+      ['carrying extra segments', 'Bearer a.b.c and-something-else'],
+    ])(
+      'refuses a %s Authorization header without verifying anything',
+      async (_l, authorization) => {
+        const { guard, context, verifyAccessToken } = build({ authorization });
+
+        await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+        expect(verifyAccessToken).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  // TWO SOURCES, TWO RULES — the distinction that used to live in passport's
+  // err/info split and now lives in two statements. Verification failures are
+  // safe to surface; anything thrown while reading the database is not.
+  describe('what a caller is told', () => {
+    it('surfaces why verification failed', async () => {
+      // 'exp' means refresh and retry; a bad signature means the client is
+      // wrong. Collapsing both to one message makes that undiagnosable from
+      // the response alone.
+      const { guard, context, verifyAccessToken } = build();
+      verifyAccessToken.mockRejectedValue(
+        new UnauthorizedException({
+          code: 'UNAUTHORIZED',
+          message: '"exp" claim timestamp check failed',
+        }),
       );
 
-      // The strategy attaches { sub }; passport's own verification is not under
-      // test here, so AuthGuard's canActivate is stubbed on the prototype the
-      // guard inherits from.
-      const passportProto = Object.getPrototypeOf(Object.getPrototypeOf(guard)) as {
-        canActivate: (ctx: unknown) => Promise<boolean>;
-      };
-      vi.spyOn(passportProto, 'canActivate').mockResolvedValue(true);
-
-      return { guard, ctx, request, resolveIdentity };
-    };
-
-    it('replaces { sub } with the full claim set on an ordinary route', async () => {
-      const { guard, ctx, request, resolveIdentity } = authenticated(false);
-
-      await expect(guard.canActivate(ctx)).resolves.toBe(true);
-
-      expect(resolveIdentity).toHaveBeenCalledWith('google-oauth2|1');
-      expect(request.user).toMatchObject({ userId: 'usr_1', role: 'USER' });
+      expect(await payloadOf(guard.canActivate(context))).toMatchObject({
+        message: '"exp" claim timestamp check failed',
+      });
     });
 
-    it('skips resolution for @AllowMissingAccount, leaving { sub }', async () => {
-      const { guard, ctx, request, resolveIdentity } = authenticated(true);
+    it('throws a structured payload the error envelope can carry', async () => {
+      // A bare UnauthorizedException serialises to Nest's default shape, which
+      // is not the documented envelope.
+      const { guard, context } = build({ authorization: null });
 
-      await expect(guard.canActivate(ctx)).resolves.toBe(true);
-
-      // The whole point: POST /auth/session must run for a caller who has no
-      // account, because it is what creates one.
-      expect(resolveIdentity).not.toHaveBeenCalled();
-      expect(request.user).toEqual({ sub: 'google-oauth2|1' });
-    });
-  });
-
-  it('rejects when passport produced no user', () => {
-    const { guard } = guardWith(false);
-
-    expect(() => guard.handleRequest(null, false, undefined)).toThrow(UnauthorizedException);
-  });
-
-  it('throws a structured payload the error envelope can carry', () => {
-    // A bare UnauthorizedException serialises to Nest's default shape, which
-    // is not the documented envelope. The filter passes a structured payload
-    // through intact.
-    const { guard } = guardWith(false);
-
-    try {
-      guard.handleRequest(null, false, undefined);
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
+      expect(await payloadOf(guard.canActivate(context))).toMatchObject({
         code: 'UNAUTHORIZED',
         message: 'Authentication required',
       });
-    }
-  });
-
-  it('surfaces why the token failed', () => {
-    // 'jwt expired' means refresh and retry; 'invalid signature' means the
-    // client is wrong. Collapsing both to one message makes that
-    // undiagnosable from the response alone.
-    const { guard } = guardWith(false);
-
-    try {
-      guard.handleRequest(null, false, new Error('jwt expired'));
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
-        message: 'jwt expired',
-      });
-    }
-  });
-
-  it('surfaces a reason thrown by validate(), not just verification failures', () => {
-    // The strategy rejects a token whose custom claims are missing. Passport
-    // reports that through `err`, never `info`, so reading only `info`
-    // collapsed it to "Authentication required" and threw away the diagnosis.
-    const { guard } = guardWith(false);
-    const thrown = new UnauthorizedException({
-      code: 'UNAUTHORIZED',
-      message: 'Token is missing required claims',
     });
 
-    try {
-      guard.handleRequest(thrown, false, undefined);
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
-        message: 'Token is missing required claims',
-      });
-    }
-  });
+    it('passes a deliberate refusal through with its own status', async () => {
+      // Flattening a deactivated account into a 401 tells the person to sign in
+      // again, which is advice that cannot work.
+      const { guard, context, resolveIdentity } = build();
+      resolveIdentity.mockRejectedValue(
+        new ForbiddenException({
+          code: 'USER_DEACTIVATED',
+          message: 'This account has been deactivated',
+        }),
+      );
 
-  // Added 2026-08-24 with the per-request identity lookup: validate() now
-  // refuses a deactivated account with a 403, and flattening that into the
-  // generic 401 below told the caller to re-authenticate — advice that cannot
-  // work for an account that is disabled.
-  it('rethrows a deliberate refusal from validate() with its own status', () => {
-    const { guard } = guardWith(false);
-    const thrown = new ForbiddenException({
-      code: 'USER_DEACTIVATED',
-      message: 'This account has been deactivated',
-    });
-
-    try {
-      guard.handleRequest(thrown, false, undefined);
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ForbiddenException);
-      expect((error as ForbiddenException).getResponse()).toMatchObject({
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(await payloadOf(guard.canActivate(context))).toMatchObject({
         code: 'USER_DEACTIVATED',
       });
-    }
-  });
+    });
 
-  // Added 2026-08-24. validate() queries the database and calls Auth0, so an
-  // unexpected throw there can carry an operator-facing message. One did: a
-  // Prisma error reached a client with its failing query, the absolute source
-  // path and the surrounding lines, because `err` used to be read with the same
-  // rule as `info`.
-  it('does not surface the message of an unexpected error from validate()', () => {
-    const { guard } = guardWith(false);
-    const leaky = new Error(
-      'Invalid `prisma.user.findUniqueOrThrow()` invocation in /Users/x/apps/api/src/...',
-    );
+    it('passes ACCOUNT_NOT_PROVISIONED through rather than reshaping it', async () => {
+      const { guard, context, resolveIdentity } = build();
+      resolveIdentity.mockRejectedValue(
+        new UnauthorizedException({
+          code: 'ACCOUNT_NOT_PROVISIONED',
+          message: 'No account exists for this sign-in. Please sign in again.',
+        }),
+      );
 
-    try {
-      guard.handleRequest(leaky, false, undefined);
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      const payload = (error as UnauthorizedException).getResponse() as { message: string };
+      expect(await payloadOf(guard.canActivate(context))).toMatchObject({
+        code: 'ACCOUNT_NOT_PROVISIONED',
+      });
+    });
+
+    // ⚠️ THE ONE WITH A HISTORY. A Prisma error reached a client on 2026-08-24
+    // carrying its message, the failing query, an absolute source path and the
+    // surrounding lines — because the rule for thrown errors was the same as
+    // the rule for verification failures. It is not.
+    it('does not surface the message of an unexpected error from resolution', async () => {
+      const { guard, context, resolveIdentity } = build();
+      resolveIdentity.mockRejectedValue(
+        new Error(
+          'Invalid `prisma.user.findUnique()` invocation in /Users/x/apps/api/src/modules/...',
+        ),
+      );
+
+      const payload = await payloadOf(guard.canActivate(context));
+
       expect(payload.message).toBe('Authentication required');
       expect(payload.message).not.toContain('prisma');
       expect(payload.message).not.toContain('/Users/');
-    }
+    });
+
+    it('leaves the request unauthenticated when resolution fails', async () => {
+      const { guard, context, request, resolveIdentity } = build();
+      resolveIdentity.mockRejectedValue(new Error('boom'));
+
+      await expect(guard.canActivate(context)).rejects.toThrow();
+
+      expect(request.user).toBeUndefined();
+    });
   });
 
-  // The rule differs by SOURCE, not by type. passport reports an expired or
-  // malformed token as an Error on `info`, and those messages are a closed set
-  // from jsonwebtoken — exactly the diagnosis a caller needs. Suppressing them
-  // too would undo the 2026-08-16 fix above.
-  it('still surfaces a passport verification failure delivered as an Error', () => {
-    const { guard } = guardWith(false);
+  // Verification must come before anything reads the database, or an unverified
+  // token gets a query run on its behalf.
+  it('does not resolve identity when verification fails', async () => {
+    const { guard, context, verifyAccessToken, resolveIdentity } = build();
+    verifyAccessToken.mockRejectedValue(new UnauthorizedException({ code: 'UNAUTHORIZED' }));
 
-    try {
-      guard.handleRequest(null, false, new Error('jwt expired'));
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
-        message: 'jwt expired',
-      });
-    }
+    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    expect(resolveIdentity).not.toHaveBeenCalled();
   });
 
-  // The passthrough above must not swallow a plain Error, which is how a
-  // verification failure arrives alongside `info`.
-  it('prefers the verification failure when both are present', () => {
-    // `info` describes why the token itself failed, which is more specific
-    // than whatever wrapper `err` carries.
-    const { guard } = guardWith(false);
-
-    try {
-      guard.handleRequest(new Error('wrapped'), false, new Error('jwt expired'));
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
-        message: 'jwt expired',
-      });
-    }
-  });
-
-  it('passes a verified user through', () => {
-    const { guard } = guardWith(false);
-    const user = { sub: 'auth0|1', userId: 'usr_1', role: 'USER' };
-
-    expect(guard.handleRequest(null, user, undefined)).toBe(user);
-  });
+  // NOTE ON WHAT IS NO LONGER HERE. This file used to pin @AllowMissingAccount,
+  // which let a verified caller with no account reach POST /auth/session — the
+  // endpoint that creates one. Identity resolution had lived in the passport
+  // strategy, which cannot see which route it is authenticating, so the account
+  // check ran before the handler and made that route unreachable by exactly the
+  // people it served.
+  //
+  // The decorator is gone because the fault it worked around is: /auth/session
+  // is now @Public and verifies a Google assertion itself, since the caller has
+  // no token from this API yet. The guard is not in that path at all, so the
+  // composition cannot recur in this shape.
 });

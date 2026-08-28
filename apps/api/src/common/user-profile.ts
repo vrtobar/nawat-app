@@ -5,7 +5,7 @@ import { LOCALE_TO_WIRE } from './locale';
 // The columns GET /users/me and POST /auth/session both return, in one place
 // so the two cannot drift.
 //
-// Listed explicitly rather than returning the row: auth0Id and deletedAt are
+// Listed explicitly rather than returning the row: googleId and deletedAt are
 // not the client's business, and a select-all would start leaking whatever the
 // next migration adds. lastLoginAt is deliberately absent — it exists to
 // answer "is this account dormant", which is an operator question rather than

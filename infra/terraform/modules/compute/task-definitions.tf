@@ -112,22 +112,24 @@ resource "aws_ecs_task_definition" "api" {
         # Enables the real SQS producer instead of the synchronous local
         # fallback. Queue URLs arrive with the messaging module.
         { name = "SQS_ENABLED", value = "false" },
+        # `iss` and `aud` on every access token this API mints, and the values
+        # it demands when verifying one. Derived from this environment's own API
+        # hostname rather than shared, so a token minted for staging is
+        # structurally invalid against production even before its signature is
+        # checked (docs/adr/0018).
+        { name = "JWT_ISSUER", value = "https://${var.api_domain}" },
+        { name = "JWT_AUDIENCE", value = "https://${var.api_domain}" },
       ])
 
       secrets = concat(local.db_secrets, [
-        { name = "AUTH0_DOMAIN", valueFrom = "${var.secret_arns["auth0"]}:domain::" },
-        { name = "AUTH0_CLIENT_ID", valueFrom = "${var.secret_arns["auth0"]}:clientId::" },
-        { name = "AUTH0_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0"]}:clientSecret::" },
-        { name = "AUTH0_AUDIENCE", valueFrom = "${var.secret_arns["auth0"]}:audience::" },
-        { name = "AUTH0_MGMT_CLIENT_ID", valueFrom = "${var.secret_arns["auth0_mgmt"]}:clientId::" },
-        { name = "AUTH0_MGMT_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0_mgmt"]}:clientSecret::" },
-        # INTERNAL_SECRET was injected here until 2026-08-24, guarding
-        # POST /auth/role for the Auth0 Post Login Action. Both the endpoint and
-        # the Action are gone — identity is resolved per request from the
-        # database — so the API no longer reads it. The Secrets Manager secret
-        # itself still exists in each environment's foundation state; removing
-        # it is a separate human apply, deliberately not bundled with an
-        # application change.
+        # No JSON key suffix: this secret holds the base64 key set as a plain
+        # string, exactly as `auth:keygen` prints it.
+        { name = "JWT_SIGNING_KEYS", valueFrom = var.secret_arns["jwt_signing"] },
+        # The audience every Google ID token must carry. The API takes the
+        # client ID alone — the SECRET belongs to the web container below, which
+        # performs the code exchange — so a compromise here yields no credential
+        # able to obtain a Google identity.
+        { name = "GOOGLE_CLIENT_ID", valueFrom = "${var.secret_arns["google"]}:clientId::" },
       ])
 
       logConfiguration = {
@@ -182,25 +184,43 @@ resource "aws_ecs_task_definition" "web" {
         { name = "API_URL", value = "https://${var.api_domain}" },
         { name = "NEXT_PUBLIC_API_URL", value = "https://${var.api_domain}" },
         { name = "APP_BASE_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
+        # ⚠️ AUTH_URL IS NOT OPTIONAL BEHIND A LOAD BALANCER, and its absence
+        # fails in two ways at once — both seen on staging 2026-08-28.
+        #
+        # Auth.js derives `trustHost` from, among other things,
+        # `NODE_ENV !== "production"`. Locally that is true and the host is
+        # trusted; in this container NODE_ENV IS production, so without one of
+        # AUTH_URL / AUTH_TRUST_HOST / VERCEL / CF_PAGES it refuses the request
+        # as an untrusted host and the sign-in dies as `error=Configuration`.
+        # The condition that triggers it is the very thing that distinguishes a
+        # deployed environment, so no local run can reproduce it.
+        #
+        # It also pins the ORIGIN. Auth.js rewrites the request origin to this
+        # value; without it the origin is inferred from the request, which
+        # behind the ALB is the container's own address — a sign-in redirected
+        # to https://ip-10-1-4-33.ec2.internal:3000. That is the second time
+        # this project has sent a user to an internal hostname; the first was
+        # the Auth0-era session-failed route, fixed the same way.
+        #
+        # Preferred over AUTH_TRUST_HOST because it does both jobs and depends
+        # on no header: trusting the Host header would work only while nothing
+        # can reach the container except through the ALB.
+        { name = "AUTH_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
       ]
 
-      # v4 SDK variable names. AUTH0_SECRET encrypts the session cookie and is
-      # its own key inside the auth0 secret, never shared with another value —
-      # compromising one would otherwise compromise the other across unrelated
-      # trust boundaries.
+      # BOTH HALVES OF THE GOOGLE CLIENT LIVE HERE and nowhere else. This tier
+      # performs the authorization code exchange, which is what needs the
+      # secret; the API container above verifies an assertion Google already
+      # signed and takes the client ID alone.
+      #
+      # AUTH_SECRET is a separate Secrets Manager secret rather than another key
+      # in the Google one. They rotate for unrelated reasons and answer to
+      # different trust boundaries, and sharing an ARN makes that separation
+      # nominal — anything able to read one key reads every key in the secret.
       secrets = [
-        { name = "AUTH0_DOMAIN", valueFrom = "${var.secret_arns["auth0"]}:domain::" },
-        { name = "AUTH0_CLIENT_ID", valueFrom = "${var.secret_arns["auth0"]}:clientId::" },
-        { name = "AUTH0_CLIENT_SECRET", valueFrom = "${var.secret_arns["auth0"]}:clientSecret::" },
-        { name = "AUTH0_SECRET", valueFrom = "${var.secret_arns["auth0"]}:sessionSecret::" },
-        # The web app must REQUEST this audience when it authorizes, or Auth0
-        # mints an opaque access token instead of a JWT. The API would then
-        # reject every request before signature verification, because what
-        # arrives is not a JWT at all — a failure that looks like broken auth
-        # rather than missing configuration.
-        #
-        # Same key the API container reads above: one identifier, one place.
-        { name = "AUTH0_AUDIENCE", valueFrom = "${var.secret_arns["auth0"]}:audience::" },
+        { name = "GOOGLE_CLIENT_ID", valueFrom = "${var.secret_arns["google"]}:clientId::" },
+        { name = "GOOGLE_CLIENT_SECRET", valueFrom = "${var.secret_arns["google"]}:clientSecret::" },
+        { name = "AUTH_SECRET", valueFrom = var.secret_arns["web_session"] },
       ]
 
       logConfiguration = {

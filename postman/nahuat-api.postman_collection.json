@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Nahuat API",
-    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables — every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat — Local** → http://localhost:3001\n- **Nahuat — Staging** → https://api.staging.nahuat.com\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, verified via JWKS against the tenant) — there is no local/HS256 bypass (ADR 13).\n\nThe token carries only `sub`. Since 2026-08-24 the API resolves the platform user id and role from its own database on every request, so a role change takes effect immediately rather than at the next login, and a deactivated account is refused on its next request with USER_DEACTIVATED. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Log into the web app for the environment you are targeting and copy the access token it sends to the API.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
+    "description": "Collection for the Nahuat API (NestJS). URI-versioned under /api/v1; health opts out at /api/health.\n\n## Environments\nPick an environment (top-right) rather than editing collection variables \u2014 every URL is driven by `{{baseUrl}}`/`{{healthBase}}`:\n- **Nahuat \u2014 Local** \u2192 http://localhost:3001\n- **Nahuat \u2014 Staging** \u2192 https://api.staging.nahuat.com\n\n## Auth\nA global JwtAuthGuard protects every route unless marked public. Tokens are real Auth0 access tokens (RS256, verified via JWKS against the tenant) \u2014 there is no local/HS256 bypass (ADR 13).\n\nThe token carries only `sub`. Since 2026-08-24 the API resolves the platform user id and role from its own database on every request, so a role change takes effect immediately rather than at the next login, and a deactivated account is refused on its next request with USER_DEACTIVATED. Roles are ranked USER < CONTRIBUTOR < ADMIN.\n\n- **Public** routes (dictionary reads, GET /dialects, health) need no token and work in every environment.\n- **Authed** routes read `{{token}}` as a Bearer token. Log into the web app for the environment you are targeting and copy the access token it sends to the API.\n\nFill `entryId`/`translationId`/`dialectId`/`slug` from a browse/list response.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -95,21 +95,36 @@
     },
     {
       "name": "Session",
-      "description": "Getting a token. /auth/access-token is mounted on the WEB app by the Auth0 SDK ({{webBaseUrl}}), not on the API ({{baseUrl}}) — the API never issues tokens, it only verifies them.\n\nIt authorises by SESSION COOKIE, so Postman needs the cookie the browser holds. Sign in at {{webBaseUrl}}, then copy the session cookie into Postman's Cookies manager for that domain (Cookies, under the Send button). Once it is there this request works and re-running it refreshes an expired token.\n\nIf you would rather not manage cookies, open {{webBaseUrl}}/auth/access-token in the browser and paste the `token` value into the environment by hand.",
+      "description": "Getting a token. THE API ISSUES THEM NOW \u2014 it is its own authorization server (ADR 18), where it previously only verified tokens minted by Auth0.\n\n\u26a1 THE LOCAL SHORTCUT, and what you probably want:\n\n    npm run db:seed:dev\n    npm run --silent auth:token --workspace=api -- admin\n\nThat mints a real access token for a seeded user and prints it; paste it into {{token}}. `admin`, `contributor` and `user` pick which seeded row it names. It signs with the same key the API verifies with, so it is not a test double \u2014 the only thing making it safe is that JWT_SIGNING_KEYS is per environment.\n\nAgainst staging you cannot do that, so you need a real sign-in: use the browser at {{webBaseUrl}} and take the id_token, then run Start session.\n\nA token does not carry your rank. It carries only `sub` \u2014 which is User.id, this API's own identifier, not Google's \u2014 and role is read from that row on every request. Changing a role in the database applies to the next request, with no new token and no re-login.",
       "item": [
         {
-          "name": "Get access token → saves {{token}}",
+          "name": "Start session (Google ID token) \u2192 saves {{token}} + {{refreshToken}}",
           "request": {
             "auth": {
               "type": "noauth"
             },
-            "method": "GET",
-            "url": {
-              "raw": "{{webBaseUrl}}/auth/access-token",
-              "host": ["{{webBaseUrl}}"],
-              "path": ["auth", "access-token"]
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"{{googleIdToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Returns { token, expiresAt } for the signed-in session and writes `token` into the active environment, so every authed request in this collection picks it up.\n\nThe token carries only `sub`. Your rank comes from your user row, which the API reads on every request — so changing a role in the database takes effect immediately and does NOT need a new token."
+            "url": {
+              "raw": "{{baseUrl}}/auth/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "session"]
+            },
+            "description": "Exchanges a Google ID token for this API's own token pair, creating the account if the subject has never been seen.\n\nGETTING AN ID TOKEN IS THE AWKWARD PART, and there is no way around it in Postman: it is issued by Google to a caller holding the client secret, which only the web app has. Sign in at {{webBaseUrl}} and take the id_token from the callback, or skip this request entirely \u2014 see the folder description for the local shortcut.\n\n@Public, because the caller has no token from this API yet. That is what this endpoint is for. It is not unauthenticated: the handler verifies Google's signature, issuer, audience and email_verified before anything else happens.\n\nIdempotent per sign-in \u2014 calling it again re-syncs the profile, moves lastLoginAt, and opens a NEW session, which is correct because each sign-in is one."
           },
           "event": [
             {
@@ -117,33 +132,141 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// Writes the token into the active environment so the",
-                  "// collection-level Bearer auth ({{token}}) picks it up.",
                   "let body;",
-                  "try {",
-                  "    body = pm.response.json();",
-                  "} catch (e) {",
-                  "    body = null;",
-                  "}",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
                   "",
-                  "pm.test('200 with a token', function () {",
+                  "const tokens = body && body.data && body.data.tokens;",
+                  "",
+                  "pm.test('200 with a token pair', function () {",
                   "    pm.response.to.have.status(200);",
-                  "    pm.expect(body && body.token, 'no token in response').to.be.a('string');",
+                  "    pm.expect(tokens && tokens.accessToken, 'no accessToken').to.be.a('string');",
+                  "    pm.expect(tokens && tokens.refreshToken, 'no refreshToken').to.be.a('string');",
                   "});",
                   "",
-                  "if (pm.response.code === 401 || pm.response.code === 302) {",
-                  "    // No session cookie, or it expired. Postman does not follow the",
-                  "    // login redirect usefully — sign in in the browser first.",
-                  "    console.log('Not signed in. Sign in at the web app, then copy the session cookie into Postman.');",
-                  "} else if (body && typeof body.token === 'string') {",
-                  "    pm.environment.set('token', body.token);",
-                  "    const expiresAt = body.expiresAt ? new Date(body.expiresAt * 1000).toISOString() : 'unknown';",
-                  "    console.log('Saved {{token}}. Expires: ' + expiresAt);",
+                  "if (tokens) {",
+                  "    pm.environment.set('token', tokens.accessToken);",
+                  "    pm.environment.set('refreshToken', tokens.refreshToken);",
+                  "    console.log('Saved {{token}} and {{refreshToken}}. Access token expires in ' +",
+                  "        tokens.expiresIn + 's.');",
                   "} else {",
-                  "    // Leave the old token alone rather than blanking it: a transient",
+                  "    // Leave the old values alone rather than blanking them: a transient",
                   "    // failure should not also log you out of every other request.",
-                  "    console.log('No token saved; the previous {{token}} is unchanged.');",
+                  "    console.log('Nothing saved; the previous {{token}} is unchanged.');",
                   "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh \u2192 rotates, saves the new pair",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Spends {{refreshToken}} and returns a new pair.\n\nSINGLE USE. The token you send is dead the moment this returns, which is why the test script overwrites both variables. Sending the same one twice is treated as theft and revokes the whole session \u2014 try it and watch the next request fail.\n\nThe absolute deadline (30 days) belongs to the login and does NOT reset here; only the 14-day idle deadline does. A session refreshed forever still ends."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;",
+                  "try { body = pm.response.json(); } catch (e) { body = null; }",
+                  "",
+                  "const tokens = body && body.data && body.data.tokens;",
+                  "",
+                  "pm.test('200 with a token pair', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(tokens && tokens.accessToken, 'no accessToken').to.be.a('string');",
+                  "    pm.expect(tokens && tokens.refreshToken, 'no refreshToken').to.be.a('string');",
+                  "});",
+                  "",
+                  "if (tokens) {",
+                  "    pm.environment.set('token', tokens.accessToken);",
+                  "    pm.environment.set('refreshToken', tokens.refreshToken);",
+                  "    console.log('Saved {{token}} and {{refreshToken}}. Access token expires in ' +",
+                  "        tokens.expiresIn + 's.');",
+                  "} else {",
+                  "    // Leave the old values alone rather than blanking them: a transient",
+                  "    // failure should not also log you out of every other request.",
+                  "    console.log('Nothing saved; the previous {{token}} is unchanged.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    console.log('Session over. Either the token was already spent \u2014 which revokes the whole family \u2014 or it expired. Start a new session.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Log out \u2192 ends this session",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revokes every token in this session's family.\n\nTakes the refresh token rather than the access token, because an access token names a USER and this has to name a SESSION \u2014 signing out here must not sign you out on another device.\n\nSucceeds for a token that does not exist, deliberately: logging out is not a place to tell a caller whether a credential was real, and what they asked for is true either way."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// The pair is dead server-side; clearing it locally keeps the",
+                  "// environment honest about that.",
+                  "pm.environment.set('token', '');",
+                  "pm.environment.set('refreshToken', '');",
+                  "console.log('Cleared {{token}} and {{refreshToken}}.');"
                 ]
               }
             }
@@ -152,7 +275,7 @@
       ]
     },
     {
-      "name": "Dictionary — reads (public)",
+      "name": "Dictionary \u2014 reads (public)",
       "item": [
         {
           "name": "Browse entries",
@@ -178,7 +301,7 @@
                   "key": "type",
                   "value": "WORD",
                   "disabled": true,
-                  "description": "WORD | EXPRESSION (PHRASE is rejected — lesson-only)"
+                  "description": "WORD | EXPRESSION (PHRASE is rejected \u2014 lesson-only)"
                 },
                 {
                   "key": "partOfSpeech",
@@ -201,7 +324,7 @@
                   "key": "locale",
                   "value": "en",
                   "disabled": true,
-                  "description": "es (default) | en — resolves gloss/example language"
+                  "description": "es (default) | en \u2014 resolves gloss/example language"
                 }
               ]
             },
@@ -290,7 +413,7 @@
       ]
     },
     {
-      "name": "Dictionary — writes (CONTRIBUTOR / ADMIN)",
+      "name": "Dictionary \u2014 writes (CONTRIBUTOR / ADMIN)",
       "item": [
         {
           "name": "Create entry (CONTRIBUTOR)",
@@ -331,7 +454,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"niño | bebé\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[ˈkunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El niño duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
+              "raw": "{\n  \"nawatContent\": \"kunet\",\n  \"type\": \"WORD\",\n  \"translations\": [\n    {\n      \"dialectCode\": \"common\",\n      \"contentEs\": \"ni\u00f1o | beb\u00e9\",\n      \"contentEn\": \"child | baby\",\n      \"partOfSpeech\": \"NOUN\",\n      \"phonetic\": \"[\u02c8kunet]\",\n      \"exampleNawat\": \"Ne kunet kochi.\",\n      \"exampleEs\": \"El ni\u00f1o duerme.\",\n      \"exampleEn\": \"The child sleeps.\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -370,7 +493,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["entries", "{{entryId}}"]
             },
-            "description": "Partial update. Renaming regenerates the slug. Contributor edits of published content are gated.\n\n**Requires `expectedUpdatedAt`** — the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
+            "description": "Partial update. Renaming regenerates the slug. Contributor edits of published content are gated.\n\n**Requires `expectedUpdatedAt`** \u2014 the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
           }
         },
         {
@@ -394,7 +517,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["entries", "{{entryId}}", "unpublish"]
             },
-            "description": "Returns a published entry to draft, cascading to its published translations — the mirror of Publish, which cascades to its drafts.\n\nExists because publishing was otherwise one-way: an entry published by mistake could only be resolved by deleting it and creating it again, losing its id, slug and attribution over what is usually a wrong gloss."
+            "description": "Returns a published entry to draft, cascading to its published translations \u2014 the mirror of Publish, which cascades to its drafts.\n\nExists because publishing was otherwise one-way: an entry published by mistake could only be resolved by deleting it and creating it again, losing its id, slug and attribution over what is usually a wrong gloss."
           }
         },
         {
@@ -426,7 +549,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"niño\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[ˈkunet]\"\n}",
+              "raw": "{\n  \"dialectCode\": \"izalco\",\n  \"contentEs\": \"ni\u00f1o\",\n  \"contentEn\": \"child\",\n  \"partOfSpeech\": \"NOUN\",\n  \"phonetic\": \"[\u02c8kunet]\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -465,7 +588,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["translations", "{{translationId}}"]
             },
-            "description": "Partial. dialectCode is immutable after creation. Requires CONTRIBUTOR.\n\n**Requires `expectedUpdatedAt`** — the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
+            "description": "Partial. dialectCode is immutable after creation. Requires CONTRIBUTOR.\n\n**Requires `expectedUpdatedAt`** \u2014 the `updatedAt` you last read. The update is conditional on it, so a row that changed since you loaded it answers 409 EDIT_CONFLICT rather than overwriting the other edit. Run \"Entry detail\" first; it saves the variable."
           }
         },
         {
@@ -570,10 +693,10 @@
     },
     {
       "name": "Admin read surface (CONTRIBUTOR / ADMIN)",
-      "description": "The authenticated reads behind the authoring panel. They exist because every public read hardcodes `isPublished: true`, so no other endpoint can return a draft — and because content comes back UNRESOLVED here (contentEs and contentEn side by side), which is what lets an edit form round-trip it.\n\nUnscoped: any CONTRIBUTOR+ sees every entry, because any of them may edit every entry. `?mine=true` narrows to your own authorship by choice.",
+      "description": "The authenticated reads behind the authoring panel. They exist because every public read hardcodes `isPublished: true`, so no other endpoint can return a draft \u2014 and because content comes back UNRESOLVED here (contentEs and contentEn side by side), which is what lets an edit form round-trip it.\n\nUnscoped: any CONTRIBUTOR+ sees every entry, because any of them may edit every entry. `?mine=true` narrows to your own authorship by choice.",
       "item": [
         {
-          "name": "List entries → saves {{entryId}}",
+          "name": "List entries \u2192 saves {{entryId}}",
           "request": {
             "method": "GET",
             "url": {
@@ -630,7 +753,7 @@
                   "    pm.environment.set('entryId', first.id);",
                   "    console.log('entryId =', first.id, '(' + first.nawatContent + ')');",
                   "} else {",
-                  "    console.log('No rows for this status — nothing saved.');",
+                  "    console.log('No rows for this status \u2014 nothing saved.');",
                   "}"
                 ]
               }
@@ -638,7 +761,7 @@
           ]
         },
         {
-          "name": "Entry detail → saves {{entryUpdatedAt}} + {{translationId}}",
+          "name": "Entry detail \u2192 saves {{entryUpdatedAt}} + {{translationId}}",
           "request": {
             "method": "GET",
             "url": {
@@ -646,7 +769,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["admin", "entries", "{{entryId}}"]
             },
-            "description": "Unresolved content, both languages, under the same field names the write DTOs use — so a form PATCHes back exactly what it received.\n\n**Run this before either PATCH.** It saves the `updatedAt` values those requests need as their optimistic lock."
+            "description": "Unresolved content, both languages, under the same field names the write DTOs use \u2014 so a form PATCHes back exactly what it received.\n\n**Run this before either PATCH.** It saves the `updatedAt` values those requests need as their optimistic lock."
           },
           "event": [
             {
@@ -672,7 +795,7 @@
                   "        pm.environment.set('translationId', t.id);",
                   "        pm.environment.set('translationUpdatedAt', t.updatedAt);",
                   "    } else {",
-                  "        console.log('Entry has no translations — translation requests will 404.');",
+                  "        console.log('Entry has no translations \u2014 translation requests will 404.');",
                   "    }",
                   "}"
                 ]

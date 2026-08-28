@@ -1,46 +1,52 @@
-import { type NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { auth0 } from './lib/auth0';
+import { auth } from './auth';
 import { LOCALE_COOKIE, LOCALES, resolveLocale } from './lib/locale';
 
-// Next.js 16: proxy.ts replaces middleware.ts. Two jobs compose here — the Auth0
-// SDK's session/route middleware, and a locale redirect that sends a
-// locale-less page request to /<locale>/… so every rendered page has an explicit
-// locale in its URL. That keeps pages cacheable, shareable, and crawlable rather
-// than varying content by a header at one URL (the same URL-identity reasoning
-// as ADR 16, applied to i18n).
-export async function proxy(request: NextRequest) {
+// Next.js 16: proxy.ts replaces middleware.ts. Two jobs compose here — Auth.js's
+// session handling, and a locale redirect that sends a locale-less page request
+// to /<locale>/… so every rendered page has an explicit locale in its URL. That
+// keeps pages cacheable, shareable, and crawlable rather than varying content by
+// a header at one URL (the same URL-identity reasoning as ADR 16, applied to
+// i18n).
+//
+// THE LOCALE LOGIC SITS INSIDE auth(), not beside it. Auth.js's middleware is
+// that wrapper rather than a function to call, so composing means putting this
+// application's logic in the handler it takes — where `request.auth` is also
+// available, should a route ever need to branch on it.
+//
+// ⚠️ THIS IS THE ONE PLACE A ROTATED REFRESH TOKEN CAN BE PERSISTED. The `jwt`
+// callback refreshes whenever the session is read, but a Server Component
+// cannot set cookies, so a refresh triggered there is computed and then thrown
+// away — and because refresh tokens are single-use, the next read would present
+// the same spent token and the API would revoke the session as reuse. Running
+// on every matched request means the refresh almost always happens here, in a
+// response that can carry the new cookie. See lib/api/auth.ts.
+//
+// THE /auth/session-failed EXEMPTION IS GONE, and its absence is the point.
+// That path was excluded because the Auth0 SDK rolled the session cookie back
+// onto any response it did not itself handle — "simply touch the sessions if
+// rolling sessions are enabled" — which silently undid the deletion that route
+// existed to perform. Nothing deletes cookies any more, because Auth.js fails a
+// sign-in before writing one.
+export const proxy = auth((request) => {
   const { pathname } = request.nextUrl;
 
-  // Clearing a session must not run through auth0.middleware. For any path it
-  // does not itself handle, the SDK rolls the session cookie back onto the
-  // response — "simply touch the sessions if rolling sessions are enabled", in
-  // its own words — which silently undoes the deletion this route exists to
-  // perform. The user then keeps a valid session with no account behind it, and
-  // the header cheerfully greets them by name.
+  // Three prefixes skip the locale redirect. /auth/* is mounted by Auth.js and
+  // would break the login round trip if /auth/callback/google became
+  // /es/auth/callback/google. /api/* is never localized. /admin/* is the
+  // authoring panel, deliberately not localized either: it is staff tooling,
+  // and translating it would double the copy for an audience that reads the
+  // language it is written in.
   //
-  // Verified the hard way: a test using a fabricated cookie value passed,
-  // because an undecryptable session cannot be rolled. Only a real sign-in
-  // showed it.
-  if (pathname === '/auth/session-failed') {
-    return NextResponse.next();
-  }
-
-  // Three prefixes skip the locale redirect and go straight to the SDK
-  // middleware. /auth/* is mounted by the SDK and would break the login
-  // round-trip if /auth/callback became /es/auth/callback. /api/* is never
-  // localized. /admin/* is the authoring panel, which is deliberately not
-  // localized either: it is staff tooling, and translating it would double the
-  // copy for an audience that reads the language it is written in.
-  //
-  // They still run auth0.middleware — skipping the locale redirect is not
-  // skipping the session. /admin needs the session most of all.
+  // Skipping the redirect is not skipping the session — that already ran, in
+  // the wrapper.
   if (
     pathname.startsWith('/auth') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/admin')
   ) {
-    return auth0.middleware(request);
+    return NextResponse.next();
   }
 
   const hasLocale = LOCALES.some((l) => pathname === `/${l}` || pathname.startsWith(`/${l}/`));
@@ -52,8 +58,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return auth0.middleware(request);
-}
+  return NextResponse.next();
+});
 
 // /api/health is EXCLUDED from the matcher, not merely permitted by it. The ALB
 // probe carries no credentials; excluding the path keeps a future

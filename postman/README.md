@@ -47,54 +47,71 @@ with `USER_DEACTIVATED`.
 
 ### Getting a token into `{{token}}`
 
-**Session → "Get access token → saves {{token}}"** does it for you: it calls
-`{{webBaseUrl}}/auth/access-token` and a post-response script writes the result
-into the active environment, so every authed request picks it up. Re-run it when
-the token expires (an hour) rather than minting anything by hand.
+**The API issues tokens now.** It is its own authorization server (ADR 18),
+where it previously only verified what Auth0 minted — so there is no longer a
+route on the web app to fetch one from, and no session cookie to copy into
+Postman.
 
-That endpoint is on the **web app**, not the API — the API only ever verifies
-tokens — and it authorises by **session cookie**. So Postman needs the cookie the
-browser holds:
+Locally, mint one directly:
 
-1. Sign in at `{{webBaseUrl}}` in the browser.
-2. Copy the session cookie into Postman's **Cookies** manager (under the Send
-   button) for that domain.
-3. Run the request. The console reports the expiry it saved.
+```bash
+npm run db:seed:dev                                      # the three dev users
+npm run --silent auth:token --workspace=api -- admin     # or contributor | user
+```
 
-If you would rather not manage cookies, open `{{webBaseUrl}}/auth/access-token`
-in the browser and paste the `token` value into the environment by hand — the
-same value, one more step.
+Paste it into `{{token}}`. The argument picks which seeded row the token names,
+and that row must exist, so run the seed first. Tokens last 12 hours.
 
-**A token does not carry your rank.** It carries only `sub`; the API reads role
-from your user row on every request. Changing a role in the database applies to
-the next request, with no new token and no re-login.
+⚠️ **It is not a test double.** It signs with the same key the API verifies
+with, so it is indistinguishable from a token issued by a real sign-in. The only
+thing making it safe is that `JWT_SIGNING_KEYS` is per environment — the local
+key signs nothing staging or production will accept.
 
-- **Authed routes locally → mint a token from the mock issuer.** A local OIDC
-  issuer stands in for the tenant, swapping the _issuer_ and not the _strategy_
-  — the API still verifies RS256 against a JWKS endpoint with issuer and
-  audience pinned, so ADR 13 is intact.
+Against **staging** that shortcut is unavailable, so you need a real sign-in:
+sign in at `{{webBaseUrl}}`, take the `id_token` from the callback, put it in
+`{{googleIdToken}}` and run **Session → Start session**. That writes both
+`{{token}}` and `{{refreshToken}}`.
 
-  The minted token supplies only the `sub`; which rung you get is whatever the
+**Why local and staging differ on secrecy.** In the Local environment `token`
+and `refreshToken` are ordinary variables — the local token is signed by a key
+that exists only on your machine, with `iss`/`aud` of `localhost:3001`, so it
+authenticates against nothing else and hiding it protects nothing. In Staging
+they are marked secret, because a staging token is a real credential and this
+directory is committed to a public repository: the type is what keeps the value
+out of the file when the environment is exported. Never paste a deployed
+environment's token into the Local one to save a step.
+
+**Refresh** then rotates the pair without another sign-in. It is single-use:
+the token you send dies as this returns, and sending the same one twice is
+treated as theft and revokes the entire session. That is worth doing once
+deliberately — run Refresh twice in a row and watch every authed request start
+failing.
+
+**A token does not carry your rank.** It carries only `sub` — which is
+`User.id`, this API's own identifier — and the API reads role from that row on
+every request. Changing a role in the database applies to the next request,
+with no new token and no re-login.
+
+- **Authed routes locally → mint one with `auth:token`.** It signs with the
+  same key the API verifies with, so the token is indistinguishable from one
+  issued by a browser sign-in — no dev bypass and no second code path.
+
+  The token supplies only the subject; which rung you get is whatever the
   matching seeded user's row says, so changing a role in the database takes
   effect on the next request without minting anything new.
 
   ```bash
   npm run db:seed:dev                     # creates the three dev users
-  npm run auth:mock --workspace=api       # leave running; serves JWKS on :8080
   npm run --silent auth:token --workspace=api -- admin
   ```
 
-  Add both lines to `apps/api/.env.local` and restart the API:
+  Paste it into the Local environment's `token`. `admin`, `contributor` and
+  `user` select which seeded user the token names, and the row must exist, so
+  run the seed first. Tokens last 12 hours; mint another.
 
-  ```
-  AUTH0_ISSUER_URL=http://localhost:8080/
-  AUTH0_JWKS_URI=http://localhost:8080/jwks
-  ```
-
-  Paste the minted token into the Local environment's `token`. `admin`,
-  `contributor` and `user` select which seeded user the token names. Tokens
-  expire after an hour; mint another. The issuer must stay running — the API
-  fetches its JWKS on every unseen `kid`.
+  This replaces the local mock OIDC issuer, deleted with the move to in-house
+  authentication (ADR 18) — the API now accepts only tokens signed by its own
+  key set, so a mock issuer cannot produce a usable one.
 
 There is no longer an internal endpoint for Auth0 to call. `POST /auth/role`,
 the `x-internal-secret` header and the Post Login Action behind them were all

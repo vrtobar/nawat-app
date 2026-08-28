@@ -22,14 +22,14 @@ are in
 
 ## Tech Stack
 
-| Layer          | Technology                          |
-| -------------- | ----------------------------------- |
-| Frontend       | Next.js 16, Tailwind CSS, shadcn/ui |
-| Backend        | NestJS, TypeScript                  |
-| Database       | PostgreSQL 16, Prisma               |
-| Cache          | ElastiCache (Valkey)                |
-| Infrastructure | AWS, Terraform                      |
-| Auth           | Auth0                               |
+| Layer          | Technology                               |
+| -------------- | ---------------------------------------- |
+| Frontend       | Next.js 16, Tailwind CSS, shadcn/ui      |
+| Backend        | NestJS, TypeScript                       |
+| Database       | PostgreSQL 16, Prisma                    |
+| Cache          | ElastiCache (Valkey)                     |
+| Infrastructure | AWS, Terraform                           |
+| Auth           | Auth.js + Google, tokens issued in-house |
 
 ## Development
 

@@ -164,10 +164,13 @@ export const API_ERROR_CODES = {
   // Auth / users
   USER_NOT_FOUND: 'USER_NOT_FOUND',
   USER_DEACTIVATED: 'USER_DEACTIVATED',
-  // A second Auth0 identity — a different connection, so a different `sub` —
-  // presenting an email address that already belongs to a user row. Auth0 keys
-  // identity on connection + subject; this API keys it on auth0Id and holds a
-  // unique constraint on email, so the two cannot both exist.
+  // A Google subject presenting an email address that already belongs to
+  // another row. Rarer with one provider than it was with two — the Auth0-era
+  // case was one person signing in with Google and with an email code,
+  // producing two subjects for one human — but not impossible: a Workspace
+  // address can be deleted and reissued to a new account, which carries a new
+  // `sub`. Identity is keyed on googleId, and email holds its own unique
+  // constraint, so the two rows cannot coexist.
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   // A verified token whose subject has no account. Since 2026-08-25 accounts
   // are created at login by POST /auth/session and nowhere else, so this means
@@ -176,6 +179,30 @@ export const API_ERROR_CODES = {
   // because the remedy differs: the credential is fine, the account is absent,
   // and signing in again is what fixes it.
   ACCOUNT_NOT_PROVISIONED: 'ACCOUNT_NOT_PROVISIONED',
+  // The ID token presented to POST /auth/session did not verify against
+  // Google: bad signature, wrong `aud` or `iss`, or expired. Distinct from
+  // UNAUTHORIZED because it names WHOSE credential failed — an access token
+  // this API minted, or an assertion Google did — and those have different
+  // remedies. Deliberately not subdivided further: telling a caller which of
+  // the four checks failed helps whoever is probing the endpoint more than it
+  // helps the one legitimate caller, which is this project's own web tier.
+  INVALID_GOOGLE_TOKEN: 'INVALID_GOOGLE_TOKEN',
+  // Google authenticated the person but reports `email_verified: false`. Rare
+  // for a consumer account and possible for a Workspace one. Refused rather
+  // than provisioned, because `users.email` is unique and unverified addresses
+  // are how one person claims another's row.
+  EMAIL_NOT_VERIFIED: 'EMAIL_NOT_VERIFIED',
+  // A refresh token that is unknown, expired, revoked, or already spent.
+  //
+  // ONE CODE FOR ALL FOUR, and the reuse case is the reason. Rotation means a
+  // token presented twice is either an attacker replaying a stolen one or the
+  // legitimate holder racing itself, and the response revokes the whole family
+  // either way. Reporting reuse distinctly would confirm to whoever presented
+  // it that the theft was noticed, which is information worth exactly as much
+  // to an attacker as it is to the user — and the user's remedy is the same for
+  // all four: sign in again. The distinction is kept where it is useful, in the
+  // log, with the family id.
+  REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES];

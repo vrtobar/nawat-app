@@ -37,18 +37,17 @@ definition, and the loader no-ops.
 | `http://localhost:3001/api/health/ready` | Readiness — checks the database                         |
 | `localhost:5432`                         | Postgres, database `nahuat_dev`, user/password `nahuat` |
 | `localhost:6379`                         | Valkey                                                  |
-| `localhost:8080`                         | Mock OIDC issuer, only while `auth:mock` is running     |
 
-Auth0 mounts its own routes on the web app; they are not localized and never
-pass through the locale redirect:
+Auth.js mounts its own routes on the web app under `/auth`; they are not
+localized and never pass through the locale redirect:
 
-| URL                  | What                                                        |
-| -------------------- | ----------------------------------------------------------- |
-| `/auth/login`        | Starts the round trip. `?returnTo=/es` comes back there     |
-| `/auth/logout`       | Clears the app and tenant sessions                          |
-| `/auth/callback`     | Auth0 redirects here. Must be registered in the dashboard   |
-| `/auth/access-token` | Returns `{ token, expiresAt }` — how to get a token by hand |
-| `/auth/profile`      | The ID token claims for the current session                 |
+| URL                     | What                                                            |
+| ----------------------- | --------------------------------------------------------------- |
+| `/auth/signin`          | Starts the round trip. `?callbackUrl=/es` comes back there      |
+| `/auth/signout`         | Clears the cookie AND revokes the session on the API            |
+| `/auth/callback/google` | Google redirects here. Must be registered on the OAuth client   |
+| `/auth/session`         | The session as the browser may see it — profile only, no tokens |
+| `/auth/failed`          | Where a refused sign-in lands, with a reason                    |
 
 ## Before pushing, run all four
 
@@ -252,9 +251,9 @@ the API with validation and attribution, never through a fixture.
 
 ### Signing in locally
 
-A browser login works against the staging Auth0 tenant. Nothing in the login
-path calls the API any more — Auth0 authenticates, the callback sets a session,
-and that is the whole round trip ([ADR 13](adr/0013-authentication-and-authorization.md)).
+A browser login goes to Google and back. The web tier performs the code
+exchange; the API verifies the resulting ID token and issues the tokens
+everything else uses ([ADR 18](adr/0018-own-authentication-google-only.md)).
 
 ```bash
 npm run dev --workspace=web    # :3000
@@ -263,57 +262,49 @@ npm run dev --workspace=api    # :3001
 
 Sign in at `http://localhost:3000/es`. The header shows your name when it works.
 
-**Logging in creates your user row**, as of 2026-08-25. The callback calls
-`POST /auth/session` with the token it has just received, which provisions the
-account from Auth0's `/userinfo`, re-syncs your name and picture, and stamps
-`lastLoginAt`. You will be a `USER`: `role` defaults that way and no login path
-writes it — see below for promoting yourself.
+**This needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in
+`apps/web/.env.local`, and the same client id in `apps/api/.env.local`.** Use a
+Google OAuth client dedicated to local development, with exactly one authorized
+redirect URI — `http://localhost:3000/auth/callback/google` — and no authorized
+JavaScript origins, which are needed only for browser-side OAuth. If the two
+files disagree on the id, every sign-in fails the API's audience check.
+
+**Logging in creates your user row.** The `jwt` callback posts Google's ID token
+to `POST /auth/session`, which provisions the account from the token's own signed
+claims, re-syncs your name and picture, and stamps `lastLoginAt`. You will be a
+`USER`: `role` defaults that way and no login path writes it — see below for
+promoting yourself.
 
 **This means the API has to be running to sign in.** If it is not, the sign-in
-does not half-succeed: you land back on the page with "Sign-in could not be
-completed", the header offers Log in rather than your name, and no session
-survives. That is deliberate — an account is what a sign-in produces, so a
-sign-in that cannot produce one is not a sign-in. The reason is logged by the
-web process as `[auth] POST /auth/session failed: …`; the message you see is
-kept vague on purpose, so the log is the only place the cause exists.
+does not half-succeed. An error thrown while establishing the session fails the
+login before Auth.js writes a cookie, so you land on `/auth/failed` with no
+session at all. That is deliberate — an account is what a sign-in produces, so a
+sign-in that cannot produce one is not a sign-in.
 
-_It did not always work this way._ Until 2026-08-25 the row appeared lazily on
-the first authenticated API request, so logging in and then only browsing the
-public dictionary left `users` empty — a genuinely confusing state that
-[ADR 13](adr/0013-authentication-and-authorization.md) records the reasoning
-for removing.
+**A permanent refusal names itself.** `EMAIL_ALREADY_REGISTERED`,
+`USER_DEACTIVATED` and `EMAIL_NOT_VERIFIED` reproduce exactly on retry, so
+`/auth/failed` says which one it was; everything else reads "try again", because
+from the outside a timeout and an unreachable API are the same thing.
 
-To get a token for curl or Postman without a browser, `/auth/access-token`
-still works in a signed-in browser session:
+⚠️ **A database carrying pre-2026-08-27 rows will refuse your first sign-in.**
+Auth0-era users survive with `provider = GOOGLE` and an `email|…` subject that no
+Google account can match, so signing in tries to create a second row and collides
+on the unique email. Free the address first, or reset the database:
 
 ```bash
-TOKEN='eyJ...'   # from http://localhost:3000/auth/access-token
-curl -s http://localhost:3001/api/v1/users/me -H "Authorization: Bearer $TOKEN"
+docker compose exec -T postgres psql -U nahuat -d nahuat_dev -c \
+  "UPDATE users SET email = replace(email, '@', '+legacy@') WHERE subject LIKE 'email|%';"
 ```
 
-**If a real token 401s on the issuer or an unknown `kid`,** `AUTH0_ISSUER_URL`
-and `AUTH0_JWKS_URI` are still set in `apps/api/.env.local` from the mock issuer
-below. Comment them out and restart the API. Unset _is_ the deployed
-configuration; they are not a fallback for missing configuration.
+**No consent screen appears for a returning user**, and the account picker only
+shows because `prompt: 'select_account'` is set on the provider. Without it,
+Google signs a single-account user straight through, which reads as a broken
+button to anyone who has just signed out and wants a different account.
 
-**The Accept/Decline consent screen is expected on localhost.** Requesting a
-custom API `audience` triggers it, and Auth0 does not skip consent for a
-`localhost` callback even though the application is first-party. Staging and
-production do not show it.
-
-**Declining is handled, not a 500.** The SDK's default renders a bare 500
-carrying the raw error; an `onCallback` hook in `apps/web/lib/auth0.ts` redirects
-back to `returnTo` with `?auth_error=denied` (or `failed` for anything else) and
-the header renders a message.
-
-**To sign in as somebody else,** logging out is not enough. It clears the app
-session and the Auth0 tenant session, but not the upstream Google session, so
-Auth0 silently re-authenticates you as the same person and only the consent
-screen appears. Force a picker:
-
-```
-http://localhost:3000/auth/login?prompt=select_account
-```
+**To get a token without a browser**, mint one directly — see the `auth:token`
+section below. There is no longer a route that hands you the current session's
+token, because the browser never holds one: the tokens live in the encrypted
+cookie and are read server-side only.
 
 The SDK forwards unrecognised query parameters through to `/authorize`, stripping
 only `connection`, `returnTo` and `scopes`. `prompt=login` forces a full
@@ -362,33 +353,27 @@ one-liner rather than dropping into a prompt.
 
 ### Hand-testing without a browser
 
-The mock OIDC issuer mints a token for a seeded user offline, which is useful
-for curl, Postman and scripts. It swaps the _issuer_, not the _strategy_ — the
-API still verifies RS256 against a JWKS endpoint with issuer and audience
-pinned, so there is still no dev bypass.
+`auth:token` mints a real access token for a seeded user, which is useful for
+curl, Postman and scripts. It signs with the same key the API verifies with, so
+there is no dev bypass and no second code path — the token is indistinguishable
+from one issued by a browser sign-in.
 
 ```bash
 npm run db:seed:dev                                      # the three dev users
-npm run auth:mock --workspace=api                        # leave running
 npm run --silent auth:token --workspace=api -- admin     # or contributor | user
 ```
 
-Point the API at it in `apps/api/.env.local`, then restart:
+**It replaces the mock OIDC issuer**, deleted with the move to in-house
+authentication (ADR 18). That existed because Auth0's servers cannot reach
+`localhost`; Google permits `localhost` redirect URIs, and the API now accepts
+only tokens signed by its own key set, so a mock issuer could not produce a
+usable token however it were configured.
 
-```
-AUTH0_ISSUER_URL=http://localhost:8080/
-AUTH0_JWKS_URI=http://localhost:8080/jwks
-```
+**The token supplies only the subject, which is `User.id`.** Which rung you get
+is whatever the matching row says, so `admin`, `contributor` and `user` select a
+seeded user rather than a claim — changing a role in the database takes effect
+without minting anything new. The row must exist, so run the seed first.
 
-Two variables rather than one, because Auth0 serves its keys at
-`/.well-known/jwks.json` and the mock serves them at `/jwks`. Both are optional
-and default to the Auth0 tenant, so staging and production set neither.
-
-**The token only supplies the `sub`.** Which rung you get is whatever the
-matching user's row says, so `admin`, `contributor` and `user` select a seeded
-user rather than a claim — changing a role in the database takes effect without
-minting anything new.
-
-The signing key is cached in `apps/api/.mock-oidc-key.json` (gitignored) so
-restarting the issuer does not invalidate tokens already minted. Delete it to
-rotate.
+⚠️ **These tokens are as real as any other**, and the only thing making them
+safe is that `JWT_SIGNING_KEYS` is per environment: the local key signs nothing
+any deployed environment will accept.

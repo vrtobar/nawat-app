@@ -1,4 +1,4 @@
-import { prisma } from '@nahuat/database';
+import { prisma, Provider } from '@nahuat/database';
 import { API_ERROR_CODES, type JwtClaims, type UserProfile } from '@nahuat/shared';
 import {
   ConflictException,
@@ -7,32 +7,14 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { z } from 'zod';
 
 import { LOCALE_TO_WIRE } from '../../common/locale';
 import { isPrismaError, PRISMA_ERROR, uniqueViolationFields } from '../../common/prisma-error';
 import { toUserProfile, USER_PROFILE_SELECT } from '../../common/user-profile';
-import type { Env } from '../../config/env.validation';
+import type { GoogleIdentity } from './google-identity.service';
 
-// The login path must not hang on a slow Auth0. Reached once per login rather
-// than once per request, so it is nowhere near the hot path — but a login that
-// hangs is worse than one that fails, because the user has nothing to retry.
-const USERINFO_TIMEOUT_MS = 5000;
-
-// Auth0's /userinfo response, narrowed to what a user row needs. Everything
-// except `sub` is optional because it depends on the connection: email OTP
-// supplies no name, and only some providers return a picture. Unknown fields
-// are ignored rather than rejected — this is someone else's contract, and it
-// grows without asking us.
-const UserInfoSchema = z.object({
-  sub: z.string(),
-  email: z.email().optional(),
-  name: z.string().optional(),
-  picture: z.url().optional(),
-});
-
-// Resolves the identity behind a verified access token.
+// Resolves the identity behind a verified access token, and creates the account
+// at login.
 //
 // Until 2026-08-24 this was a login-time sync: an Auth0 Post Login Action
 // called POST /auth/role, which upserted the user and returned role/userId for
@@ -42,16 +24,25 @@ const UserInfoSchema = z.object({
 // the API being reachable, one Action could not serve local and staging, and a
 // role or deactivation change did not take effect until the user signed in
 // again.
+//
+// THE PROFILE NOW ARRIVES WITH THE CREDENTIAL. This class used to call Auth0's
+// /userinfo on every login, because an access token carries `sub` and nothing
+// else useful. A Google ID token carries the profile in its own signed claims,
+// so the fetch, its timeout and its four failure branches are gone — and with
+// them the case where a login hung on a slow identity provider.
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  constructor(private readonly config: ConfigService<Env, true>) {}
-
-  // Called once per authenticated request by JwtStrategy.validate(), after the
-  // signature, issuer, audience and expiry have already passed. One indexed
-  // read on users.auth0Id (unique btree); a request that gets this far is
-  // about to query the database for its actual work anyway.
+  // Called once per authenticated request by JwtAuthGuard, after the signature,
+  // issuer, audience and expiry have already passed. A primary-key read; a
+  // request that gets this far is about to query the database for its actual
+  // work anyway.
+  //
+  // TAKES User.id, NOT THE PROVIDER'S SUBJECT. The access token's `sub` is this
+  // system's own user id — see token.service.ts — so identity resolution never
+  // has to know which provider vouched for the person. That is what makes
+  // adding a second provider a change to the login path alone.
   //
   // A PURE READ as of 2026-08-25. It used to provision a missing row here, and
   // that had two problems. It made "logged in" and "has an account" different
@@ -61,17 +52,18 @@ export class AuthService {
   // re-created them** on their next request: the soft-delete gate below cannot
   // see a row that is gone. Accounts are now created at login by
   // startSession(), and a missing row here is a fault.
-  async resolveIdentity(auth0Id: string): Promise<JwtClaims> {
+  async resolveIdentity(userId: string): Promise<JwtClaims> {
     const existing = await prisma.user.findUnique({
-      where: { auth0Id },
+      where: { id: userId },
       select: { id: true, role: true, locale: true, deletedAt: true, isActive: true },
     });
 
     if (!existing) {
       // 401, not 404: the credential is valid and the caller is who they say
-      // they are — there is simply no account behind the subject. Signing in
+      // they are — there is simply no account behind it any more, which means
+      // the row was hard-deleted while the token was still live. Signing in
       // again fixes it, because that is the path that creates one.
-      this.logger.warn(`no account for verified sub "${auth0Id}"`);
+      this.logger.warn(`no account for verified user id "${userId}"`);
       throw new UnauthorizedException({
         code: API_ERROR_CODES.ACCOUNT_NOT_PROVISIONED,
         message: 'No account exists for this sign-in. Please sign in again.',
@@ -90,7 +82,6 @@ export class AuthService {
     }
 
     return {
-      sub: auth0Id,
       userId: existing.id,
       role: existing.role,
       locale: LOCALE_TO_WIRE[existing.locale],
@@ -108,12 +99,13 @@ export class AuthService {
   // Deliberately refuses a deactivated account rather than stamping a login on
   // it. Telling someone at sign-in that their account is disabled is a better
   // answer than letting them in and failing every subsequent request.
-  async startSession(auth0Id: string, accessToken: string): Promise<UserProfile> {
-    const profile = await this.fetchUserInfo(accessToken);
-    this.assertProfileUsable(auth0Id, profile);
+  async startSession(identity: GoogleIdentity): Promise<UserProfile> {
+    // The PAIR, not the subject alone. `subject` carries no unique constraint
+    // of its own, because two providers may legitimately issue the same string.
+    const where = { provider_subject: { provider: Provider.GOOGLE, subject: identity.sub } };
 
     const existing = await prisma.user.findUnique({
-      where: { auth0Id },
+      where,
       select: { id: true, deletedAt: true, isActive: true },
     });
 
@@ -130,10 +122,10 @@ export class AuthService {
       // the collision would surface as a failed login for someone who changed
       // nothing.
       const updated = await prisma.user.update({
-        where: { auth0Id },
+        where,
         data: {
-          name: profile.name ?? profile.email,
-          pictureUrl: profile.picture ?? null,
+          name: identity.name ?? identity.email,
+          pictureUrl: identity.picture ?? null,
           lastLoginAt: new Date(),
         },
         select: USER_PROFILE_SELECT,
@@ -142,58 +134,27 @@ export class AuthService {
       return toUserProfile(updated);
     }
 
-    return this.provision(auth0Id, profile);
+    return this.provision(identity);
   }
 
-  // Rejects a /userinfo response that cannot produce a row, before any write.
-  private assertProfileUsable(
-    auth0Id: string,
-    profile: z.infer<typeof UserInfoSchema>,
-  ): asserts profile is z.infer<typeof UserInfoSchema> & { email: string } {
-    // Auth0 returns the token's own subject. A mismatch means the token and the
-    // profile describe different people, which should be impossible — refuse
-    // rather than create a row under the wrong identity.
-    if (profile.sub !== auth0Id) {
-      this.logger.error(`userinfo sub "${profile.sub}" does not match token sub "${auth0Id}"`);
-      throw new UnauthorizedException({
-        code: API_ERROR_CODES.UNAUTHORIZED,
-        message: 'Could not establish identity',
-      });
-    }
-
-    // email is non-null and unique in the schema, so there is no row to create
-    // without it. Every connection in use returns one; a connection that did
-    // not would need a deliberate decision about what identifies the user, not
-    // a synthesized placeholder that quietly occupies the unique index.
-    if (!profile.email) {
-      this.logger.error(`userinfo returned no email for "${auth0Id}"`);
-      throw new UnauthorizedException({
-        code: API_ERROR_CODES.UNAUTHORIZED,
-        message: 'Could not establish identity',
-      });
-    }
-  }
-
-  // An account that has never been seen. The access token carries `sub` and
-  // nothing else useful — email, name and picture live on the ID token, which
-  // the browser holds and the API never receives — so the profile is fetched
-  // from Auth0 rather than taken from the client. That matters: a
-  // client-supplied profile would let a caller choose the email attached to
-  // their own row, and email is a unique column.
-  private async provision(
-    auth0Id: string,
-    profile: z.infer<typeof UserInfoSchema> & { email: string },
-  ): Promise<UserProfile> {
+  // An account that has never been seen.
+  //
+  // The profile comes from the ID TOKEN'S OWN CLAIMS, which Google signed, not
+  // from anything the caller composed. That is the property that matters here
+  // and it is easy to lose: a client-supplied profile would let a caller choose
+  // the email attached to their row, and email is a unique column — so choosing
+  // it is choosing whose row you collide with.
+  private async provision(identity: GoogleIdentity): Promise<UserProfile> {
     try {
       const created = await prisma.user.create({
         data: {
-          auth0Id,
-          email: profile.email,
-          // name is non-nullable in the database and some connections omit it
-          // (email OTP in particular); the email stands in, as it did in the
-          // Action this replaced.
-          name: profile.name ?? profile.email,
-          pictureUrl: profile.picture ?? null,
+          provider: Provider.GOOGLE,
+          subject: identity.sub,
+          email: identity.email,
+          // name is non-nullable in the database and Google does not always
+          // supply one; the email stands in.
+          name: identity.name ?? identity.email,
+          pictureUrl: identity.picture ?? null,
           // Stamped on creation, not left null: the row exists because a login
           // happened, and this is that login.
           lastLoginAt: new Date(),
@@ -203,27 +164,28 @@ export class AuthService {
 
       return toUserProfile(created);
     } catch (error) {
-      // WHICH unique constraint matters. `users` holds three — auth0_id, email
-      // and username — and the original code assumed any P2002 here meant a
+      // WHICH unique constraint matters. `users` holds three — the
+      // (provider, subject) pair, email and username — and the original code assumed any P2002 here meant a
       // concurrent insert of the same subject. It does not.
       const fields = uniqueViolationFields(error);
 
-      // A second Auth0 identity carrying an email that already belongs to
-      // someone. Auth0 keys identity on connection + subject, so signing in
-      // with Google and with an email code produce different `sub` values for
-      // the same person, and the second one arrives here as a brand new user
-      // whose email is taken.
+      // A Google subject presenting an email that already belongs to another
+      // row. Much rarer with one provider than it was with two — the Auth0-era
+      // case was the same person signing in with Google and with an email
+      // code, producing two subjects — but not impossible: a Workspace address
+      // can be deleted and reissued to a new account, which carries a new
+      // `sub`.
       //
-      // Refused, not merged. Linking the two would mean deciding that a
-      // matching email proves the same person, which is only true when both
-      // addresses are verified — and getting that wrong is an account
-      // takeover, not an inconvenience. See the BACKLOG entry.
+      // Refused, not merged. Linking them would mean deciding that a matching
+      // email proves the same person, and getting that wrong is an account
+      // takeover rather than an inconvenience.
       //
-      // The message deliberately does not name which connection owns the
-      // address. Doing so would confirm to any caller that a given email is
-      // registered here.
+      // The message deliberately does not say the address is registered.
+      // Doing so would confirm to any caller which emails have accounts here.
       if (fields.includes('email')) {
-        this.logger.warn(`email already registered under a different auth0Id (sub "${auth0Id}")`);
+        this.logger.warn(
+          `email already registered under a different subject (sub "${identity.sub}")`,
+        );
         throw new ConflictException({
           code: API_ERROR_CODES.EMAIL_ALREADY_REGISTERED,
           message:
@@ -245,7 +207,9 @@ export class AuthService {
       // be a worse bug than the one being fixed.
       if (isPrismaError(error, PRISMA_ERROR.UNIQUE_VIOLATION)) {
         const raced = await prisma.user.findUnique({
-          where: { auth0Id },
+          where: {
+            provider_subject: { provider: Provider.GOOGLE, subject: identity.sub },
+          },
           select: USER_PROFILE_SELECT,
         });
 
@@ -260,9 +224,9 @@ export class AuthService {
         }
 
         this.logger.error(
-          `unique violation on user create for sub "${auth0Id}" ` +
+          `unique violation on user create for sub "${identity.sub}" ` +
             `(fields: ${fields.length > 0 ? fields.join(', ') : 'unreadable'}) ` +
-            `and no row is readable under that auth0Id`,
+            `and no row is readable under that subject`,
         );
         throw new UnauthorizedException({
           code: API_ERROR_CODES.UNAUTHORIZED,
@@ -272,45 +236,5 @@ export class AuthService {
 
       throw error;
     }
-  }
-
-  private async fetchUserInfo(accessToken: string): Promise<z.infer<typeof UserInfoSchema>> {
-    const domain = this.config.get('AUTH0_DOMAIN', { infer: true });
-
-    let response: Response;
-    try {
-      response = await fetch(`https://${domain}/userinfo`, {
-        headers: { authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
-      });
-    } catch (error) {
-      // Unreachable or timed out. 401 rather than 503: the caller's own next
-      // request may well succeed, and this is the authentication path, so the
-      // client should retry the request rather than treat the API as down.
-      this.logger.error(`userinfo request failed: ${String(error)}`);
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Could not establish identity',
-      });
-    }
-
-    if (!response.ok) {
-      this.logger.error(`userinfo returned ${response.status}`);
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Could not establish identity',
-      });
-    }
-
-    const parsed = UserInfoSchema.safeParse(await response.json().catch(() => null));
-    if (!parsed.success) {
-      this.logger.error(`userinfo response did not parse: ${parsed.error.message}`);
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Could not establish identity',
-      });
-    }
-
-    return parsed.data;
   }
 }

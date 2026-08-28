@@ -31,27 +31,61 @@ const EnvSchema = z
     REDIS_HOST: z.string().min(1).optional(),
     REDIS_PORT: z.coerce.number().int().optional(),
 
-    // Auth0
-    AUTH0_DOMAIN: z.string().min(1),
-    AUTH0_AUDIENCE: z.string().min(1),
-
-    // Both default to the Auth0 tenant derived from AUTH0_DOMAIN, so staging
-    // and production set neither and behave exactly as before. They exist so
-    // local development can point the *issuer* at a mock OIDC provider that
-    // mints RS256 tokens with arbitrary claims — the strategy is unchanged and
-    // still trusts only RS256-via-JWKS. Swapping the issuer is not the rejected
-    // NODE_ENV/HS256 bypass: no branch is added to the running service, which
-    // is the property docs/adr/0013 protects.
+    // In-house access tokens (docs/adr/0018). This API is the authorization
+    // server: it signs the tokens it verifies, and the private key never
+    // leaves this process.
     //
-    // Two variables rather than one because the paths genuinely differ: Auth0
-    // serves /.well-known/jwks.json, oauth2-mock-server serves /jwks, so the
-    // JWKS URI cannot simply be derived from the issuer.
-    AUTH0_ISSUER_URL: z.url().optional(),
-    AUTH0_JWKS_URI: z.url().optional(),
-    AUTH0_CLIENT_ID: z.string().min(1),
-    AUTH0_CLIENT_SECRET: z.string().min(1),
-    AUTH0_MGMT_CLIENT_ID: z.string().min(1),
-    AUTH0_MGMT_CLIENT_SECRET: z.string().min(1),
+    // A base64-encoded JWK Set of PRIVATE RSA keys. The first key signs and
+    // every key verifies, which is what makes rotation a one-variable change —
+    // see token.service.ts. `npm run auth:keygen` produces the value.
+    //
+    // REQUIRED, with no development default, and that is the point: a signing
+    // key that falls back to something when unset is a signing key an
+    // environment can accidentally share, and every token it minted would
+    // verify everywhere.
+    JWT_SIGNING_KEYS: z.string().min(1),
+
+    // `iss` and `aud` on every token this API mints, and the values it demands
+    // when verifying one. Both are checked: without `aud`, a token minted by
+    // this issuer for some other consumer would be accepted here.
+    JWT_ISSUER: z.url(),
+    JWT_AUDIENCE: z.string().min(1),
+
+    // ~1 hour, per docs/adr/0018. Short because the refresh token carries the
+    // session — see the RefreshToken store — so a stolen access token expires
+    // on its own rather than lasting the length of a login.
+    ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+
+    // The session, in two deadlines. The absolute one belongs to the login and
+    // survives every rotation; the idle one belongs to the token in hand and
+    // resets each time it is used. Both defaults follow docs/adr/0018, which
+    // took them from what Auth0 issues with rotation enabled.
+    REFRESH_TOKEN_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(30),
+    REFRESH_TOKEN_IDLE_TTL_DAYS: z.coerce.number().int().positive().default(14),
+
+    // The Google OAuth client this API accepts ID tokens for — the `aud` every
+    // one of them must carry.
+    //
+    // ⚠️ ONE CLIENT PER ENVIRONMENT, and it is not an incidental detail. A
+    // single client listing localhost, staging and production redirect URIs
+    // works, and was briefly how this was set up — but it makes this value
+    // identical everywhere, so an ID token obtained against local development
+    // satisfies production's audience check too. That is the
+    // cross-environment token validity docs/adr/0018 exists to end, rebuilt in
+    // a smaller form. The sharper cost is the client SECRET: with one client,
+    // anyone who can run this application locally holds production's OAuth
+    // credential.
+    //
+    // Separate clients make the coupling structurally impossible rather than
+    // merely unused, which is the same reasoning as JWT_SIGNING_KEYS below
+    // having no default.
+    //
+    // THE CLIENT SECRET IS DELIBERATELY ABSENT. The web tier performs the code
+    // exchange and is the only place that needs it; this API only ever
+    // verifies an assertion Google already signed, which takes the public
+    // client id and Google's published keys. So a compromise here yields no
+    // credential that can obtain a Google identity.
+    GOOGLE_CLIENT_ID: z.string().min(1),
 
     // Uploads / CDN
     S3_BUCKET: z.string().min(1),
