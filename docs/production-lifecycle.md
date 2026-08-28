@@ -79,7 +79,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://nahuat.com   # maintenance pag
 
 - **The database is destroyed with the layer.** Acceptable only pre-launch:
   reference data is re-seeded on the next bring-up, there is no authored dictionary
-  content, and user rows are Auth0 identities recreated on login. The first real
+  content, and user rows are Google identities recreated on login. The first real
   content or user base ends this posture — see
   [ADR 17](adr/0017-production-disposable-during-prelaunch.md).
 - **Foundation and global are never destroyed.** The script refuses any target but

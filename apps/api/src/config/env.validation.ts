@@ -42,9 +42,7 @@ const EnvSchema = z
     // REQUIRED, with no development default, and that is the point: a signing
     // key that falls back to something when unset is a signing key an
     // environment can accidentally share, and every token it minted would
-    // verify everywhere. The Auth0-era AUTH0_ISSUER_URL escape hatch above
-    // exists because pointing verification at a mock issuer adds no branch to
-    // the running service; a defaulted key would.
+    // verify everywhere.
     JWT_SIGNING_KEYS: z.string().min(1),
 
     // `iss` and `aud` on every token this API mints, and the values it demands
