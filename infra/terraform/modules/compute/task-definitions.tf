@@ -184,6 +184,28 @@ resource "aws_ecs_task_definition" "web" {
         { name = "API_URL", value = "https://${var.api_domain}" },
         { name = "NEXT_PUBLIC_API_URL", value = "https://${var.api_domain}" },
         { name = "APP_BASE_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
+        # ⚠️ AUTH_URL IS NOT OPTIONAL BEHIND A LOAD BALANCER, and its absence
+        # fails in two ways at once — both seen on staging 2026-08-28.
+        #
+        # Auth.js derives `trustHost` from, among other things,
+        # `NODE_ENV !== "production"`. Locally that is true and the host is
+        # trusted; in this container NODE_ENV IS production, so without one of
+        # AUTH_URL / AUTH_TRUST_HOST / VERCEL / CF_PAGES it refuses the request
+        # as an untrusted host and the sign-in dies as `error=Configuration`.
+        # The condition that triggers it is the very thing that distinguishes a
+        # deployed environment, so no local run can reproduce it.
+        #
+        # It also pins the ORIGIN. Auth.js rewrites the request origin to this
+        # value; without it the origin is inferred from the request, which
+        # behind the ALB is the container's own address — a sign-in redirected
+        # to https://ip-10-1-4-33.ec2.internal:3000. That is the second time
+        # this project has sent a user to an internal hostname; the first was
+        # the Auth0-era session-failed route, fixed the same way.
+        #
+        # Preferred over AUTH_TRUST_HOST because it does both jobs and depends
+        # on no header: trusting the Host header would work only while nothing
+        # can reach the container except through the ALB.
+        { name = "AUTH_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
       ]
 
       # BOTH HALVES OF THE GOOGLE CLIENT LIVE HERE and nowhere else. This tier
