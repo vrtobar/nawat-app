@@ -1,6 +1,7 @@
 import type { Locale } from '@nahuat/shared';
 
 import { auth } from '../auth';
+import { AUTH_ROUTES, withCallback } from '../lib/auth-routes';
 
 // Four strings, inlined. The app has no message catalogue yet — the landing
 // page's copy is hardcoded too — and introducing one for a login link would be
@@ -35,12 +36,11 @@ export async function AuthControl({
   const session = await auth();
   const copy = COPY[locale];
   const destination = returnTo ?? `/${locale}`;
-  const target = encodeURIComponent(destination);
 
   if (!session) {
     return (
       <a
-        href={`/auth/signin?callbackUrl=${target}`}
+        href={withCallback(AUTH_ROUTES.signIn, destination)}
         className="text-sm font-medium hover:underline"
       >
         {copy.login}
@@ -68,7 +68,10 @@ export async function AuthControl({
         and no list to be absent from, so a relative path back to the current
         locale simply works.
       */}
-      <a href={`/auth/signout?callbackUrl=${target}`} className="font-medium hover:underline">
+      <a
+        href={withCallback(AUTH_ROUTES.signOut, destination)}
+        className="font-medium hover:underline"
+      >
         {copy.logout}
       </a>
     </div>

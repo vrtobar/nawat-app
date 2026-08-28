@@ -1,6 +1,7 @@
 import { cookies, headers } from 'next/headers';
 import Link from 'next/link';
 
+import { AUTH_ROUTES } from '../../../lib/auth-routes';
 import { LOCALE_COOKIE, resolveLocale } from '../../../lib/locale';
 
 // Where Auth.js sends a failed sign-in (`pages.error` in auth.ts).
@@ -68,10 +69,7 @@ export default async function AuthFailedPage({
       <h1 className="text-xl font-semibold">{copy.title}</h1>
       <p className="text-gray-600">{reason}</p>
       <div className="flex gap-4 text-sm font-medium">
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages --
-            /auth/signin is an Auth.js route, not a page; <Link> would attempt a
-            client-side transition to a route that does not exist. */}
-        <a href="/auth/signin" className="hover:underline">
+        <a href={AUTH_ROUTES.signIn} className="hover:underline">
           {copy.retry}
         </a>
         <Link href={`/${locale}`} className="hover:underline">
