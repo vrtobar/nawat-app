@@ -150,9 +150,17 @@ model User {
 // rows that never sign in — they hold authored content so that a fresh
 // database has something to show, and giving them a real provider's name would
 // be a lie the schema tells about where they came from.
+//
+// IMPORT is the same idea for a different writer: prisma/import.ts restores a
+// dictionary export, whose attribution is flattened by design, and the restored
+// rows need an author to point at. It is deliberately NOT SEED — unlike the
+// seeder, an import runs in production, and a SEED row appearing there would
+// read as "the development seed ran against production", which is precisely the
+// misreading the paragraph above exists to prevent.
 enum Provider {
   GOOGLE
   SEED
+  IMPORT
 }
 
 // A refresh token, hashed. One row per token; one FAMILY per login session.
