@@ -6,11 +6,41 @@ name: CodeQL
 # Scheduled as well as on pull requests because a finding can appear without
 # the code changing — the query packs are updated continuously, so a weekly run
 # catches advisories published after the last commit.
+# Triggers are deliberately redundant, because each does a different job: pull
+# request runs catch a finding before it lands, the push to the default branch
+# is what MAINTAINS the alert baseline (alert state is tracked against that
+# branch, not against pull requests), and the schedule catches advisories
+# published after the last commit.
+#
+# What is filtered instead is analysis with nothing to analyse. Running a
+# JavaScript analyser over a Markdown diff produces nothing, and this repository
+# lands a lot of documentation. CodeQL is not a required status check — the gate
+# is CI's own aggregate job — so a filtered-out run blocks no merge.
 on:
   pull_request:
     branches: [develop, main]
+    # Repeated rather than anchored: GitHub Actions does not support YAML
+    # anchors, and actionlint rejects them outright.
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.mts'
+      - '**/*.js'
+      - '**/*.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/codeql.yml'
   push:
     branches: [main]
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.mts'
+      - '**/*.js'
+      - '**/*.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/codeql.yml'
   schedule:
     # Sunday 04:17 UTC. Off the hour deliberately: scheduled jobs on the hour
     # queue behind everyone else's.
