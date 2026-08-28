@@ -34,7 +34,8 @@
     "db:server-address": "tsx prisma/server-address.ts",
     "db:psql": "docker compose exec postgres psql -U nahuat -d nahuat_dev",
     "db:studio": "prisma studio",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "dependencies": {
     "@nahuat/shared": "*",
