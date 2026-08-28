@@ -81,6 +81,66 @@ resource "aws_s3_bucket_public_access_block" "assets" {
   restrict_public_buckets = true
 }
 
+# Dictionary exports — prisma/export.ts writes a JSON snapshot of entries and
+# translations, infra/scripts/dictionary-backup.sh puts it here.
+#
+# THE POINT OF THIS BUCKET IS WHICH LAYER IT IS IN. RDS lives in the
+# application layer, so `terraform destroy` on that layer takes the content
+# with it; ADR 17 makes exactly that a routine pre-launch operation. Foundation
+# survives, so this does too, and a restore into a rebuilt environment reads
+# from a bucket that never went away.
+#
+# Not a database backup — that is an RDS snapshot. This is the portable half:
+# content, in a form that can be read, diffed and imported into an environment
+# that does not exist yet.
+resource "aws_s3_bucket" "backups" {
+  bucket = "${local.prefix}-backups-${data.aws_caller_identity.current.account_id}"
+}
+
+# Versioning matters more here than on assets. An export is written to a
+# predictable key, so a bad export — taken against a half-restored database,
+# say — would otherwise overwrite the good one it was meant to supersede.
+resource "aws_s3_bucket_versioning" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Superseded versions are kept long enough to undo a mistake nobody noticed for
+# a while, then expire. Current versions are never expired: the newest export is
+# the only copy of the dictionary while every environment is torn down.
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  rule {
+    id     = "expire-old-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+
+    # A multipart upload that failed partway leaves parts that are billed and
+    # invisible in the console's object list.
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 # Served by CloudFront when the ALB is unreachable, which includes the
 # expected case of the application layer being destroyed.
 resource "aws_s3_bucket" "maintenance" {
