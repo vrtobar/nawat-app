@@ -86,12 +86,32 @@ case "$action" in
     echo "Application layer applied. Migrations and reference seed do NOT run"
     echo "from here — trigger the Production deploy workflow to migrate, seed"
     echo "and roll onto this image, then verify https://nahuat.com."
+    echo ""
+    # AFTER the deploy, not after this apply: import needs the schema the
+    # migration creates and the dialects the reference seed writes, since every
+    # translation carries a dialectCode foreign key. Running it earlier fails
+    # with "No dialects in this database", which is a clear error but a wasted
+    # tunnel.
+    echo "The database comes up empty. Once the deploy has migrated and seeded,"
+    echo "restore the dictionary if there is an export to restore:"
+    echo "  infra/scripts/db-tunnel.sh production          # in another terminal"
+    echo "  infra/scripts/dictionary-backup.sh restore production"
     ;;
   down)
     echo "=== production/application: DESTROY ==="
     echo "This destroys the ALB, both services, RDS (and its data), ElastiCache"
     echo "and the NAT gateway. nahuat.com will fail over to the maintenance page."
     echo "Foundation and global layers are untouched."
+    echo ""
+    # RDS is in this layer, so the dictionary goes with it. The bastion is here
+    # too and is still up at this point, so an export is possible right now and
+    # not one minute later — which is the whole reason this prints here rather
+    # than in the docs.
+    echo "Content: entries and translations live in RDS and are destroyed by this."
+    echo "The backups bucket is in foundation and survives. To keep the dictionary:"
+    echo "  infra/scripts/db-tunnel.sh production          # in another terminal"
+    echo "  infra/scripts/dictionary-backup.sh export production"
+    echo "Skip it if nothing has been authored since the last export."
     echo ""
     read -r -p 'Type "destroy production" to proceed: ' confirm
     [ "$confirm" = "destroy production" ] || { echo "Aborted." >&2; exit 1; }
