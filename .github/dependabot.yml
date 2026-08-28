@@ -1,11 +1,23 @@
 # Dependency updates. The scanning half — CodeQL, npm audit, the ECR gate —
 # lives in the workflows; this is what proposes the fixes those find.
 version: 2
+
+# TARGET develop, NOT the default branch.
+#
+# Dependabot opens against the repository's default branch unless told
+# otherwise, and this repository's default is main — which is the release
+# branch, not the integration branch. Left unset, every update PR would bypass
+# develop, put main ahead of it, trigger the production deploy workflow on
+# merge, and write "chore(deps): bump ..." into `git log --first-parent main`,
+# which is meant to carry one descriptive line per release.
+#
+# Repeated per ecosystem because there is no top-level default for it.
 updates:
   # One entry for the workspace root. npm workspaces hoist to a single
   # package-lock.json, so a per-workspace directory list would produce
   # duplicate PRs for the same resolved version.
   - package-ecosystem: npm
+    target-branch: develop
     directory: /
     schedule:
       interval: weekly
@@ -20,6 +32,7 @@ updates:
   # finding in ECR today is an openssl CVE inherited from node:24-alpine, which
   # no application change can fix. This is the path by which those get resolved.
   - package-ecosystem: docker
+    target-branch: develop
     directories:
       - /apps/api
       - /apps/web
@@ -30,6 +43,7 @@ updates:
   # runner image or node version in an action is a CI failure that arrives
   # without a commit.
   - package-ecosystem: github-actions
+    target-branch: develop
     directory: /
     schedule:
       interval: weekly
