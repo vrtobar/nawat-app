@@ -14,6 +14,10 @@
     "./dev-users": {
       "types": "./dist/dev-users.d.ts",
       "default": "./dist/dev-users.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "prisma": {
