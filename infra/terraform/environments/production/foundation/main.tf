@@ -442,30 +442,34 @@ resource "aws_route53_record" "cdn" {
 # rather than vanishing immediately.
 # =============================================================================
 
-resource "aws_secretsmanager_secret" "auth0" {
-  name                    = "nahuat/${var.environment}/auth0"
-  description             = "Auth0 application credentials - set manually from the Auth0 dashboard"
+resource "aws_secretsmanager_secret" "google" {
+  name                    = "nahuat/${var.environment}/google"
+  description             = "Google OAuth client for THIS environment - clientId and clientSecret, set manually from the Google Cloud console"
   recovery_window_in_days = 7
 }
 
-resource "aws_secretsmanager_secret" "auth0_mgmt" {
-  name                    = "nahuat/${var.environment}/auth0-mgmt"
-  description             = "Auth0 Management API credentials - set manually from the Auth0 dashboard"
+# The RS256 key set this API signs its own access tokens with (docs/adr/0018).
+# A base64-encoded private JWK Set, not JSON with named keys — `auth:keygen`
+# emits exactly the string this holds, so there is nothing to assemble by hand
+# and nothing to get wrong assembling it.
+#
+# ⚠️ GENERATE IT SEPARATELY PER ENVIRONMENT. There is no defence behind this
+# value: the API verifies against whatever key set it is given, so the key IS
+# the boundary between environments. One key shared with staging means staging
+# can mint access tokens production accepts.
+resource "aws_secretsmanager_secret" "jwt_signing" {
+  name                    = "nahuat/${var.environment}/jwt-signing"
+  description             = "RS256 signing key set for this API's own access tokens - generate per environment with: npm run auth:keygen"
   recovery_window_in_days = 7
 }
 
-# ORPHANED as of 2026-08-24 - nothing reads this.
-#
-# It held the shared secret for POST /auth/role, which the Auth0 Post Login
-# Action called during login. That endpoint, its guard, and the Action are all
-# deleted (docs/adr/0013), and the compute layer no longer injects the value.
-#
-# Left in place rather than removed in the same change: destroying it is a
-# one-way door on a 7-day recovery window, and it costs nothing to keep while
-# the reversal is still being verified in both environments. Removing it is a
-# tracked backlog item, not an oversight.
-resource "aws_secretsmanager_secret" "internal" {
-  name                    = "nahuat/${var.environment}/internal"
-  description             = "Orphaned - held the POST /auth/role shared secret, deleted 2026-08-24"
+# Encrypts the web tier's session cookie. Its own secret rather than a key
+# inside the Google one, because they answer to different trust boundaries and
+# rotate for different reasons — this with `openssl rand -hex 32`, the other in
+# a console. Sharing an ARN would have made the separation nominal: anything
+# able to read one key reads every key in that secret.
+resource "aws_secretsmanager_secret" "web_session" {
+  name                    = "nahuat/${var.environment}/web-session"
+  description             = "AUTH_SECRET - encrypts the Next.js session cookie. openssl rand -hex 32"
   recovery_window_in_days = 7
 }
