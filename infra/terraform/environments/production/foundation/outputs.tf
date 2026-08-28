@@ -143,8 +143,8 @@ output "ecr_web_url" {
 output "secret_arns" {
   description = "Secret ARNs, referenced by ECS task definitions and IAM policies"
   value = {
-    auth0      = aws_secretsmanager_secret.auth0.arn
-    auth0_mgmt = aws_secretsmanager_secret.auth0_mgmt.arn
-    internal   = aws_secretsmanager_secret.internal.arn
+    google      = aws_secretsmanager_secret.google.arn
+    jwt_signing = aws_secretsmanager_secret.jwt_signing.arn
+    web_session = aws_secretsmanager_secret.web_session.arn
   }
 }
