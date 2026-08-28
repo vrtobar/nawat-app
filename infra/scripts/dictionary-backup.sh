@@ -13,9 +13,28 @@
 # restored into an environment rebuilt from nothing.
 #
 # The heavy lifting is in packages/database: `db:export` and `db:import` speak
-# to the database, this script only moves files and picks keys. It talks to
-# whatever database DATABASE_URL / DB_* point at — for a deployed environment
-# that means an open bastion tunnel (docs/production-lifecycle.md).
+# to the database; this script resolves WHICH database, moves files and picks
+# keys.
+#
+# THE ENVIRONMENT ARGUMENT IS AUTHORITATIVE FOR BOTH the bucket and the
+# database, and that is not a convenience — it is the whole safety property.
+# An earlier version took the bucket from this argument and let the database
+# come from the caller's environment, and the two silently disagreed: a run
+# labelled `export staging` read the LOCAL development database and uploaded 42
+# local rows into staging's prefix. Nothing in the output said so.
+#
+# Ambient configuration cannot be trusted here, because `packages/database/.env`
+# sets DATABASE_URL for local development and `export.ts` loads it through
+# `dotenv/config`. `buildDatabaseUrl()` checks DATABASE_URL before DB_*, so
+# exporting DB_HOST/DB_PORT and friends does NOT redirect the connection — the
+# .env wins, silently, and points at localhost. This script therefore builds
+# DATABASE_URL itself from the named environment's Terraform outputs and RDS
+# secret, and passes it explicitly so nothing ambient can win.
+#
+# It does NOT open the tunnel. `db-tunnel.sh` runs in the foreground and cannot
+# see its own SSM session id, so a wrapper that backgrounds and kills it leaves
+# the session Active for 20 minutes (see that script's header). Open the tunnel
+# in another terminal; this refuses to run without one.
 #
 # Usage:
 #   dictionary-backup.sh export <staging|production>          # db -> S3
@@ -64,6 +83,106 @@ fi
 # buckets by hand still say where it came from.
 PREFIX="dictionary/$env_name"
 
+# -----------------------------------------------------------------------------
+# WHICH DATABASE
+#
+# Skipped for `list`, which only ever touches S3 — requiring a tunnel to read a
+# bucket listing would be friction with nothing behind it.
+# -----------------------------------------------------------------------------
+TUNNEL_PORT="${DB_TUNNEL_PORT:-5433}" # db-tunnel.sh's default local port
+
+if [ "$action" != "list" ]; then
+  APPLICATION_DIR="$REPO_ROOT/infra/terraform/environments/$env_name/application"
+  outputs="$(terraform -chdir="$APPLICATION_DIR" output -json 2>/dev/null || true)"
+  rds_endpoint="$(printf '%s' "${outputs:-}" | jq -r '.rds_endpoint.value // empty' 2>/dev/null || true)"
+
+  if [ -z "$rds_endpoint" ]; then
+    echo "No rds_endpoint output for $env_name — is the application layer up?" >&2
+    exit 1
+  fi
+
+  # Refuse before doing anything rather than failing inside Prisma with a
+  # connection error that says nothing about which environment was meant.
+  if ! nc -z localhost "$TUNNEL_PORT" 2>/dev/null; then
+    echo "Nothing is listening on localhost:$TUNNEL_PORT." >&2
+    echo "Open the tunnel in another terminal first:" >&2
+    echo "  infra/scripts/db-tunnel.sh $env_name" >&2
+    exit 1
+  fi
+
+  db_secret_arn="$(printf '%s' "$outputs" | jq -r '.db_secret_arn.value // empty')"
+  db_name="$(printf '%s' "$outputs" | jq -r '.rds_db_name.value // "nahuat"')"
+  secret_json="$(aws secretsmanager get-secret-value \
+    --secret-id "$db_secret_arn" --query SecretString --output text)"
+
+  # Percent-encoded through jq's @uri. The RDS-managed password contains
+  # URL-special characters, and an unencoded one produces a string that psql
+  # accepts and Node's URL parser rejects outright with `Invalid URL` — which is
+  # how `db-tunnel.sh --print-dsn` output came to be unusable here.
+  db_user="$(printf '%s' "$secret_json" | jq -r '.username // "postgres" | @uri')"
+  db_pass="$(printf '%s' "$secret_json" | jq -r '.password // empty | @uri')"
+
+  # sslmode=no-verify, matching buildDatabaseUrl(): RDS ships rds.force_ssl=1 so
+  # an unencrypted connection is refused, and the certificate names the RDS
+  # endpoint rather than the localhost the tunnel presents, so verification
+  # cannot succeed through a forwarded port.
+  export DATABASE_URL="postgresql://$db_user:$db_pass@localhost:$TUNNEL_PORT/$db_name?sslmode=no-verify"
+
+  # -----------------------------------------------------------------------
+  # WHICH INSTANCE IS ACTUALLY ON THE OTHER END
+  #
+  # The environment argument selects the bucket and the credentials. It cannot
+  # select which RDS instance the tunnel terminates at — from here every
+  # environment is `localhost:$TUNNEL_PORT`. Open a tunnel to production, type
+  # `export staging`, and production's rows are read and written into staging's
+  # bucket with every message along the way saying "staging". The `restore`
+  # direction is worse: it writes.
+  #
+  # inet_server_addr() is answered by the server, so it names the instance
+  # actually reached. The RDS endpoint resolves publicly to that same private
+  # address, so the two are directly comparable.
+  # -----------------------------------------------------------------------
+  expected_addr="$(dig +short "$rds_endpoint" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -1 || true)"
+  actual_addr="$(npm run --silent db:server-address --workspace=@nahuat/database 2>/dev/null | tr -d '[:space:]' || true)"
+
+  if [ -z "$expected_addr" ] || [ -z "$actual_addr" ]; then
+    # UNVERIFIABLE IS NOT THE SAME AS MISMATCHED, and the two directions deserve
+    # different answers. A missing `dig`, or a socket connection where
+    # inet_server_addr() is NULL, means the check could not run — not that
+    # anything is wrong — so refusing every time would block work for a reason
+    # unrelated to the danger.
+    #
+    # But `restore` WRITES. A mislabelled export is a file someone deletes; a
+    # restore into the wrong database is a corrupted environment and, if it went
+    # to production, one whose previous contents are already gone. So export and
+    # list warn, and restore refuses until the check can run.
+    echo "WARNING: could not confirm which instance the tunnel reaches." >&2
+    echo "  expected (DNS): ${expected_addr:-unknown}   actual (server): ${actual_addr:-unknown}" >&2
+
+    if [ "$action" = "restore" ]; then
+      echo "" >&2
+      echo "REFUSING to restore into an instance that cannot be identified." >&2
+      echo "Restore writes, so an unverified target is not a risk worth taking." >&2
+      exit 1
+    fi
+  elif [ "$expected_addr" != "$actual_addr" ]; then
+    echo "REFUSING: the tunnel does not reach $env_name." >&2
+    echo "" >&2
+    echo "  $env_name is $rds_endpoint ($expected_addr)" >&2
+    echo "  localhost:$TUNNEL_PORT reaches $actual_addr" >&2
+    echo "" >&2
+    echo "Close the tunnel and reopen it against $env_name:" >&2
+    echo "  infra/scripts/db-tunnel.sh $env_name" >&2
+    echo "" >&2
+    echo "If $env_name recently failed over, its address may have changed and this" >&2
+    echo "is a false alarm — re-check the endpoint before overriding anything." >&2
+    exit 1
+  fi
+
+  # Named before anything is read or written.
+  echo "Database: $db_name on $rds_endpoint ($actual_addr) via localhost:$TUNNEL_PORT"
+fi
+
 case "$action" in
   export)
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -85,7 +204,8 @@ case "$action" in
     count="$(node -e 'const fs=require("node:fs");process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).counts.entries))' "$tmp")"
     if [ "$count" -eq 0 ]; then
       echo "REFUSING: the export contains 0 entries." >&2
-      echo "Check which database DB_* points at. To store it anyway, upload by hand:" >&2
+      echo "The database named above is empty. If that is not the one you meant," >&2
+      echo "check which environment the open tunnel targets. To store it anyway:" >&2
       echo "  aws s3 cp <file> s3://$BUCKET/$PREFIX/$stamp.json" >&2
       exit 1
     fi
