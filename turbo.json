@@ -28,8 +28,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    // Not yet implemented by any package — it needs a schema to run against,
-    // and the first migration does not exist. Wired into CI when it does.
+    // Implemented by @nahuat/database against docker-compose.test.yml, which
+    // runs as its own compose project on ports that do not collide with the
+    // development stack. The suite truncates tables and refuses any database
+    // not named nahuat_test.
     "test:integration": {
       "dependsOn": ["^build"],
       "outputs": []

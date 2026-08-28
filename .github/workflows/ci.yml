@@ -112,6 +112,41 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  integration:
+    name: Integration tests
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Its own compose project (`name: nawat-test` in the file), on ports that
+      # do not collide with the development stack or with db-tunnel.sh's
+      # forwarded port. The suite refuses to run against any database not named
+      # nahuat_test, so a mis-wired service fails loudly rather than truncating
+      # something real.
+      - name: Start test infrastructure
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      # Applies the migration FILES, the same way a deployed environment does,
+      # so the hand-written ones are exercised — the accent-insensitive GIN
+      # indexes and the immutable_unaccent search_path fix are invisible to a
+      # schema push.
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Stop test infrastructure
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
   terraform:
     name: Terraform validate
     needs: changes
@@ -217,7 +252,7 @@ jobs:
   # while a failure or cancellation is not.
   gate:
     name: All checks passed
-    needs: [quality, terraform, image, workflows]
+    needs: [quality, integration, terraform, image, workflows]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -227,6 +262,7 @@ jobs:
           failed=0
           for result in \
             "quality=${{ needs.quality.result }}" \
+            "integration=${{ needs.integration.result }}" \
             "terraform=${{ needs.terraform.result }}" \
             "image=${{ needs.image.result }}" \
             "workflows=${{ needs.workflows.result }}"
