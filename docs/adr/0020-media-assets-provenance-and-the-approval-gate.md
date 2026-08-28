@@ -45,6 +45,16 @@ already work this way; media has no equivalent.
   `sourceKey`, the processed `derivatives`, `error` and `attempts` for retries,
   and the provenance the recording is worth keeping — who supplied it and when.
   `Translation.audioAssetId` and `Entry.imageAssetId` reference it.
+- **Both kinds are processed by one pipeline, and images are not a later
+  addition.** Audio is normalised for loudness across contributors recording on
+  different equipment, trimmed of leading and trailing silence, transcoded to a
+  web-delivered format, and measured for duration. Images are resized to a small
+  set of widths and converted to a modern format.
+  - ⚠️ **EXIF is stripped, and that is a privacy measure rather than a size
+    optimisation.** Photographs carry GPS coordinates by default. A project
+    documenting a language spoken in identifiable communities must not publish a
+    contributor's location as a side effect of their uploading a picture, and
+    the metadata survives every naive copy of a file.
 - **Media is a sub-resource, not a field of an entry.** It is attached after
   creation, through its own endpoint, never through the entry's `PATCH`.
   Consequently attaching a recording does not touch the entry's `updatedAt` and
