@@ -3,6 +3,7 @@ import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
 import { ApiError, endSession, refreshSession, startSession } from './lib/api/client';
+import { AUTH_ROUTES } from './lib/auth-routes';
 
 // =============================================================================
 // AUTHENTICATION — Auth.js, with Google as the only provider. See
@@ -233,7 +234,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Signals to the login UI. `error` receives whatever reason the sign-in
   // failed with, which for this application is the API's own code.
   pages: {
-    error: '/auth/failed',
+    error: AUTH_ROUTES.failed,
   },
 });
 

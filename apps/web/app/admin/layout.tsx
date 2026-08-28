@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '../../auth';
 import { getMe } from '../../lib/api/admin';
 import { ApiError } from '../../lib/api/client';
+import { AUTH_ROUTES, withCallback } from '../../lib/auth-routes';
 
 // Not indexed, and not a mistake to state twice: the panel is behind a session
 // anyway, but a crawler that somehow reaches it should not retain the URL.
@@ -30,7 +31,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   // No session at all — send them to log in and come back here.
   if (!session) {
-    redirect(`/auth/signin?callbackUrl=${encodeURIComponent('/admin/entries')}`);
+    redirect(withCallback(AUTH_ROUTES.signIn, '/admin/entries'));
   }
 
   // One request to learn the role, from the same row the API authorizes
@@ -76,9 +77,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <Link href="/" className="hover:underline">
               Dictionary
             </Link>
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages --
-                see the note above: /auth/* is a middleware route, not a page. */}
-            <a href="/auth/logout" className="font-medium hover:underline">
+            <a
+              href={withCallback(AUTH_ROUTES.signOut, '/')}
+              className="font-medium hover:underline"
+            >
               Log out
             </a>
           </div>
@@ -133,11 +135,10 @@ function Blocked({ error }: { error: unknown }) {
       <body className="p-8">
         <h1 className="text-xl font-semibold">{heading}</h1>
         <p className="mt-2 max-w-prose text-sm text-gray-600">{detail}</p>
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages --
-            /auth/* is mounted by the Auth0 SDK in proxy.ts, not a page in app/.
-            <Link> would attempt a client-side RSC navigation to a route that
-            has no page payload. */}
-        <a href="/auth/logout" className="mt-4 inline-block text-sm underline">
+        <a
+          href={withCallback(AUTH_ROUTES.signOut, '/')}
+          className="mt-4 inline-block text-sm underline"
+        >
           Sign out
         </a>
       </body>
