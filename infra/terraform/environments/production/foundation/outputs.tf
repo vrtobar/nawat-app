@@ -95,6 +95,11 @@ output "assets_bucket_arn" {
   value       = aws_s3_bucket.assets.arn
 }
 
+output "backups_bucket_name" {
+  description = "Dictionary export bucket name, for infra/scripts/dictionary-backup.sh"
+  value       = aws_s3_bucket.backups.bucket
+}
+
 output "cdn_domain" {
   description = "CDN base URL, injected as CDN_URL"
   value       = "https://cdn.nahuat.com"
