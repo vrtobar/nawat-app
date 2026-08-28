@@ -19,7 +19,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test:unit",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "turbo run test:integration --concurrency=1",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dev:infra": "docker compose up -d",
@@ -27,7 +27,8 @@
     "db:migrate": "npm run db:migrate --workspace=@nahuat/database",
     "db:seed": "npm run db:seed --workspace=@nahuat/database",
     "db:seed:dev": "npm run db:seed:dev --workspace=@nahuat/database",
-    "db:studio": "npm run db:studio --workspace=@nahuat/database"
+    "db:studio": "npm run db:studio --workspace=@nahuat/database",
+    "audit": "npm audit --audit-level=critical"
   },
   "devDependencies": {
     "prettier": "^3.9.6",

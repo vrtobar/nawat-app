@@ -435,6 +435,12 @@ data "aws_iam_policy_document" "github_build" {
   # The read actions are not redundant: buildx pulls previous layers from the
   # registry for its cache, so a push-only grant would rebuild from scratch
   # every run.
+  #
+  # DescribeImageScanFindings is what lets the deploy workflow read the scan
+  # the registry already performs on push. Both repositories set
+  # scanOnPush = true and, until this was added, nothing could read the result
+  # — the findings existed and only the console could see them. Read-only, and
+  # on the same two repositories as everything else here.
   statement {
     sid    = "EcrPush"
     effect = "Allow"
@@ -446,6 +452,7 @@ data "aws_iam_policy_document" "github_build" {
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload",
       "ecr:PutImage",
+      "ecr:DescribeImageScanFindings",
     ]
     resources = [
       aws_ecr_repository.api.arn,

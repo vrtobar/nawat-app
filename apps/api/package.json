@@ -12,7 +12,8 @@
     "start": "node dist/main.js",
     "lint": "eslint src scripts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "dependencies": {
     "@nahuat/database": "*",

@@ -1,0 +1,50 @@
+name: CodeQL
+
+# Static analysis. Free on public repositories, and the first thing a reader
+# checks for on one.
+#
+# Scheduled as well as on pull requests because a finding can appear without
+# the code changing — the query packs are updated continuously, so a weekly run
+# catches advisories published after the last commit.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [main]
+  schedule:
+    # Sunday 04:17 UTC. Off the hour deliberately: scheduled jobs on the hour
+    # queue behind everyone else's.
+    - cron: '17 4 * * 0'
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Required to upload results to the Security tab; without it the analysis
+  # runs and its findings go nowhere.
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Adds the security-focused queries beyond the default set. Noisier,
+          # and worth it on a repository small enough to read the output.
+          queries: security-extended
+
+      # No build step. javascript-typescript analyses source directly, and
+      # letting CodeQL autobuild a Turborepo would run the whole pipeline for
+      # nothing.
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
