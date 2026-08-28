@@ -1,0 +1,35 @@
+# Dependency updates. The scanning half — CodeQL, npm audit, the ECR gate —
+# lives in the workflows; this is what proposes the fixes those find.
+version: 2
+updates:
+  # One entry for the workspace root. npm workspaces hoist to a single
+  # package-lock.json, so a per-workspace directory list would produce
+  # duplicate PRs for the same resolved version.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps arrive as one PR per week rather than a dozen.
+      # Majors stay separate: they are the ones that need reading.
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  # The base images are where the vulnerabilities actually are — every HIGH
+  # finding in ECR today is an openssl CVE inherited from node:24-alpine, which
+  # no application change can fix. This is the path by which those get resolved.
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/web
+    schedule:
+      interval: weekly
+
+  # Actions are pinned by major tag and drift silently otherwise; a deprecated
+  # runner image or node version in an action is a CI failure that arrives
+  # without a commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
