@@ -47,6 +47,21 @@ export const ExportFileSchema = z.object({
   source: z.object({
     database: z.string(),
     host: z.string(),
+    // The Postgres server's own address, from inet_server_addr().
+    //
+    // `host` is the address DIALLED, which through a bastion tunnel is always
+    // `localhost` — so it cannot tell a staging export from a production one.
+    // This is the address ANSWERED BY THE SERVER, so it names the instance the
+    // rows actually came from. It is what makes a file's provenance identifying
+    // rather than merely truthful.
+    //
+    // OPTIONAL, and not a version bump: files written before this field existed
+    // are still valid version 1 and must keep importing. It is provenance for a
+    // human reading a file after the fact — the enforcement that stops a restore
+    // going to the wrong instance is a live comparison in
+    // dictionary-backup.sh, which does not consult this field at all. Empty
+    // over a unix socket, where inet_server_addr() is NULL.
+    serverAddress: z.string().optional(),
   }),
   // Written at export and re-checked at import. The counts are what catches a
   // truncated file: a JSON parse of a partial write usually fails, but a file

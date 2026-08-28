@@ -43,6 +43,33 @@ function outPath(): string | undefined {
   return value;
 }
 
+// Provenance describes the connection ACTUALLY USED, derived from the resolved
+// connection string — never from process.env.DB_* directly.
+//
+// The earlier version read DB_NAME and DB_HOST with the connection string only
+// as a fallback, and that is exactly backwards: `buildDatabaseUrl()` prefers
+// DATABASE_URL over DB_*, so whenever a DATABASE_URL is present (and
+// packages/database/.env sets one) the DB_* variables describe a database that
+// was never opened. It wrote `nahuat@localhost` onto a file whose rows came out
+// of `nahuat_dev` on port 5432. A provenance field that can disagree with the
+// connection is worse than none: it is the field someone checks to find out
+// whether an export came from where they think.
+function describeConnection(url: string | undefined): { database: string; host: string } {
+  if (!url) return { database: 'unknown', host: 'unknown' };
+
+  try {
+    const parsed = new URL(url);
+    return {
+      database: parsed.pathname.replace(/^\//, '') || 'unknown',
+      host: parsed.hostname || 'unknown',
+    };
+  } catch {
+    // A URL Prisma also could not parse. Reaching here means the export is
+    // about to fail anyway; say so rather than guessing from the environment.
+    return { database: 'unparseable', host: 'unparseable' };
+  }
+}
+
 async function main(): Promise<void> {
   // Soft-deleted rows are left behind. They are not content any more, and
   // restoring them would resurrect entries someone deleted on purpose.
@@ -75,6 +102,14 @@ async function main(): Promise<void> {
     },
   });
 
+  // Asked of the server rather than inferred from the URL, for the reason in
+  // content-file.ts: the dialled host is `localhost` for every tunnelled
+  // environment. Empty over a unix socket, which is not an error.
+  const serverRows = await prisma.$queryRaw<{ addr: string | null }[]>`
+    SELECT host(inet_server_addr()) AS addr
+  `;
+  const serverAddress = serverRows[0]?.addr ?? undefined;
+
   // Prisma returns null for an empty nullable column; the schemas describe
   // these fields as optional, so drop the nulls rather than widening every
   // field to nullable. An absent key and a null mean the same thing here —
@@ -85,12 +120,7 @@ async function main(): Promise<void> {
   const payload = {
     formatVersion: FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
-    source: {
-      database:
-        process.env.DB_NAME ??
-        new URL(connectionString ?? 'postgres://x/unknown').pathname.slice(1),
-      host: process.env.DB_HOST ?? new URL(connectionString ?? 'postgres://unknown').hostname,
-    },
+    source: { ...describeConnection(connectionString), serverAddress },
     counts: {
       entries: entries.length,
       translations: entries.reduce((n, e) => n + e.translations.length, 0),
