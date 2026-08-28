@@ -130,10 +130,25 @@ cat >&2 <<INFO
 INFO
 
 if [ "$print_dsn" = true ]; then
+  # Percent-encoded through jq's @uri, and not cosmetically. The RDS-managed
+  # password contains URL-special characters, and interpolating it raw produced
+  # a string psql accepts — it does not parse this as a URL — while Node's URL
+  # parser rejects it outright. A Prisma client handed that DSN fails with
+  # `Invalid URL` and a stack trace pointing at the query, naming nothing that
+  # would lead anyone here.
+  #
+  # sslmode=require, not the no-verify that buildDatabaseUrl() uses: `no-verify`
+  # is a node-postgres spelling that libpq does not accept, and this DSN's first
+  # audience is psql. `require` encrypts without checking the certificate name,
+  # which is what a forwarded port needs — the certificate names the RDS
+  # endpoint, never the localhost presented here.
+  enc_user="$(jq -rn --arg v "$db_user" '$v|@uri')"
+
   if [ -n "$db_pass" ]; then
-    echo "postgresql://$db_user:$db_pass@localhost:$local_port/$db_name"
+    enc_pass="$(jq -rn --arg v "$db_pass" '$v|@uri')"
+    echo "postgresql://$enc_user:$enc_pass@localhost:$local_port/$db_name?sslmode=require"
   else
-    echo "postgresql://$db_user@localhost:$local_port/$db_name"
+    echo "postgresql://$enc_user@localhost:$local_port/$db_name?sslmode=require"
   fi
   exit 0
 fi
