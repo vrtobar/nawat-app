@@ -1,14 +1,35 @@
 # CI integration-test infra — separate ports from docker-compose.yml so
 # both can run side by side without conflict. tmpfs storage: clean slate
 # every run, nothing persisted between CI jobs.
+#
+# POSTGRES IS ON 5434, NOT 5433, and that is not arbitrary. db-tunnel.sh
+# forwards a deployed database to localhost:5433 by default. These tests
+# truncate tables. A suite pointed at 5433 while a tunnel happened to be open
+# would wipe staging or production, and the failure would look like a passing
+# test run. The port moves the collision out of existence; the database-name
+# assertion in test/integration/setup.ts is the guard for when someone
+# overrides the port anyway.
+# A DISTINCT COMPOSE PROJECT, and this line is load-bearing. Compose derives the
+# project name from the directory, so without it this file's `postgres` service
+# is the SAME container as docker-compose.yml's — and `up` recreates the
+# development database with this file's tmpfs storage and test credentials,
+# destroying it. That is not hypothetical; it happened while writing this suite.
+name: nawat-test
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: nahuat_test
       POSTGRES_USER: nahuat
-      POSTGRES_PASSWORD: nahuat
-    ports: ['5433:5432']
+      # Deliberately full of URL-special characters. The RDS-managed password
+      # contains them, and an unencoded password produces a DSN that psql
+      # accepts and Node's URL parser rejects — a defect that reached a
+      # deployed environment precisely because every local fixture used a
+      # password that needed no encoding. A test fixture that is easier than
+      # production is a test fixture that hides the bug.
+      POSTGRES_PASSWORD: 'n4/w@t:p+ss#1'
+    ports: ['5434:5432']
     tmpfs: [/var/lib/postgresql/data]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U nahuat -d nahuat_test']
