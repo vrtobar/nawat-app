@@ -39,3 +39,4 @@ alongside the date of the record.
 | [19](0019-asynchronous-tier-anchored-on-media-processing.md) | The asynchronous tier, anchored on media processing       | Accepted                                                                          |
 | [20](0020-media-assets-provenance-and-the-approval-gate.md)  | Media assets: provenance, state, and the ADMIN gate       | Accepted                                                                          |
 | [21](0021-the-public-read-path.md)                           | The public read path: topology, caching, anonymous access | Accepted                                                                          |
+| [22](0022-dictionary-and-flashcards-as-the-first-product.md) | Dictionary and flashcards as the first product            | Accepted                                                                          |
