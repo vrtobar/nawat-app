@@ -28,10 +28,16 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    // Implemented by @nahuat/database against docker-compose.test.yml, which
-    // runs as its own compose project on ports that do not collide with the
-    // development stack. The suite truncates tables and refuses any database
-    // not named nahuat_test.
+    // Implemented by @nahuat/database and api, against docker-compose.test.yml,
+    // which runs as its own compose project on ports that do not collide with
+    // the development stack. Both suites truncate tables and refuse any
+    // database that is not named nahuat_test.
+    //
+    // ⚠️ The root script passes --concurrency=1. Both workspaces write to the
+    // SAME test database, so running them in parallel — turbo's default — has
+    // them truncating each other's rows mid-test, which fails as though the
+    // product were broken. Each suite also prepares the schema itself rather
+    // than relying on the other having run.
     "test:integration": {
       "dependsOn": ["^build"],
       "outputs": []
