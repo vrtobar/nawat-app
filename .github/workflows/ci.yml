@@ -107,6 +107,21 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # CRITICAL for now, and knowingly weaker than it should be.
+      #
+      # `--audit-level=high` fails today and cannot be made to pass: three high
+      # advisories all resolve to deepmerge-ts reached through @prisma/config,
+      # and the only remedy npm offers is prisma@6.12.0 — a downgrade off the
+      # 7.x line. A blocking check that cannot go green teaches people to
+      # ignore it, so the threshold sits at critical until the advisory can be
+      # excepted deliberately rather than by lowering the bar for everything.
+      #
+      # ⚠️ This accepts every future HIGH advisory too, including fixable ones
+      # in the request path. Tracked; the target is an allowlist with per-entry
+      # expiry, before launch.
+      - name: Audit dependencies
+        run: npm run audit
+
       # turbo resolves ^build first: api's tests import @nahuat/database
       # through its "main" entry, which points at dist/.
       - name: Unit tests
