@@ -77,6 +77,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // `/auth/*`, matching what this app already used and what proxy.ts routes.
   // next-auth defaults to `/api/auth` for backwards compatibility with v4;
   // every other Auth.js integration defaults to `/auth`.
+  //
+  // ⚠️ AUTH_URL MUST BE SET IN EVERY ENVIRONMENT, and nothing here enforces it.
+  // Auth.js derives `trustHost` from `NODE_ENV !== "production"` among other
+  // things, so a laptop trusts the host by default and a container does not —
+  // the one variable that fails only where NODE_ENV is production, which is
+  // exactly where no local test runs. It also pins the origin Auth.js builds
+  // callback URLs from; inferred instead, behind a load balancer, that is the
+  // container's own internal address.
   basePath: '/auth',
 
   providers: [
