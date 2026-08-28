@@ -1,8 +1,26 @@
 # 5. One Auth0 tenant per environment
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 18](0018-own-authentication-google-only.md)
 - **Date:** 2026-08-14 (records a decision taken 2026-08-13)
 - **Supersedes:** two earlier positions recorded below
+- **Superseded 2026-08-27.** Auth0 is gone, so "one tenant per environment" has
+  nothing left to decide — there is no tenant. The question did not get
+  answered; it stopped existing.
+
+  **What replaced it is smaller but not nothing**, and the shape rhymes closely
+  enough to be worth stating: one Google OAuth CLIENT per environment, each with
+  a single redirect URI. The reasoning below about a shared identity provider
+  coupling environments together survives almost verbatim — a shared client
+  makes the client id identical everywhere, so an ID token obtained against
+  local development satisfies production's audience check, and it puts
+  production's client secret on every machine that runs the app locally.
+
+  **What genuinely went away** is the part this record found expensive: a tenant
+  holds connections, an email provider, tenant settings and Actions, none of
+  which could be rehearsed under a shared account. A Google client holds a
+  redirect URI list. That is why the replacement is a paragraph rather than an
+  ADR.
+
 - **Amended 2026-08-24:** the decision stands, but its strongest argument no
   longer applies. The Post Login Action was deleted
   ([ADR 13](0013-authentication-and-authorization.md)), so a shared tenant can
