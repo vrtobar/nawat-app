@@ -53,7 +53,15 @@ export class AuthController {
   // Idempotent. The web callback calls it once per login; calling it again
   // re-syncs the profile, moves lastLoginAt, and opens a NEW session — which is
   // correct, since each sign-in is one.
+  //
+  // 200 rather than the 201 a POST defaults to. An account really is created on
+  // first sign-in, so 201 is arguable — but nothing here is addressable, there
+  // is no Location to return, and a repeat call updates rather than creates.
+  // Mostly it was inconsistent: the two routes below already answer 200 for the
+  // same reason, and three sibling endpoints differing on status invites a
+  // client to treat the difference as meaningful.
   @Public()
+  @HttpCode(HttpStatus.OK)
   @Post('session')
   async startSession(
     @Body(new ZodValidationPipe(StartSessionSchema)) body: StartSession,

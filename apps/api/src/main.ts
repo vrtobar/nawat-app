@@ -2,21 +2,20 @@ import './env-bootstrap'; // MUST be first — see comment in that file
 
 // TODO: initialize AWS X-Ray here, BEFORE NestFactory.create —
 // the SDK must patch http/https/pg before anything else imports them.
-import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
 import type { Env } from './config/env.validation';
+import { configureApp } from './configure-app';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService<Env, true>);
 
-  // All routes under /api, versioned as /api/v1/... — the health
-  // controller opts out with VERSION_NEUTRAL (ECS probes /api/health).
-  app.setGlobalPrefix('api');
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  // Prefix and versioning live in configure-app.ts so the HTTP tests boot an
+  // application addressed the same way this one is.
+  configureApp(app);
 
   app.enableCors({
     origin: config.get('WEB_URL', { infer: true }),
