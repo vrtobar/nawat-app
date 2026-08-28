@@ -64,7 +64,42 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # ⚠️ ECR TAGS ARE IMMUTABLE (docs/adr/0002), so pushing a tag that already
+      # exists is rejected outright — which makes rebuilding an unchanged commit
+      # a hard failure rather than a no-op. `down` then `up` on the same commit
+      # could never succeed, and that is exactly the shape of "bring the
+      # environment back to look at something I have not changed".
+      #
+      # Latent since immutable tags landed, and masked whenever the branch is
+      # moving: a new commit means a new tag means no collision. It surfaced on
+      # 2026-08-28, with development happening on a feature branch and the base
+      # branch sitting still.
+      #
+      # Skipping the build is not a workaround for immutability, it is what
+      # immutability is FOR: one commit, one image, built once and reused. A
+      # rebuild would be wasted work even where the registry allowed it.
+      #
+      # batch-get-image rather than describe-images because the build role is
+      # granted ecr:BatchGetImage and not ecr:DescribeImages — see the global
+      # layer. Checking with an API the role cannot call would turn every run
+      # into a permissions failure.
+      - name: Already built?
+        id: existing
+        run: |
+          count=$(aws ecr batch-get-image \
+            --repository-name nahuat-${{ matrix.app }} \
+            --image-ids imageTag=staging-${{ github.sha }} \
+            --query 'length(images)' --output text 2>/dev/null || echo 0)
+          if [ "$count" = "0" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No image for staging-${{ github.sha }} — building."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "staging-${{ github.sha }} already in ECR — reusing it."
+          fi
+
       - name: Build and push
+        if: steps.existing.outputs.found == 'false'
         uses: docker/build-push-action@v7
         with:
           context: .
