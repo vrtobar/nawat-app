@@ -13,39 +13,6 @@ datasource db {
 }
 
 // =============================================================================
-// LEVELS
-// Top-level proficiency grouping. Rarely created, never deleted.
-// Controls which courses are visible at each proficiency stage.
-// Follows CEFR loosely: Beginner (A1), Elementary (A2), Intermediate (B1) etc.
-// All courses within a published level are freely accessible — no unlock gates.
-// Level 2+ marked Coming Soon until published by ADMIN.
-// =============================================================================
-
-model Level {
-  id            String  @id @default(cuid())
-  titleEs       String  @map("title_es") // e.g. "Principiante", "Elemental", "Intermedio"
-  titleEn       String? @map("title_en") // e.g. "Beginner", "Elementary", "Intermediate"
-  descriptionEs String? @map("description_es")
-  descriptionEn String? @map("description_en")
-  order         Int // display order — lower = shown first
-  cefrLabel     String? @map("cefr_label") // e.g. "A1", "A2", "B1" — optional reference
-
-  // Draft by default — ADMIN publishes when content is ready.
-  isPublished Boolean @default(false) @map("is_published")
-
-  // No deletedAt/archivedAt — levels are permanent infrastructure.
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  courses Course[]
-
-  @@index([order])
-  @@index([isPublished])
-  @@map("levels")
-}
-
-// =============================================================================
 // AUTH & USERS
 // =============================================================================
 
@@ -123,15 +90,11 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  flashcardSets      FlashcardSet[]
-  userCardProgress   UserCardProgress[]
-  userLessonProgress UserLessonProgress[]
-  userLessonAttempts UserLessonAttempt[]
-  userCourseProgress UserCourseProgress[]
-  userUnitProgress   UserUnitProgress[]
-  userActivity       UserActivity[]
-  auditLogs          AuditLog[]
-  refreshTokens      RefreshToken[]
+  flashcardSets    FlashcardSet[]
+  userCardProgress UserCardProgress[]
+  userActivity     UserActivity[]
+  auditLogs        AuditLog[]
+  refreshTokens    RefreshToken[]
 
   // Attribution
   createdEntries      Entry[]       @relation("EntryCreator")
@@ -366,10 +329,8 @@ model Translation {
   entry   Entry   @relation(fields: [entryId], references: [id], onDelete: Restrict)
   dialect Dialect @relation(fields: [dialectCode], references: [code], onDelete: Restrict, onUpdate: Cascade)
 
-  flashcards           Flashcard[]
-  exerciseTranslations ExerciseTranslation[]
-  lessonVocabulary     LessonVocabulary[]
-  userCardProgress     UserCardProgress[]
+  flashcards       Flashcard[]
+  userCardProgress UserCardProgress[]
 
   // One translation per dialect per entry. A word with several senses is one
   // row with a pipe-separated gloss, not several rows (see CreateTranslation in
@@ -490,311 +451,9 @@ enum CardState {
 // LESSONS
 // =============================================================================
 
-// Topic-based learning container — freely accessible within a level.
-// e.g. "Greetings and Introductions", "Numbers and Counting", "Family Members"
-// All courses within a published level are available from day one — no unlock gates.
-// Units within a course unlock sequentially (complete Unit N → unlock Unit N+1).
-model Course {
-  id            String  @id @default(cuid())
-  levelId       String  @map("level_id")
-  titleEs       String  @map("title_es")
-  titleEn       String? @map("title_en")
-  descriptionEs String? @map("description_es")
-  descriptionEn String? @map("description_en")
-  order         Int // suggested display order within level — not an unlock gate
-
-  isPublished Boolean @default(false) @map("is_published")
-
-  // Soft delete: hide from course browser without destroying data
-  // Archive: retire a course replaced by improved content
-  deletedAt  DateTime? @map("deleted_at")
-  archivedAt DateTime? @map("archived_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  level              Level                @relation(fields: [levelId], references: [id], onDelete: Restrict)
-  units              Unit[]
-  userCourseProgress UserCourseProgress[]
-
-  // Kept unfiltered for the admin panel, which browses drafts and archived
-  // courses. The public course browser uses courses_live_idx instead — a
-  // partial index in 20260815160500_partial_live_indexes, not visible here.
-  @@index([levelId, order])
-  @@map("courses")
-}
-
-// Mid-level grouping within a course — specific topic cluster.
-// e.g. Course "Greetings" → Unit "Basic Greetings", Unit "Formal Greetings"
-// Units unlock sequentially: complete Unit N → unlock Unit N+1.
-// Completing all units in a course completes the course.
-model Unit {
-  id            String  @id @default(cuid())
-  courseId      String  @map("course_id")
-  titleEs       String  @map("title_es")
-  titleEn       String? @map("title_en")
-  descriptionEs String? @map("description_es")
-  descriptionEn String? @map("description_en")
-  order         Int // sequence within section — reordered on soft delete or archive
-
-  isPublished Boolean @default(false) @map("is_published")
-
-  // Soft delete / archive — same semantics as Course
-  deletedAt  DateTime? @map("deleted_at")
-  archivedAt DateTime? @map("archived_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  course           Course             @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  lessons          Lesson[]
-  userUnitProgress UserUnitProgress[]
-
-  // Admin-facing, same split as Course — units_live_idx is partial and lives
-  // in the migration.
-  @@index([courseId, order])
-  @@map("units")
-}
-
-// Single bite-sized study session — 8-12 exercises, 3-5 minutes.
-// Two types:
-//   STANDARD — manually created by contributors, teaches specific vocabulary
-//   RECAP    — auto-generated from all LessonVocabulary in the parent unit
-//              always the last lesson in a unit, unlocks after all STANDARD lessons complete
-//              exercises are generated at runtime from unit vocabulary (not stored as Exercise rows)
-// Completing all lessons (including RECAP) in a unit completes the unit.
-model Lesson {
-  id            String     @id @default(cuid())
-  unitId        String     @map("unit_id")
-  type          LessonType @default(STANDARD)
-  titleEs       String     @map("title_es")
-  titleEn       String?    @map("title_en")
-  descriptionEs String?    @map("description_es")
-  descriptionEn String?    @map("description_en")
-  order         Int // sequence within unit — RECAP always has highest order
-  xpReward      Int        @default(10) @map("xp_reward")
-
-  isPublished Boolean @default(false) @map("is_published")
-
-  // Soft delete / archive — same semantics as Course and Unit.
-  // Archiving auto-completes any IN_PROGRESS users (autoCompleted=true)
-  // and triggers checkAndUnlockNext for affected users.
-  deletedAt  DateTime? @map("deleted_at")
-  archivedAt DateTime? @map("archived_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  unit Unit @relation(fields: [unitId], references: [id], onDelete: Restrict)
-
-  exercises          Exercise[]
-  vocabulary         LessonVocabulary[]
-  userLessonProgress UserLessonProgress[]
-  userLessonAttempts UserLessonAttempt[]
-
-  // Admin-facing, same split as Course — lessons_live_idx is partial and
-  // lives in the migration.
-  @@index([unitId, order])
-  @@map("lessons")
-}
-
-// Explicitly declares which translations a lesson teaches.
-// On lesson completion, ProgressModule iterates this table to upsert
-// UserCardProgress (SRS queue) for each translation:
-//   - New words → created with ts-fsrs defaults, due = now()
-//   - Known words → existing SRS state preserved unchanged
-model LessonVocabulary {
-  id            String @id @default(cuid())
-  lessonId      String @map("lesson_id")
-  translationId String @map("translation_id")
-  order         Int // display order in admin panel
-
-  lesson      Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  translation Translation @relation(fields: [translationId], references: [id], onDelete: Restrict)
-
-  @@unique([lessonId, translationId])
-  @@map("lesson_vocabulary")
-}
-
-// Exercise config — only 3 types require config. See exercise-configs.schema.ts
-// in packages/shared for full config shape documentation.
-//
-// Config-free types derive everything from ExerciseTranslation rows:
-//   MULTIPLE_CHOICE — TARGET + 2-3 DISTRACTORS
-//   LISTEN_SELECT   — TARGET + 2-3 DISTRACTORS (requires audioUrl on TARGET)
-//   TYPE_ANSWER     — TARGET only (accent-insensitive matching in NestJS)
-//   MATCH_PAIRS     — 3-6 COMPONENT rows only, no TARGET
-//   BUILD_PHRASE    — TARGET (phrase entry) + 2+ COMPONENTs + optional DISTRACTORS
-//                     prompt from TARGET.translation.contentEs
-//                     correct order from COMPONENT.order field
-//   LISTEN_TYPE     — TARGET only (requires audioUrl on TARGET)
-//
-// Config required:
-//   TRUE_FALSE:   { isCorrect: boolean }
-//   FILL_BLANK:   { sentence: string, hint?: string }
-//   IMAGE_SELECT: { variant: "word_from_image" | "image_from_word" }
-model Exercise {
-  id        String       @id @default(cuid())
-  lessonId  String       @map("lesson_id")
-  type      ExerciseType
-  direction Direction    @default(NAWAT_TO_SPANISH)
-  order     Int
-  config    Json?
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  lesson       Lesson                @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  translations ExerciseTranslation[]
-
-  @@index([lessonId, order])
-  @@map("exercises")
-}
-
-// Unified join table for all exercise-translation relationships.
-//
-// Roles:
-//   TARGET     — correct answer / word being taught (all types except MATCH_PAIRS)
-//   DISTRACTOR — curated wrong answer option
-//   COMPONENT  — individual tile in multi-word exercises (MATCH_PAIRS, BUILD_PHRASE)
-//
-// MATCH_PAIRS: COMPONENT only — no TARGET, no DISTRACTORS
-// BUILD_PHRASE: TARGET (phrase entry) + COMPONENT (word tiles) + optional DISTRACTORS
-// IMAGE_SELECT: images sourced via Translation → Entry → imageUrl (not stored here)
-model ExerciseTranslation {
-  id            String          @id @default(cuid())
-  exerciseId    String          @map("exercise_id")
-  translationId String          @map("translation_id")
-  role          TranslationRole
-  order         Int             @default(0) // COMPONENT ordering in BUILD_PHRASE
-
-  exercise    Exercise    @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
-  translation Translation @relation(fields: [translationId], references: [id], onDelete: Restrict)
-
-  @@unique([exerciseId, translationId])
-  @@map("exercise_translations")
-}
-
-enum ExerciseType {
-  // Phase 1 — MVP
-  MULTIPLE_CHOICE // see prompt, pick correct answer from options
-  LISTEN_SELECT // hear audio, pick correct translation
-  TYPE_ANSWER // see prompt, type the answer (accent-insensitive)
-  MATCH_PAIRS // match Nawat words to Spanish translations (COMPONENT only)
-  TRUE_FALSE // is this translation correct? config: { isCorrect }
-  BUILD_PHRASE // arrange word tiles to form a Nawat phrase
-
-  // Phase 2 — Post-MVP
-  FILL_BLANK // complete a sentence with the missing word. config: { sentence, hint? }
-  LISTEN_TYPE // hear audio, type what you heard (dictation)
-  IMAGE_SELECT // image-based word recognition. config: { variant }
-}
-
-enum TranslationRole {
-  TARGET
-  DISTRACTOR
-  COMPONENT
-}
-
-enum LessonType {
-  STANDARD // manually created — teaches specific vocabulary via exercises
-  RECAP // auto-generated — reviews all vocabulary from parent unit
-  // exercises generated at runtime, not stored as Exercise rows
-}
-
-enum Direction {
-  NAWAT_TO_SPANISH
-  SPANISH_TO_NAWAT
-}
-
 // =============================================================================
 // PROGRESS TRACKING
 // =============================================================================
-
-// Course progress — tracks which courses a user has started and completed.
-// No unlock logic between courses — all courses freely accessible within a level.
-// UNLOCKED = user has started at least one lesson in this course.
-// COMPLETE  = all units (including recaps) completed.
-// First unit auto-unlocks when user starts a course (clicks "Start Course").
-model UserCourseProgress {
-  id          String       @id @default(cuid())
-  userId      String       @map("user_id")
-  courseId    String       @map("course_id")
-  status      CourseStatus @default(UNLOCKED) // no LOCKED state — courses freely accessible
-  startedAt   DateTime     @default(now()) @map("started_at")
-  completedAt DateTime?    @map("completed_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course Course @relation(fields: [courseId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, courseId])
-  @@map("user_course_progress")
-}
-
-// Unit progress — unlock logic lives here.
-// Units unlock sequentially within a course:
-//   Course started → Unit 1 auto-unlocks
-//   Unit N complete → Unit N+1 unlocks
-// RECAP lesson completion triggers unit completion check.
-model UserUnitProgress {
-  id          String     @id @default(cuid())
-  userId      String     @map("user_id")
-  unitId      String     @map("unit_id")
-  status      UnitStatus @default(LOCKED)
-  unlockedAt  DateTime?  @map("unlocked_at")
-  completedAt DateTime?  @map("completed_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  unit Unit @relation(fields: [unitId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, unitId])
-  @@map("user_unit_progress")
-}
-
-// Canonical current state per user per lesson.
-// score         — most recent completion score (percentage correct)
-// bestScore     — highest score across all attempts
-// attempts      — increments on every full lesson retry
-// autoCompleted — true if lesson was completed by the system (e.g. lesson archived mid-progress)
-// For full per-attempt history see UserLessonAttempt.
-model UserLessonProgress {
-  id       String       @id @default(cuid())
-  userId   String       @map("user_id")
-  lessonId String       @map("lesson_id")
-  status   LessonStatus @default(IN_PROGRESS)
-
-  score         Float?
-  bestScore     Float?    @map("best_score")
-  attempts      Int       @default(1)
-  autoCompleted Boolean   @default(false) @map("auto_completed")
-  startedAt     DateTime  @default(now()) @map("started_at")
-  completedAt   DateTime? @map("completed_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Restrict)
-
-  @@unique([userId, lessonId])
-  @@map("user_lesson_progress")
-}
-
-// Individual attempt history — one row per full lesson attempt.
-// Used for analytics: score improvement over time, difficulty analysis,
-// which lessons have the most retries.
-model UserLessonAttempt {
-  id          String   @id @default(cuid())
-  userId      String   @map("user_id")
-  lessonId    String   @map("lesson_id")
-  score       Float
-  completedAt DateTime @default(now()) @map("completed_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Restrict)
-
-  @@index([userId, lessonId])
-  @@index([userId, completedAt])
-  @@index([lessonId])
-  @@map("user_lesson_attempts")
-}
 
 // Unified activity event log — source of truth for streak calculation
 // and usage analytics.
@@ -811,8 +470,7 @@ model UserLessonAttempt {
 //   Time between activities, events per session
 //
 // metadata stores event-specific context:
-//   LESSON_COMPLETED: { lessonId, score, xpEarned, durationSeconds? }
-//   REVIEW_SESSION:   { cardsReviewed, cardsCorrect, durationSeconds? }
+//   REVIEW_SESSION: { cardsReviewed, cardsCorrect, durationSeconds? }
 model UserActivity {
   id       String       @id @default(cuid())
   userId   String       @map("user_id")
@@ -826,26 +484,11 @@ model UserActivity {
   @@map("user_activity")
 }
 
-enum CourseStatus {
-  // No LOCKED state — courses are freely accessible within a published level.
-  // Row created when user first starts a course (clicks "Start Course").
-  UNLOCKED // user has started at least one lesson
-  COMPLETE // all units including recaps completed
-}
-
-enum UnitStatus {
-  LOCKED
-  UNLOCKED
-  COMPLETE
-}
-
-enum LessonStatus {
-  IN_PROGRESS
-  COMPLETE
-}
-
+// What a recorded activity was. LESSON_COMPLETED was removed with the learning
+// hierarchy (ADR 22) — there are no lessons to complete, and the consumer that
+// would have reacted to one is re-scoped to review sessions by ADR 19. Add
+// members back when there are events to name.
 enum ActivityType {
-  LESSON_COMPLETED
   REVIEW_SESSION
 }
 

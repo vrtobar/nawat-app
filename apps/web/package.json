@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@nahuat/shared": "*",
-    "next": "^16.3.0",
+    "next": "^16.3.3",
     "next-auth": "5.0.0-beta.32",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -23,7 +23,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/react-dom": "^19.2.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"
   }
