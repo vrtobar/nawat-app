@@ -1,0 +1,33 @@
+-- Make immutable_unaccent() resolvable under an empty search_path.
+--
+-- `20260820163000_accent_insensitive_trigram_search` defined the function body
+-- as `SELECT unaccent('unaccent', $1)`. Both names in it are unqualified: the
+-- function, and the text-search dictionary named in the first argument. Any
+-- caller that runs with `search_path = ''` therefore fails to resolve them:
+--
+--   ERROR:  function unaccent(unknown, text) does not exist
+--   CONTEXT:  SQL function "immutable_unaccent" during startup
+--
+-- pg_dump is the caller that matters. It sets `search_path = ''` deliberately,
+-- so that object names in a dump cannot be captured by a malicious schema —
+-- which means logical dumps of this database can fail. The failure mode is
+-- worse than an error: pg_dump exits non-zero but leaves the rows it had
+-- already written on disk, so a backup taken with stderr redirected can look
+-- like a valid file and contain no content.
+--
+-- Attaching the search_path to the function fixes every such caller at once,
+-- including any future one, rather than the one that happened to surface it.
+-- pg_catalog is listed first so the resolution cannot be redirected by a schema
+-- earlier in the path.
+ALTER FUNCTION immutable_unaccent(text) SET search_path = pg_catalog, public;
+
+-- No REINDEX. Three GIN indexes are built on immutable_unaccent(col)
+-- (entries.nawat_content, translations.content_es, translations.content_en).
+-- This changes only how names inside the function resolve, not what it returns
+-- for any input — the same dictionary is applied either way — so the values
+-- already stored in those indexes remain correct. Verified before shipping by
+-- running the search query down both the index path and a sequential scan and
+-- comparing the rows.
+--
+-- The IMMUTABLE promise from the original migration still stands unchanged: do
+-- not alter the `unaccent` dictionary under these indexes without reindexing.
