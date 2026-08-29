@@ -43,7 +43,6 @@ export function EntryEditor({
 
   const [nawatContent, setNawatContent] = useState(entry.nawatContent);
   const [type, setType] = useState<EntryType>(entry.type);
-  const [imageUrl, setImageUrl] = useState(entry.imageUrl ?? '');
 
   const [headerPending, startHeaderTransition] = useTransition();
   const [headerError, setHeaderError] = useState<string | null>(null);
@@ -55,7 +54,6 @@ export function EntryEditor({
   const saveHeader = () =>
     startHeaderTransition(async () => {
       setHeaderError(null);
-      const trimmedImage = imageUrl.trim();
       const body: UpdateEntry = {
         expectedUpdatedAt,
         nawatContent: nawatContent.trim(),
@@ -64,8 +62,6 @@ export function EntryEditor({
         // row alone — but the select always holds a value, so there is nothing
         // to be gained by leaving it out.
         type,
-        // null clears, '' would be rejected by z.url().
-        imageUrl: trimmedImage === '' ? null : trimmedImage,
       };
       const result = await updateEntryAction(entry.id, body);
       if (result.ok) {
@@ -167,23 +163,9 @@ export function EntryEditor({
             </select>
           </div>
 
-          <div className="sm:col-span-2">
-            <label className={labelClass} htmlFor="imageUrl">
-              Image URL
-            </label>
-            <input
-              id="imageUrl"
-              className={inputClass}
-              value={imageUrl}
-              disabled={headerPending || !canEditEntry}
-              onChange={(event) => {
-                setImageUrl(event.target.value);
-                setHeaderSaved(false);
-              }}
-              placeholder="https://"
-            />
-            <p className="mt-1 text-xs text-gray-500">Clear the box to remove the image.</p>
-          </div>
+          {/* No image field, for the reason given in translation-fields: the
+              column is written only when an ADMIN approves a MediaAsset, so a
+              URL box here would route around the gate. */}
         </div>
 
         <div className="mt-3 flex items-center gap-3">

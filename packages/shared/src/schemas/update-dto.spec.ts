@@ -39,11 +39,17 @@ describe('UpdateTranslationSchema', () => {
     expect(parseUpdate(UpdateTranslationSchema, {})).toEqual({});
   });
 
-  it('still rejects an empty string for a URL field', () => {
-    // Clearing is null, never ''. An untouched audio box must be omitted or
-    // nulled — z.url() rejects the empty string, which is what stops a blank
-    // field from being mistaken for a cleared one.
-    expect(safeUpdate(UpdateTranslationSchema, { audioUrl: '' }).success).toBe(false);
+  it('will not let a client write audioUrl at all', () => {
+    // The column is set by exactly one thing, an ADMIN approving a MediaAsset
+    // (docs/adr/0020). It is STRIPPED rather than rejected, because that is
+    // what Zod does with an unknown key and the schema is not strict — so the
+    // assertion is that the value does not survive, not that the request
+    // fails. A contributor sending it gets a successful update that changed
+    // nothing about the audio.
+    expect(parseUpdate(UpdateTranslationSchema, { audioUrl: 'https://cdn.example/x.mp3' })).toEqual(
+      {},
+    );
+    expect(parseUpdate(UpdateTranslationSchema, { audioUrl: null })).toEqual({});
   });
 
   it('accepts null for partOfSpeech but still rejects an unknown member', () => {
@@ -89,9 +95,14 @@ describe('UpdateEntrySchema', () => {
     expect(safeUpdate(UpdateEntrySchema, { type: 'NOPE' }).success).toBe(false);
   });
 
-  it('clears imageUrl when sent as null, but refuses to null the headword', () => {
-    expect(parseUpdate(UpdateEntrySchema, { imageUrl: null })).toEqual({ imageUrl: null });
+  it('refuses to null the headword', () => {
     expect(safeUpdate(UpdateEntrySchema, { nawatContent: null }).success).toBe(false);
+  });
+
+  it('will not let a client write imageUrl at all', () => {
+    // Same gate as audioUrl on a translation, and stripped the same way.
+    expect(parseUpdate(UpdateEntrySchema, { imageUrl: 'https://cdn.example/x.webp' })).toEqual({});
+    expect(parseUpdate(UpdateEntrySchema, { imageUrl: null })).toEqual({});
   });
 });
 
