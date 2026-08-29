@@ -23,7 +23,6 @@ export type TranslationDraft = {
   exampleNawat: string;
   exampleEs: string;
   exampleEn: string;
-  audioUrl: string;
 };
 
 export function blankDraft(dialectCode: string): TranslationDraft {
@@ -36,7 +35,6 @@ export function blankDraft(dialectCode: string): TranslationDraft {
     exampleNawat: '',
     exampleEs: '',
     exampleEn: '',
-    audioUrl: '',
   };
 }
 
@@ -54,7 +52,6 @@ export function draftFrom(t: AdminTranslationDetail): TranslationDraft {
     exampleNawat: t.exampleNawat ?? '',
     exampleEs: t.exampleEs ?? '',
     exampleEn: t.exampleEn ?? '',
-    audioUrl: t.audioUrl ?? '',
   };
 }
 
@@ -65,8 +62,9 @@ export function draftFrom(t: AdminTranslationDetail): TranslationDraft {
 //     be STORED. `hasEnglish` counts a non-null contentEn as English present,
 //     so a blank field would report an entry as complete while carrying no
 //     English at all.
-//   - `audioUrl` is z.url(), which REJECTS '', so an untouched audio box would
-//     fail validation on a form the author never typed into.
+//   - The same trap applied to `audioUrl`, a z.url() that REJECTS '', until
+//     audio stopped being a form field at all — it is attached through the
+//     media sub-resource now, so no URL box can be left untouched.
 //
 // Trimmed on the way through: a field holding only spaces is an untouched
 // field that was tabbed across.
@@ -87,7 +85,6 @@ export function toCreateTranslation(draft: TranslationDraft): CreateTranslation 
     exampleNawat: omitEmpty(draft.exampleNawat),
     exampleEs: omitEmpty(draft.exampleEs),
     exampleEn: omitEmpty(draft.exampleEn),
-    audioUrl: omitEmpty(draft.audioUrl),
   };
 }
 
@@ -131,6 +128,5 @@ export function toUpdateTranslation(
     exampleNawat: emptyToNull(draft.exampleNawat),
     exampleEs: emptyToNull(draft.exampleEs),
     exampleEn: emptyToNull(draft.exampleEn),
-    audioUrl: emptyToNull(draft.audioUrl),
   };
 }

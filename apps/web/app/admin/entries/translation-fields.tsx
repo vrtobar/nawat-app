@@ -125,22 +125,11 @@ export function TranslationFields({
         />
       </div>
 
-      {/* A plain URL box, not an upload. There is no UploadsModule yet, and
-          audioUrl is a z.url() on the DTO — the field is here so a hosted clip
-          can be referenced now rather than waiting on the upload flow. */}
-      <div>
-        <label className={labelClass} htmlFor={`audio-${draft.dialectCode}`}>
-          Audio URL
-        </label>
-        <input
-          id={`audio-${draft.dialectCode}`}
-          className={inputClass}
-          value={draft.audioUrl}
-          disabled={disabled}
-          onChange={(event) => set('audioUrl', event.target.value)}
-          placeholder="https://"
-        />
-      </div>
+      {/* No audio field. A URL box lived here while there was no upload flow;
+          it is gone because `audioUrl` is now written by exactly one thing, an
+          ADMIN approving a recording, and a box that PATCHes the column would
+          be the approval gate defeated by typing. Attaching audio is the media
+          sub-resource's job. */}
 
       {/* Not resolved to a locale on any read: Nawat is the subject, shown to
           every learner whichever language they study in. */}

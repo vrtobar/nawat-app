@@ -146,20 +146,23 @@ export type DictionarySearchParams = z.infer<typeof DictionarySearchParamsSchema
 // CREATE / UPDATE DTOs
 // Translations are created separately via /translations endpoint
 // (or atomically via POST /entries/full).
-// imageUrl is provided after S3 upload — upload flow handled by UploadsModule.
+//
+// NEITHER SHAPE CARRIES imageUrl. The column is written by exactly one thing,
+// an ADMIN approving a MediaAsset (docs/adr/0020); an image is attached to an
+// entry through the media sub-resource endpoints, never by sending a URL.
 // -----------------------------------------------------------------------------
 
 export const CreateEntrySchema = z.object({
   nawatContent: z.string().min(1).max(500),
   type: EntryTypeSchema.default('WORD'),
-  imageUrl: z.url().optional(),
 });
 
-// PATCH — every field optional, and imageUrl additionally NULLABLE so it can
-// be removed. See UpdateTranslationSchema for the full reasoning: an absent key
-// means leave alone and an explicit null means clear (RFC 7396), because
-// `undefined` does not survive JSON.stringify and so cannot express the
-// difference on the wire.
+// PATCH — every field optional. See UpdateTranslationSchema for the full
+// reasoning on absent-versus-null: an absent key means leave alone and an
+// explicit null means clear (RFC 7396), because `undefined` does not survive
+// JSON.stringify and so cannot express the difference on the wire. Nothing on
+// an entry is clearable any more, now that imageUrl is gone — every remaining
+// field can be changed but not emptied.
 //
 // `nawatContent` and `type` are not nullable. An entry with no headword is not
 // an entry, and `type` has a default rather than an empty state — both can be
@@ -174,7 +177,6 @@ export const CreateEntrySchema = z.object({
 // absent. The default still applies where it belongs, on create.
 export const UpdateEntrySchema = CreateEntrySchema.extend({
   type: CreateEntrySchema.shape.type.unwrap(),
-  imageUrl: CreateEntrySchema.shape.imageUrl.unwrap().nullable(),
 })
   .partial()
   .extend({ expectedUpdatedAt: OptimisticLockSchema });

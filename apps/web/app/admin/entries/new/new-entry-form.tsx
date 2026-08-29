@@ -35,7 +35,6 @@ export function NewEntryForm({ dialects }: { dialects: Dialect[] }) {
 
   const [nawatContent, setNawatContent] = useState('');
   const [type, setType] = useState<EntryType>('WORD');
-  const [imageUrl, setImageUrl] = useState('');
 
   // Opens on the broadly-used form rather than a town's, matching how the
   // reads pick a headword. Falls back to the first dialect if the reference
@@ -66,7 +65,6 @@ export function NewEntryForm({ dialects }: { dialects: Dialect[] }) {
     const payload = {
       nawatContent: nawatContent.trim(),
       type,
-      imageUrl: imageUrl.trim() === '' ? undefined : imageUrl.trim(),
       translations: drafts.map(toCreateTranslation),
     };
 
@@ -136,19 +134,10 @@ export function NewEntryForm({ dialects }: { dialects: Dialect[] }) {
           </select>
         </div>
 
-        <div className="sm:col-span-2">
-          <label className={labelClass} htmlFor="imageUrl">
-            Image URL
-          </label>
-          <input
-            id="imageUrl"
-            className={inputClass}
-            value={imageUrl}
-            disabled={pending}
-            onChange={(event) => setImageUrl(event.target.value)}
-            placeholder="https://"
-          />
-        </div>
+        {/* No image field. `imageUrl` is written only when an ADMIN approves
+            a MediaAsset, so a box here would route around the gate — and this
+            payload is a bare literal handed to safeParse, so the compiler
+            could not have told us the key had stopped meaning anything. */}
       </section>
 
       <section className="space-y-4">

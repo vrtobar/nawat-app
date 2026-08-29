@@ -24,14 +24,34 @@ export const FORMAT_VERSION = 1;
 
 // Composed from the shared API schemas rather than restated, same reasoning as
 // seed.ts: the export cannot drift from the contract the rows were created
-// under. Only `isPublished` is added, because it is state rather than input —
-// the API sets it through publish/unpublish, so no create schema mentions it.
+// under. What is added is what the API never accepts as input.
+//
+// `isPublished` is state rather than input — the API sets it through
+// publish/unpublish, so no create schema mentions it.
+//
+// `audioUrl` and `imageUrl` USED TO ARRIVE THROUGH THE CREATE SCHEMAS and no
+// longer do, because a contributor may not write them: they are set only when
+// an ADMIN approves a MediaAsset (docs/adr/0020). The export still carries
+// them, which keeps the file format unchanged and every existing export valid.
+//
+// The inheritance was doing real work and stopped: an export is a snapshot of
+// what a trusted writer restores, and a create schema is what an untrusted one
+// may send. Those were the same set of columns until media acquired an
+// approval gate, and this is where they part.
+//
+// ⚠️ WHAT A RESTORED URL MEANS IS WEAKER THAN WHAT A LIVE ONE MEANS. MediaAsset
+// rows are not exported, so a restore produces a populated URL with no asset
+// behind it — the object survives (the assets bucket is in the foundation
+// layer), but the provenance, the approver and the derivative manifest do not.
+// Deliberate, and recorded in the backlog rather than silently accepted.
 export const ExportTranslationSchema = CreateTranslationSchema.extend({
   isPublished: z.boolean(),
+  audioUrl: z.url().optional(),
 });
 
 export const ExportEntrySchema = CreateEntrySchema.extend({
   isPublished: z.boolean(),
+  imageUrl: z.url().optional(),
   // No `.min(1)`, unlike the seed fixture. A draft entry with no translation
   // yet is a legitimate row in the database, and an export that refused to
   // carry it would quietly drop work in progress — the one thing this exists
