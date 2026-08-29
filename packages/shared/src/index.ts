@@ -23,6 +23,9 @@ export * from './schemas/translation.schema';
 export * from './schemas/entry.schema';
 export * from './slugify';
 
+// Media — audio and images attached to dictionary rows as a sub-resource
+export * from './schemas/media.schema';
+
 // Flashcards
 export * from './schemas/flashcard.schema';
 

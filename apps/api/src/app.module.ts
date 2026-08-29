@@ -11,12 +11,15 @@ import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
 import { DictionaryModule } from './modules/dictionary/dictionary.module';
 import { HealthModule } from './modules/health/health.module';
+import { MediaModule } from './modules/media/media.module';
 import { UsersModule } from './modules/users/users.module';
 
 // TODO: feature modules land here as they're implemented. Still to come —
-// LessonsModule, ProgressModule, FlashcardsModule, ReviewModule, UploadsModule,
-// AuditModule (@Global), CacheModule, SqsModule. Auth, Health, Users and
-// Dictionary (dialects only so far) are already below.
+// FlashcardsModule, ReviewModule, AuditModule (@Global), CacheModule,
+// SqsModule. Auth, Health, Users, Dictionary and Media are already below.
+//
+// The lesson and progress modules that used to be listed here are gone with the
+// learning hierarchy (docs/adr/0022), not merely unbuilt.
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -30,6 +33,7 @@ import { UsersModule } from './modules/users/users.module';
     AuthModule,
     DictionaryModule,
     HealthModule,
+    MediaModule,
     UsersModule,
   ],
   providers: [

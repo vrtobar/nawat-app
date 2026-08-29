@@ -157,6 +157,26 @@ export const API_ERROR_CODES = {
   EXERCISE_MISSING_AUDIO: 'EXERCISE_MISSING_AUDIO',
   EXERCISE_MISSING_IMAGE: 'EXERCISE_MISSING_IMAGE',
 
+  // Media
+  MEDIA_ASSET_NOT_FOUND: 'MEDIA_ASSET_NOT_FOUND',
+  // The declared content type is not one the pipeline has a branch for. Raised
+  // at presign rather than after a queue round trip, so an unsupported format
+  // is a 400 at the boundary instead of a FAILED asset a reviewer has to
+  // interpret.
+  MEDIA_TYPE_UNSUPPORTED: 'MEDIA_TYPE_UNSUPPORTED',
+  // Too many uploads presigned and never completed. A presigned URL is a write
+  // capability, and this bounds how many one user may hold at once.
+  UPLOAD_LIMIT_REACHED: 'UPLOAD_LIMIT_REACHED',
+  // A transition the asset's current status does not allow — completing an
+  // upload twice, or completing one that already failed. Named rather than a
+  // bare CONFLICT because the client's recovery differs per state, and the
+  // message says which state it was in.
+  MEDIA_INVALID_STATE: 'MEDIA_INVALID_STATE',
+  // The upload was reported complete, but the object is not in the bucket or
+  // does not match what was signed. The asset stays AWAITING_UPLOAD, so the
+  // caller can retry the PUT rather than start over.
+  MEDIA_UPLOAD_INCOMPLETE: 'MEDIA_UPLOAD_INCOMPLETE',
+
   // Flashcards
   FLASHCARD_SET_NOT_FOUND: 'FLASHCARD_SET_NOT_FOUND',
   FLASHCARD_ALREADY_IN_SET: 'FLASHCARD_ALREADY_IN_SET',
