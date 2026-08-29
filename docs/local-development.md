@@ -330,18 +330,19 @@ The full form is worth knowing too, since `-T` is what makes these safe to paste
 into a script:
 
 ```bash
-# Who exists? Seeded users are the `seed|` ones; yours came from a real login.
+# Who exists? Identity is the (provider, subject) pair: seeded and dev users
+# carry provider SEED, yours came from a real login and carries GOOGLE.
 docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
-  -c "SELECT auth0_id, email, name, role, is_active FROM users ORDER BY created_at;"
+  -c "SELECT provider, subject, email, name, role, is_active FROM users ORDER BY created_at;"
 
 # Promote yourself. Takes effect on the NEXT REQUEST — role is read from the
 # database per request, so no re-login and no new token.
 docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
-  -c "UPDATE users SET role='ADMIN' WHERE auth0_id NOT LIKE 'seed|%';"
+  -c "UPDATE users SET role='ADMIN' WHERE provider = 'GOOGLE';"
 
 # Exercise the deactivation gate. Refuses with 403 USER_DEACTIVATED, immediately.
 docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
-  -c "UPDATE users SET is_active=false WHERE auth0_id NOT LIKE 'seed|%';"
+  -c "UPDATE users SET is_active=false WHERE provider = 'GOOGLE';"
 
 # What is in the dictionary, and how much of it is draft?
 docker compose exec -T postgres psql -U nahuat -d nahuat_dev \
