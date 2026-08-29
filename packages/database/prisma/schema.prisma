@@ -101,6 +101,8 @@ model User {
   updatedEntries      Entry[]       @relation("EntryUpdater")
   createdTranslations Translation[] @relation("TranslationCreator")
   updatedTranslations Translation[] @relation("TranslationUpdater")
+  uploadedMedia       MediaAsset[]  @relation("MediaUploader")
+  publishedMedia      MediaAsset[]  @relation("MediaPublisher")
 
   // The identity, and the reason `subject` carries no unique constraint of its
   // own: two providers may legitimately issue the same string, and only the
@@ -214,8 +216,24 @@ model Entry {
   // the same slug fail loudly (ENTRY_SLUG_CONFLICT) instead of colliding
   // silently. See docs/adr/0016-dictionary-entry-slugs.
   slug         String    @unique
+  // WRITTEN ONLY WHEN AN ADMIN PUBLISHES THE ASSET (docs/adr/0020). A populated
+  // URL therefore asserts three things at once: processed, verified
+  // retrievable, and approved. Presign does not write it, the upload does not,
+  // and the processor does not. That is what keeps the public read a single
+  // query that cannot leak — it joins nothing, so unprocessed, failed and
+  // unreviewed media are unreachable by construction rather than by a filter
+  // every future query has to remember. Unpublishing clears it.
   imageUrl     String?   @map("image_url")
-  imageKey     String?   @map("image_key") // S3 key — source of truth for file location
+
+  // The FK lives here rather than on MediaAsset, so an asset may exist before
+  // it finds an entry (uploads are not attached at creation) and the public
+  // read needs no join. @unique: one asset serves at most one entry.
+  //
+  // Restrict, not SetNull: detaching is what DELETE /entries/:id/image is for,
+  // and letting a row deletion do it silently would route around the
+  // sub-resource model. It also matches every other content FK here.
+  imageAssetId String?     @unique @map("image_asset_id")
+  imageAsset   MediaAsset? @relation("EntryImage", fields: [imageAssetId], references: [id], onDelete: Restrict)
 
   // Draft by default — only ADMIN can publish.
   // Unpublished and soft-deleted rows are hidden by an explicit
@@ -308,8 +326,11 @@ model Translation {
   exampleEs    String? @map("example_es")
   exampleEn    String? @map("example_en")
 
+  // Written only on ADMIN approval of the asset — see the note on Entry.imageUrl.
   audioUrl String? @map("audio_url")
-  audioKey String? @map("audio_key") // S3 key
+
+  audioAssetId String?     @unique @map("audio_asset_id")
+  audioAsset   MediaAsset? @relation("TranslationAudio", fields: [audioAssetId], references: [id], onDelete: Restrict)
 
   // Draft by default — only ADMIN can publish.
   // Hard delete allowed for unpublished translations.
@@ -360,6 +381,136 @@ enum PartOfSpeech {
   PREPOSITION
   CONJUNCTION
   OTHER
+}
+
+// =============================================================================
+// MEDIA
+// =============================================================================
+
+// Audio recordings and images as a TABLE rather than status columns beside a
+// URL (docs/adr/0020). Three things ruled the smaller shape out: processing is
+// asynchronous, so a URL written at upload time points at media that may never
+// become ready; derivatives are plural; and retries need somewhere to keep
+// state. Provenance had nowhere to live in a nullable string either, and for a
+// language with roughly a hundred speakers, who recorded a word and when is
+// much of what makes the recording worth keeping.
+//
+// PROCESSING STATE AND REVIEW STATE ARE SEPARATE, AND NEITHER IMPLIES THE
+// OTHER. `status` belongs to the pipeline and moves without a person;
+// `isPublished` belongs to an ADMIN. A recording may be READY and unapproved;
+// it can never be approved while still PENDING.
+model MediaAsset {
+  // Appears in the public object key (`public/{id}/...`), so it becomes part of
+  // a permanent CDN URL. cuid is non-sequential and encodes nothing about the
+  // uploader, which is why the key is built from it rather than from the user
+  // id and a timestamp.
+  id   String    @id @default(cuid())
+  // Selects the transformations, not a separate consumer — one pipeline
+  // handles both kinds. Stored rather than derived from contentType, which is
+  // a client's claim; this is the server's decision, and the attach endpoints
+  // refuse a mismatch (a translation takes AUDIO, an entry IMAGE).
+  kind MediaKind
+
+  status MediaStatus @default(AWAITING_UPLOAD)
+
+  // The original upload: `source/{id}/{name}`. CHOSEN BY THE SERVER AT PRESIGN,
+  // which is what stops a client deciding where its bytes land, and non-null
+  // from creation because the key is what gets signed — it exists before the
+  // object does. Never rewritten, and never served: the source is kept
+  // permanently because derivatives can be regenerated at a better bitrate or
+  // in a new format and a recording of one of ~100 speakers cannot.
+  sourceKey String @map("source_key")
+
+  // Both are SIGNED INTO THE PRESIGNED PUT, so S3 itself rejects a body that
+  // disagrees. Kept afterwards because the processor compares the declared type
+  // against the bytes it actually finds, and a mismatch is a signal worth
+  // recording rather than a discrepancy to quietly correct.
+  contentType String @map("content_type")
+  sizeBytes   Int    @map("size_bytes")
+
+  // What the processor wrote: for audio the transcode plus duration and
+  // measured loudness, for images a width-keyed set. Json rather than a child
+  // table because the shape differs by kind and will change as the pipeline
+  // does, and NOTHING QUERIES INSIDE IT — the public read path reads the URL on
+  // the parent row and never looks here. A child table would buy queryability
+  // no caller wants at the price of a migration per derivative width.
+  derivatives Json?
+
+  // Null unless FAILED. Carried on the row for the admin surface and for
+  // judging whether a retry is worth attempting.
+  error String?
+
+  // On the row rather than read from the SQS receive count: this is what the
+  // review queue and any alarm read, it outlives the message, and it is what
+  // lets retries stop without a person inspecting a dead-letter queue.
+  attempts Int @default(0)
+
+  // Who supplied the file. Restrict matches Entry.creatorId — attribution must
+  // not disappear with a user row.
+  uploaderId String @map("uploader_id")
+  uploader   User   @relation("MediaUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+
+  // ALL PROVENANCE THAT IS NOT THE UPLOADER: who is heard, when the recording
+  // was actually made, the conditions, the equipment, the setting. ADR 20
+  // specifies a structured speaker reference and a recorded-at column; this has
+  // neither — see the implementation amendment on that record.
+  //
+  // One free-text column rather than some fields typed and the rest not. Most
+  // speakers of a language with roughly a hundred left will never hold an
+  // account, so a foreign key cannot represent them; and once the who and the
+  // where are prose, typing the when alone buys a column nothing queries. The
+  // cost is that provenance is read rather than sorted. Reversible cheaply: a
+  // nullable recorded_at is an additive migration whenever a caller wants one.
+  notes String?
+
+  // Review state, ADMIN only, deliberately the same name and meaning as
+  // Entry.isPublished — the codebase already means one thing by it. Approval is
+  // what copies derivatives from the pending prefix to the public one and
+  // writes the URL on the parent; the prefix move, not the flag, is what makes
+  // unapproved media unreachable rather than merely unlinked.
+  isPublished   Boolean   @default(false) @map("is_published")
+  publishedAt   DateTime? @map("published_at")
+  // Who approved. The gate IS the quality-control claim, and an unattributed
+  // approval is not much of one.
+  publishedById String?   @map("published_by_id")
+  publishedBy   User?     @relation("MediaPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // The owning row, whichever it is. Both null means the asset is uploaded but
+  // not yet attached, which is a legitimate state: uploads are not attached at
+  // creation, so one can outlive the intent that produced it.
+  entry       Entry?       @relation("EntryImage")
+  translation Translation? @relation("TranslationAudio")
+
+  @@index([status])
+  @@index([uploaderId])
+  // NOT THE FULL INDEX SET. The review queue reads
+  // `status = READY AND is_published = false`, which wants a partial index, and
+  // Prisma cannot express a WHERE clause — so it lives in the migration
+  // alongside entries_live_idx and entries_drafts_idx, not here.
+  @@map("media_assets")
+}
+
+enum MediaKind {
+  AUDIO
+  IMAGE
+}
+
+// AWAITING_UPLOAD IS NOT IN ADR 20, which specifies PENDING -> READY | FAILED.
+// It is added because the row is created at presign, before any bytes exist, so
+// a single PENDING would mean both "the browser has not uploaded yet" and
+// "uploaded, waiting on the processor". ADR 20 makes an asset stuck in PENDING
+// a MONITORED condition — the signal that a queue or a consumer is broken — and
+// abandoned uploads are common enough to drown that signal from the first day.
+// Splitting them keeps PENDING meaning exactly "queued and unprocessed", and
+// hands a future reaper the precise set of objects that were never claimed.
+enum MediaStatus {
+  AWAITING_UPLOAD
+  PENDING
+  READY
+  FAILED
 }
 
 // =============================================================================
@@ -543,4 +694,5 @@ enum EntityType {
   LESSON
   EXERCISE
   USER
+  MEDIA_ASSET
 }

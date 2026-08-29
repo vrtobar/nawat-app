@@ -28,7 +28,11 @@ export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 // TRANSLATION DETAIL
 // Used within DictionaryEntryDetail and standalone in flashcard/exercise views.
 // Includes dialect inline — avoids a separate lookup.
-// audioKey and imageKey intentionally excluded — S3 keys are internal only.
+// audioAssetId and the asset's keys are intentionally excluded — a response
+// carries audioUrl and nothing else about storage. That URL is written only on
+// ADMIN approval (docs/adr/0020), so its presence already means processed,
+// verified and approved; exposing the asset would add a second way to reach
+// media that has not passed the gate.
 //
 // RESOLVED CONTENT (ADR 0015 §4). This is a response shape, so `content` and
 // `example` are already resolved to one locale server-side — never both
@@ -150,8 +154,9 @@ export type UpdateTranslation = z.infer<typeof UpdateTranslationSchema>;
 // mapping layer sits between the form and UpdateTranslationSchema where a
 // rename could silently drop a field.
 //
-// No `locale` field, because nothing was resolved. audioKey/imageKey stay
-// excluded — S3 keys are internal regardless of who is asking.
+// No `locale` field, because nothing was resolved. Storage stays excluded
+// regardless of who is asking: an editor attaches media through the
+// sub-resource endpoints, never by PATCHing a key or a URL back.
 // -----------------------------------------------------------------------------
 
 export const AdminTranslationDetailSchema = z.object({
