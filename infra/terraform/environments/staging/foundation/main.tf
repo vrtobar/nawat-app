@@ -56,7 +56,17 @@ module "security" {
 # S3
 # =============================================================================
 
-# Audio recordings and images, served only through the CDN distribution.
+# Audio recordings and images. THREE PREFIXES, and the split is a security
+# boundary rather than filing (docs/adr/0020):
+#
+#   source/   original uploads — never served, never moved, kept permanently
+#   pending/  processed derivatives awaiting ADMIN review
+#   public/   approved; the only prefix this bucket's CDN can read
+#
+# Publication is a COPY between prefixes, not a flag on a row, which is what
+# makes unapproved media unreachable rather than merely unlinked. The CDN
+# distribution below enforces it twice, in its origin path and in the grant.
+#
 # Versioning is on because a re-uploaded recording would otherwise be
 # unrecoverable, and the language content is the part of this project that
 # cannot be regenerated.
@@ -298,6 +308,18 @@ resource "aws_cloudfront_distribution" "cdn" {
     origin_id                = "s3-assets"
     domain_name              = aws_s3_bucket.assets.bucket_regional_domain_name
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+
+    # THE APPROVAL GATE, EXPRESSED AS A ROUTE. The assets bucket holds three
+    # prefixes (docs/adr/0020): `source/` for original uploads, `pending/` for
+    # processed derivatives awaiting review, and `public/` for approved ones.
+    # This path prepends `/public` to every request, so no URL a viewer can
+    # construct reaches the other two — `cdn.nahuat.com/pending/x` asks the
+    # origin for `public/pending/x` and gets a 404.
+    #
+    # Without it the gate is a convention that holds only until someone shares
+    # a key. The bucket policy below narrows the grant to match; both are
+    # needed, since either alone leaves the objects reachable.
+    origin_path = "/public"
   }
 
   default_cache_behavior {
@@ -335,7 +357,13 @@ resource "aws_s3_bucket_policy" "assets" {
       Effect    = "Allow"
       Principal = { Service = "cloudfront.amazonaws.com" }
       Action    = "s3:GetObject"
-      Resource  = "${aws_s3_bucket.assets.arn}/*"
+      # `public/*`, not `*`. The origin path above already stops a viewer
+      # addressing another prefix; this stops the distribution reading one at
+      # all, so a later behaviour or origin added to this distribution cannot
+      # widen the exposure by accident. Unapproved media is unreachable because
+      # CloudFront is not permitted to fetch it, not merely because no route
+      # points there.
+      Resource = "${aws_s3_bucket.assets.arn}/public/*"
       Condition = {
         StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.cdn.arn }
       }
