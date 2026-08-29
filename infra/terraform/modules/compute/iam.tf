@@ -78,17 +78,55 @@ resource "aws_iam_role" "api_task" {
 }
 
 data "aws_iam_policy_document" "api_task" {
-  # Presigned upload URLs. Objects are written directly by the browser, so the
-  # API only ever signs — it never proxies the bytes.
+  # THE ASSETS BUCKET IS THREE PREFIXES WITH DIFFERENT MEANINGS (docs/adr/0020),
+  # so it is three statements. A single grant over the bucket let this role
+  # delete an original recording, which nothing in the system should ever be
+  # able to do — the source is the one artefact that cannot be regenerated.
+  #
+  # Bytes never pass through this process. It signs URLs the browser uses
+  # directly, reads object metadata to check what arrived, and copies between
+  # prefixes when an admin approves.
+
+  # Originals. PutObject is what the presigned upload URL is signed with;
+  # GetObject covers the HeadObject that confirms the bytes landed, and the
+  # copy an approval reads from if a derivative is ever regenerated.
+  #
+  # NO DeleteObject, deliberately. Reclaiming abandoned uploads is a real job
+  # and not this role's — a reaper that deletes source objects should hold its
+  # own narrow grant, so a bug in a request path cannot destroy a recording.
   statement {
-    sid    = "AssetObjects"
+    sid    = "AssetSourceObjects"
+    effect = "Allow"
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+    ]
+    resources = ["${var.assets_bucket_arn}/source/*"]
+  }
+
+  # Derivatives awaiting review. READ ONLY from this role: the processor writes
+  # them, an admin plays them through a short-lived presigned GET, and approval
+  # copies them to public/. Nothing the API does should alter what a reviewer
+  # is about to judge.
+  statement {
+    sid       = "AssetPendingObjects"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.assets_bucket_arn}/pending/*"]
+  }
+
+  # Approved. The only prefix this role may write or delete: publication copies
+  # into it (PutObject, with GetObject on the pending source above) and
+  # unpublishing removes the object again.
+  statement {
+    sid    = "AssetPublicObjects"
     effect = "Allow"
     actions = [
       "s3:PutObject",
       "s3:GetObject",
       "s3:DeleteObject",
     ]
-    resources = ["${var.assets_bucket_arn}/*"]
+    resources = ["${var.assets_bucket_arn}/public/*"]
   }
 
   # Queue ARNs are matched by prefix rather than listed: the queues live in the
