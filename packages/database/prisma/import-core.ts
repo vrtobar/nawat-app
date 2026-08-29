@@ -176,9 +176,11 @@ export async function importFile(prisma: PrismaClient, path: string): Promise<Im
         }
 
         if (toUpdate.length > 0) {
-          // image_key, audio_key and deleted_at are absent on purpose: they are
-          // not in the export format, so an UPDATE naming them would clear S3
-          // pointers and undelete rows that a restore has no business touching.
+          // image_asset_id and deleted_at are absent on purpose: neither is in
+          // the export format, so an UPDATE naming them would detach media and
+          // undelete rows that a restore has no business touching. The media
+          // itself is not exported at all — the assets bucket is in the
+          // foundation layer and survives the teardown an export exists for.
           await tx.$executeRaw`
             UPDATE entries AS e
             SET type       = v.type::"EntryType",

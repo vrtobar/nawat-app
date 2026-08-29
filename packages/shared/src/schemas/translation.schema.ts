@@ -28,7 +28,11 @@ export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 // TRANSLATION DETAIL
 // Used within DictionaryEntryDetail and standalone in flashcard/exercise views.
 // Includes dialect inline — avoids a separate lookup.
-// audioKey and imageKey intentionally excluded — S3 keys are internal only.
+// audioAssetId and the asset's keys are intentionally excluded — a response
+// carries audioUrl and nothing else about storage. That URL is written only on
+// ADMIN approval (docs/adr/0020), so its presence already means processed,
+// verified and approved; exposing the asset would add a second way to reach
+// media that has not passed the gate.
 //
 // RESOLVED CONTENT (ADR 0015 §4). This is a response shape, so `content` and
 // `example` are already resolved to one locale server-side — never both
@@ -84,7 +88,11 @@ export const CreateTranslationSchema = z.object({
   exampleNawat: z.string().optional(),
   exampleEs: z.string().optional(),
   exampleEn: z.string().optional(),
-  audioUrl: z.url().optional(),
+  // NO audioUrl. It is not an omission — the column is written by exactly one
+  // thing, an ADMIN approving a MediaAsset (docs/adr/0020), and accepting it
+  // here would let a contributor point a published translation at any URL they
+  // like, which is the approval gate defeated by a PATCH. Audio is attached
+  // through the media sub-resource endpoints instead.
 });
 
 // PATCH — every field optional, dialect immutable after creation, and the
@@ -108,9 +116,9 @@ export const CreateTranslationSchema = z.object({
 // nowhere — so it can be left alone or replaced, never emptied.
 //
 // Each nullable field is derived from its create counterpart with .unwrap()
-// rather than redeclared, so a change to the underlying rule — audioUrl's
-// z.url(), the part-of-speech enum gaining a member — tracks here instead of
-// drifting into a second, staler definition.
+// rather than redeclared, so a change to the underlying rule — a length bound,
+// the part-of-speech enum gaining a member — tracks here instead of drifting
+// into a second, staler definition.
 const createShape = CreateTranslationSchema.shape;
 
 export const UpdateTranslationSchema = CreateTranslationSchema.omit({
@@ -123,7 +131,6 @@ export const UpdateTranslationSchema = CreateTranslationSchema.omit({
     exampleNawat: createShape.exampleNawat.unwrap().nullable(),
     exampleEs: createShape.exampleEs.unwrap().nullable(),
     exampleEn: createShape.exampleEn.unwrap().nullable(),
-    audioUrl: createShape.audioUrl.unwrap().nullable(),
   })
   .partial()
   .extend({ expectedUpdatedAt: OptimisticLockSchema });
@@ -150,8 +157,9 @@ export type UpdateTranslation = z.infer<typeof UpdateTranslationSchema>;
 // mapping layer sits between the form and UpdateTranslationSchema where a
 // rename could silently drop a field.
 //
-// No `locale` field, because nothing was resolved. audioKey/imageKey stay
-// excluded — S3 keys are internal regardless of who is asking.
+// No `locale` field, because nothing was resolved. Storage stays excluded
+// regardless of who is asking: an editor attaches media through the
+// sub-resource endpoints, never by PATCHing a key or a URL back.
 // -----------------------------------------------------------------------------
 
 export const AdminTranslationDetailSchema = z.object({

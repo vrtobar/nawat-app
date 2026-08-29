@@ -4,10 +4,12 @@ import { type AdminTranslationDetail, type Locale, type TranslationDetail } from
 // The full translation shape for a detail response — every field
 // TranslationDetail declares, plus its dialect inline so the client needs no
 // second lookup. Paired content/example columns are selected and resolved to one
-// locale by toTranslationDetail; the S3 keys (audioKey, imageKey) are
-// deliberately absent. Shared by the entry detail (translations nested on the
-// entry) and the standalone translation write paths, so the projection and its
-// mapping cannot drift between them.
+// locale by toTranslationDetail; audioUrl is selected but audioAssetId and the
+// asset row are deliberately absent, so a response can express "there is
+// approved audio here" and nothing else about where it lives. Shared by the
+// entry detail (translations nested on the entry) and the standalone
+// translation write paths, so the projection and its mapping cannot drift
+// between them.
 export const TRANSLATION_DETAIL_SELECT = {
   id: true,
   contentEs: true,

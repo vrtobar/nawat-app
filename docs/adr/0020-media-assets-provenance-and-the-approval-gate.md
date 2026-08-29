@@ -7,8 +7,14 @@
 - **Depends on:** [ADR 19](0019-asynchronous-tier-anchored-on-media-processing.md)
   for the processing pipeline, [ADR 17](0017-production-disposable-during-prelaunch.md)
   for what survives a teardown
+- **Amended 2026-08-29:** the schema, the upload path, attachment and the
+  approval gate are built. **Read "Amendment: what actually shipped" at the end
+  before treating the Decision below as a description of the running system** —
+  four things differ, and one of them is a state this record does not mention.
 
-This record describes work that does not exist yet.
+~~This record describes work that does not exist yet.~~ It did when it was
+written. The processing pipeline it depends on is still unbuilt; everything
+either side of it is not.
 
 ## Context
 
@@ -128,3 +134,109 @@ already work this way; media has no equivalent.
   time.** Rejected: it makes every public read join the asset table and depends
   on every future query remembering the filter. The invariant is cheaper to keep
   than the discipline.
+
+## Amendment: what actually shipped
+
+_Added 2026-08-29, after the schema, the upload path, the sub-resource
+attachment and the approval gate were built._ Four things differ from the
+Decision above. Each is recorded with its reason, because in every case the
+original had an argument behind it and the argument is the part worth keeping.
+
+**What did not change is worth saying first**, since the list below is
+necessarily about deviations: media is a sub-resource, processing state and
+review state are separate, `audioUrl` and `imageUrl` are written only on
+approval and by nothing else, and publication is a copy between prefixes
+enforced by CloudFront's origin path and the bucket policy together. The
+substance of this record is the running system.
+
+### There is no structured speaker reference
+
+**The Decision says provenance covers "who recorded a word, when, in which
+dialect, and under what understanding", and the Context calls being able to
+"inspect or sort contributions by speaker" a requirement rather than a
+convenience.** What shipped is `uploaderId` and a free-text `notes` column.
+
+**The argument that removed it.** A foreign key to `users` cannot represent the
+people who matter most here. A language with roughly a hundred speakers is
+documented largely by recording elders who will never hold an account, so the
+column would have been null for the majority of exactly the provenance this
+record calls essential. The alternative considered was a small `Speaker` table,
+which represents them properly and is what a later version should have.
+
+**What it costs, stated plainly:** provenance is read rather than queried.
+Sorting a contributor's recordings by who is heard in them is not possible, and
+free text does not sort — names vary and are misspelled. If that becomes a real
+need, the fix is a `Speaker` table and a migration over real recordings, which
+this record elsewhere calls the expensive kind. The judgement was that
+recordings accumulate slowly enough for that to stay affordable, and that a
+half-typed provenance model — some fields structured, the rest prose — is worse
+than one honest free-text column.
+
+### There is no recorded-at column either, and for a different reason
+
+`recordedAt` was written, then removed before it shipped. The reason is not the
+one above: a date has an obvious type and would have been easy to keep.
+
+**It was removed for consistency.** Once the who and the where are prose, typing
+the when alone buys a column nothing queries — no endpoint reads it, no view
+sorts by it, and the review queue orders by `createdAt`. It would have been a
+nullable column carried because it was planned rather than because anything used
+it, which is the shape this project has already paid for twice: the orphaned
+`nahuat/<env>/internal` secret, and an ElastiCache instance billed for months
+with no client library installed.
+
+**Cheap to reverse, and deliberately so.** Unlike the speaker question, adding
+`recorded_at` later is an additive nullable column and a backfill of only the
+rows anyone cares about — no relational restructuring, no data migration over
+the whole table.
+
+### The state machine has a fourth state
+
+**The Decision specifies `PENDING → READY | FAILED`.** What shipped is
+`AWAITING_UPLOAD → PENDING → READY | FAILED`.
+
+The row is created at presign, before any bytes exist. A single `PENDING` would
+therefore mean both "the browser has not uploaded yet" and "uploaded, waiting on
+the processor" — and this record makes an asset stuck in `PENDING` a **monitored
+condition**, the signal that a queue or a consumer is broken. Abandoned uploads
+are common enough that they would have drowned that signal from the first day.
+
+Split, `PENDING` means exactly "queued and unprocessed", and the abandoned set
+becomes addressable in its own right: it is what a reaper needs in order to
+reclaim orphaned objects, which is a job this record's Consequences already
+anticipate.
+
+### The derivatives contract is defined by the gate, not the processor
+
+**This record describes `derivatives` without saying what is in it.** The
+approval gate has to know — it decides what to copy and which file becomes the
+public URL — and it shipped first, so the shape is defined in
+`packages/shared/src/schemas/media.schema.ts` and the still-unbuilt consumer
+must honour it.
+
+Two properties of that shape are decisions rather than encoding details. **Keys
+are stored relative to the asset's prefix**, so `pending/<id>/audio.mp3` and
+`public/<id>/audio.mp3` are the same stored key under two prefixes — publication
+is a prefix swap with nothing to parse or re-derive. And **the primary file is
+named rather than inferred**: for audio there is one obvious answer and for
+images there is not, so a gate that guessed would put a thumbnail on a
+dictionary page the day someone reordered the list.
+
+⚠️ **This is a contract with a consumer that does not exist**, and it has never
+met one. The gate's own logic and ordering are covered by unit tests that seed
+the column and a fake object store; that a real transcode produces a shape the
+gate accepts is unverified, and the first run behind a live processor is where
+that gets found out.
+
+### Two smaller notes
+
+**Publishing an unattached asset is refused.** The Decision does not address it.
+Approval writes a URL onto a parent row, so an unattached asset has nowhere for
+that URL to go — and a published asset visible to nobody is the kind of state
+that is discovered months later.
+
+**Replacing or removing approved media is ADMIN-only**, while adding media where
+there is none stays open to any contributor, published parent included. That
+second half is this record's stated goal. The first half is its logical
+consequence rather than a new rule: live media passed a review, so unreviewing
+it is a reviewer's decision.

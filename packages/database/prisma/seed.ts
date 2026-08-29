@@ -226,7 +226,6 @@ async function seedDevContent(): Promise<void> {
           exampleNawat: t.exampleNawat ?? null,
           exampleEs: t.exampleEs ?? null,
           exampleEn: t.exampleEn ?? null,
-          audioUrl: t.audioUrl ?? null,
           isPublished: true,
           creatorId: author.id,
           updaterId: author.id,
