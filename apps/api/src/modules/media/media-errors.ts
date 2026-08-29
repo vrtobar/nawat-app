@@ -90,3 +90,25 @@ export function publishedMediaChangeForbidden(): ForbiddenException {
     message: 'Published media can only be replaced or removed by an admin',
   });
 }
+
+// Approval writes a URL onto an entry or a translation, so an unattached asset
+// has nowhere for that URL to go. Refused rather than quietly approved: an
+// asset marked published with no parent would satisfy every check the gate
+// makes and be visible to nobody, which is the kind of state that gets
+// discovered months later.
+export function mediaNotAttached(): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.MEDIA_NOT_ATTACHED,
+    message: 'Attach this media to an entry or translation before publishing it',
+  });
+}
+
+// The processor wrote something the gate cannot act on. Distinct from a FAILED
+// asset, which never produced derivatives at all — this one claims to be READY
+// and is not, which points at the pipeline rather than at the upload.
+export function mediaDerivativesInvalid(detail: string): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.MEDIA_DERIVATIVES_INVALID,
+    message: `This asset cannot be published: ${detail}`,
+  });
+}

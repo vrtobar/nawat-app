@@ -40,3 +40,27 @@ export function extensionFor(kind: MediaKind, contentType: string): string {
   }
   return extension;
 }
+
+// A derivative's key under a given prefix. The stored key is RELATIVE to the
+// asset's folder, so publication is this function called twice with different
+// prefixes — nothing is parsed, and the pending and public objects are
+// guaranteed to differ in exactly one path component.
+export function derivativeKey(
+  prefix: (typeof MEDIA_PREFIX)[keyof typeof MEDIA_PREFIX],
+  assetId: string,
+  relativeKey: string,
+): string {
+  return `${prefix}/${assetId}/${relativeKey}`;
+}
+
+// The address a published derivative is served at.
+//
+// ⚠️ THE `public/` PREFIX IS ABSENT ON PURPOSE. The CloudFront distribution
+// sets `origin_path = "/public"`, so it prepends that component itself; a URL
+// including it would resolve to `public/public/...` and 404. The prefix is how
+// the bucket is organised and the origin path is how that organisation is
+// hidden from viewers — this function is where the two meet, and it is the
+// only place that knows.
+export function cdnUrlFor(cdnBaseUrl: string, assetId: string, relativeKey: string): string {
+  return `${cdnBaseUrl.replace(/\/$/, '')}/${assetId}/${relativeKey}`;
+}

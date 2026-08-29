@@ -1,4 +1,11 @@
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -8,6 +15,11 @@ import { ConfigService } from '@nestjs/config';
 // short enough that one copied out of a network log is worthless by the time
 // it is used.
 const UPLOAD_URL_TTL_SECONDS = 300;
+
+// A reviewer's playback link. Shorter than the upload window and for a
+// different reason: this one points at UNAPPROVED media, so the window is how
+// long a link remains useful if it leaves the admin's browser.
+const PREVIEW_URL_TTL_SECONDS = 120;
 
 // What the browser must send on the PUT, and what S3 will check the body
 // against because they were signed.
@@ -87,6 +99,36 @@ export class StorageService {
       if (isNotFound(error)) return undefined;
       throw error;
     }
+  }
+
+  // A read link for media that is not published, so an admin can hear or see
+  // what they are approving. Deliberately not the CDN: CloudFront cannot read
+  // the pending prefix at all, which is what makes the gate a boundary rather
+  // than a convention — so review has to go through a signed request or not
+  // happen.
+  presignGet(key: string): Promise<string> {
+    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+      expiresIn: PREVIEW_URL_TTL_SECONDS,
+    });
+  }
+
+  // Publication. A server-side copy, so the bytes never travel through this
+  // process or back out to the internet.
+  async copy(fromKey: string, toKey: string): Promise<void> {
+    await this.client.send(
+      new CopyObjectCommand({
+        Bucket: this.bucket,
+        // CopySource is the one place in the S3 API that wants bucket and key
+        // as one slash-joined string, and it must be URI-encoded — a key with
+        // a space or a plus silently copies the wrong object otherwise.
+        CopySource: encodeURI(`${this.bucket}/${fromKey}`),
+        Key: toKey,
+      }),
+    );
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 }
 
