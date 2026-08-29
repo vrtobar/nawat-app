@@ -176,6 +176,15 @@ export const API_ERROR_CODES = {
   // does not match what was signed. The asset stays AWAITING_UPLOAD, so the
   // caller can retry the PUT rather than start over.
   MEDIA_UPLOAD_INCOMPLETE: 'MEDIA_UPLOAD_INCOMPLETE',
+  // An AUDIO asset offered to an entry's image slot, or the reverse. A
+  // translation carries a recording and an entry carries a picture; the kind is
+  // fixed at upload and the slot cannot coerce it.
+  MEDIA_KIND_MISMATCH: 'MEDIA_KIND_MISMATCH',
+  // The asset is already attached to a different entry or translation. One
+  // asset serves one row — the same recording used twice would give two rows a
+  // single approval state and a single set of derivatives, so a second use is
+  // a second upload.
+  MEDIA_ALREADY_ATTACHED: 'MEDIA_ALREADY_ATTACHED',
 
   // Flashcards
   FLASHCARD_SET_NOT_FOUND: 'FLASHCARD_SET_NOT_FOUND',

@@ -7,6 +7,7 @@ import {
 } from '@nahuat/shared';
 import { Injectable } from '@nestjs/common';
 
+import { MEDIA_ASSET_SELECT, toMediaAsset } from './media-asset';
 import {
   mediaAssetNotFound,
   mediaInvalidState,
@@ -16,41 +17,6 @@ import {
 } from './media-errors';
 import { sourceKeyFor } from './media-keys';
 import { StorageService } from './storage.service';
-
-// The columns that make up the MediaAsset contract. Selected explicitly, the
-// same discipline as DIALECT_SELECT: sourceKey and derivatives are internal and
-// must not reach a response by being added to the row later.
-const MEDIA_ASSET_SELECT = {
-  id: true,
-  kind: true,
-  status: true,
-  contentType: true,
-  sizeBytes: true,
-  error: true,
-  notes: true,
-  isPublished: true,
-  createdAt: true,
-} as const;
-
-// Prisma hands back a Date; the contract is an ISO string. Mapped explicitly
-// rather than left to the JSON serializer, matching toAdminEntryDetail and
-// toUserProfile — the response shape is then checked by the compiler instead of
-// depending on how a Date happens to stringify.
-type MediaAssetRow = {
-  id: string;
-  kind: MediaAsset['kind'];
-  status: MediaAsset['status'];
-  contentType: string;
-  sizeBytes: number;
-  error: string | null;
-  notes: string | null;
-  isPublished: boolean;
-  createdAt: Date;
-};
-
-function toMediaAsset(row: MediaAssetRow): MediaAsset {
-  return { ...row, createdAt: row.createdAt.toISOString() };
-}
 
 @Injectable()
 export class UploadsService {

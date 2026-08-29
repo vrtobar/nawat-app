@@ -120,3 +120,20 @@ export const MediaAssetSchema = z.object({
   createdAt: z.iso.datetime(),
 });
 export type MediaAsset = z.infer<typeof MediaAssetSchema>;
+
+// -----------------------------------------------------------------------------
+// ATTACHMENT
+// -----------------------------------------------------------------------------
+
+// The body of PUT /translations/:id/audio and PUT /entries/:id/image.
+//
+// NO expectedUpdatedAt, unlike every other write to these rows. Attaching does
+// not modify the parent — it sets a foreign key and leaves `updatedAt` alone
+// (docs/adr/0020) — so there is no version to contend for, and demanding one
+// would make a recording fail because someone else fixed a typo. Two people
+// attaching to the same row is settled by the unique constraint underneath,
+// which is a race with one winner rather than a lost update.
+export const AttachMediaSchema = z.object({
+  assetId: z.string().min(1),
+});
+export type AttachMedia = z.infer<typeof AttachMediaSchema>;

@@ -1,4 +1,4 @@
-import { API_ERROR_CODES, type MediaStatus } from '@nahuat/shared';
+import { API_ERROR_CODES, type MediaKind, type MediaStatus } from '@nahuat/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -60,5 +60,33 @@ export function uploadNotYours(): ForbiddenException {
   return new ForbiddenException({
     code: API_ERROR_CODES.FORBIDDEN,
     message: 'This upload belongs to another contributor',
+  });
+}
+
+export function mediaKindMismatch(expected: MediaKind, actual: MediaKind): BadRequestException {
+  return new BadRequestException({
+    code: API_ERROR_CODES.MEDIA_KIND_MISMATCH,
+    message: `This slot takes ${expected.toLowerCase()}, and that asset is ${actual.toLowerCase()}`,
+  });
+}
+
+export function mediaAlreadyAttached(): ConflictException {
+  return new ConflictException({
+    code: API_ERROR_CODES.MEDIA_ALREADY_ATTACHED,
+    message: 'That upload is already attached to something else',
+  });
+}
+
+// The media equivalent of publishedEditForbidden in the dictionary module, and
+// deliberately a separate factory rather than an import across modules: the two
+// rules coincide today and answer to different records. This one comes from the
+// approval gate (docs/adr/0020) — live media was reviewed by an admin, so
+// removing or replacing it is an admin's decision. ADDING media where there is
+// none stays open to contributors even on a published row, which is the
+// contribution the sub-resource exists to make possible.
+export function publishedMediaChangeForbidden(): ForbiddenException {
+  return new ForbiddenException({
+    code: API_ERROR_CODES.FORBIDDEN,
+    message: 'Published media can only be replaced or removed by an admin',
   });
 }
