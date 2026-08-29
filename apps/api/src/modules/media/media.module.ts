@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { AttachmentsController } from './attachments.controller';
+import { AttachmentsService } from './attachments.service';
 import { StorageService } from './storage.service';
 import { UploadsController } from './uploads.controller';
 import { UploadsService } from './uploads.service';
@@ -12,8 +14,8 @@ import { UploadsService } from './uploads.service';
 // images would duplicate the presign, the state machine and the gate to gain a
 // distinction only ffmpeg cares about.
 @Module({
-  controllers: [UploadsController],
-  providers: [StorageService, UploadsService],
+  controllers: [AttachmentsController, UploadsController],
+  providers: [AttachmentsService, StorageService, UploadsService],
   // StorageService is the only S3 client in the API. Exported because the
   // approval gate needs it to move objects between prefixes, and a second
   // client would mean a second place the bucket name is resolved.
