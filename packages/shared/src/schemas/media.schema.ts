@@ -137,3 +137,81 @@ export const AttachMediaSchema = z.object({
   assetId: z.string().min(1),
 });
 export type AttachMedia = z.infer<typeof AttachMediaSchema>;
+
+// -----------------------------------------------------------------------------
+// DERIVATIVES
+// -----------------------------------------------------------------------------
+
+// ⚠️ THIS IS A CONTRACT WITH A CONSUMER THAT DOES NOT EXIST YET. The media
+// processor (ADR 19, still unbuilt) writes this JSON; the approval gate reads
+// it to know what to copy and which file becomes the public URL. Defining it
+// here rather than letting the processor invent it is deliberate — the gate
+// ships first, and a shape agreed in one place beats two halves guessing.
+//
+// KEYS ARE RELATIVE TO THE ASSET'S PREFIX, e.g. `audio.mp3` or `960.webp`, not
+// `pending/med_1/audio.mp3`. That is what makes publication a prefix swap:
+// the same relative key names the object under `pending/` and under `public/`,
+// so approving is a copy with one component changed and nothing to re-derive.
+export const MediaDerivativeFileSchema = z.object({
+  key: z.string().min(1),
+  contentType: z.string().min(1),
+  bytes: z.int().nonnegative(),
+  // Images only — the width this rendition was resized to, so a client can
+  // build a srcset without opening the files.
+  width: z.int().positive().optional(),
+});
+export type MediaDerivativeFile = z.infer<typeof MediaDerivativeFileSchema>;
+
+export const MediaDerivativesSchema = z.object({
+  // Which file the public URL points at. Named rather than inferred: for audio
+  // there is one obvious answer and for images there is not, and a gate that
+  // guessed would put a thumbnail on a dictionary page the day someone
+  // reordered the list.
+  primary: z.string().min(1),
+  files: z.array(MediaDerivativeFileSchema).min(1),
+  // Audio only. Measured during processing, kept because a client showing a
+  // player wants it before the file loads.
+  durationSec: z.number().positive().optional(),
+});
+export type MediaDerivatives = z.infer<typeof MediaDerivativesSchema>;
+
+// -----------------------------------------------------------------------------
+// ADMIN REVIEW
+// -----------------------------------------------------------------------------
+
+// The review queue's row. Carries what a reviewer decides on: the asset, what
+// it is attached to, and who supplied it. Provenance is included here and
+// nowhere else — the public shapes have no business knowing who recorded a
+// word, and the reviewer has no way to judge without it.
+export const AdminMediaAssetSchema = MediaAssetSchema.extend({
+  uploader: z.object({
+    id: z.string(),
+    name: z.string().nullable(),
+    email: z.string(),
+  }),
+  // Null while the asset is unattached. An unattached asset cannot be
+  // published — approval writes a URL onto a parent, and there is nowhere to
+  // write it — so the queue shows them but the gate refuses them.
+  attachedTo: z
+    .object({
+      kind: z.enum(['ENTRY', 'TRANSLATION']),
+      id: z.string(),
+      // The headword, for both kinds. A reviewer judging a recording needs to
+      // know which word it claims to be.
+      nawatContent: z.string(),
+    })
+    .nullable(),
+  // A short-lived presigned GET against the PENDING prefix. Review plays the
+  // recording through this and never through the CDN, which cannot see
+  // unapproved media at all — that is the point of the prefix split.
+  previewUrl: z.url().nullable(),
+});
+export type AdminMediaAsset = z.infer<typeof AdminMediaAssetSchema>;
+
+// Defaults to the set a reviewer is there to act on: processed, and not yet
+// decided. The other combinations exist for looking into a specific failure.
+export const MediaQuerySchema = z.object({
+  status: MediaStatusSchema.optional(),
+  isPublished: z.stringbool().optional(),
+});
+export type MediaQuery = z.infer<typeof MediaQuerySchema>;

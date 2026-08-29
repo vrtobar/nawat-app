@@ -185,6 +185,13 @@ export const API_ERROR_CODES = {
   // single approval state and a single set of derivatives, so a second use is
   // a second upload.
   MEDIA_ALREADY_ATTACHED: 'MEDIA_ALREADY_ATTACHED',
+  // Publishing an asset attached to nothing. Approval writes a URL onto a
+  // parent row, so an unattached asset has nowhere for that URL to go.
+  MEDIA_NOT_ATTACHED: 'MEDIA_NOT_ATTACHED',
+  // The asset says READY but its derivatives are missing, unparseable, or name
+  // a primary file that is not in the list. Points at the processor rather than
+  // at the upload, which is why it is not MEDIA_UPLOAD_INCOMPLETE.
+  MEDIA_DERIVATIVES_INVALID: 'MEDIA_DERIVATIVES_INVALID',
 
   // Flashcards
   FLASHCARD_SET_NOT_FOUND: 'FLASHCARD_SET_NOT_FOUND',
