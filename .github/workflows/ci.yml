@@ -66,7 +66,7 @@ jobs:
             # see: Dockerfile edits, and dependency changes that shift what has
             # to be copied between stages or pruned out of the runtime tree.
             docker:
-              - 'apps/*/Dockerfile'
+              - 'apps/**/Dockerfile'
               - '.dockerignore'
               - 'package-lock.json'
               - 'apps/*/package.json'
