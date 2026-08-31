@@ -106,7 +106,7 @@ output "cdn_domain" {
 }
 
 output "cdn_distribution_id" {
-  description = "CDN distribution ID, used by cdn-invalidation-consumer"
+  description = "CDN distribution ID, for cache invalidation"
   value       = aws_cloudfront_distribution.cdn.id
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "cache-invalidation-consumer",
+  "name": "review-session-consumer",
   "version": "0.0.1",
   "private": true,
   "license": "MIT",
@@ -10,6 +10,9 @@
     "dev": "tsc --watch",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nahuat/database": "*"
   },
   "devDependencies": {
     "@nahuat/config": "*",
