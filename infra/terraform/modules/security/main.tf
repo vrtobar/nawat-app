@@ -172,10 +172,10 @@ resource "aws_security_group" "rds" {
 # -----------------------------------------------------------------------------
 # ElastiCache Valkey
 #
-# TRADEOFF: only cache-invalidation-consumer needs Redis, but all four Lambdas
-# share one security group, so all four can reach it. Per-consumer groups would
-# close that gap at the cost of four more groups and four more rules to keep in
-# sync — not worth it while the consumers are all first-party code in this repo.
+# The Lambda ingress below predates ADR 19, which deleted the only consumer
+# that read Redis. No Lambda exists in either environment today, so the rule
+# grants access to an empty group; whether the media consumer needs Redis at
+# all is decided when modules/messaging places it. See the backlog entry.
 #
 # There is no AUTH token either: access is controlled by VPC placement and this
 # group alone. See the backlog entry on Redis AUTH.
@@ -194,7 +194,7 @@ resource "aws_security_group" "redis" {
   }
 
   ingress {
-    description     = "Redis from Lambda (cache-invalidation-consumer)"
+    description     = "Redis from Lambda"
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
@@ -219,8 +219,9 @@ resource "aws_security_group" "redis" {
 # The event source mapping invokes the function through the Lambda service
 # plane, so nothing needs to reach these ENIs inbound.
 #
-# Outbound covers RDS, Redis, and 443 via NAT for the CloudFront API used by
-# cdn-invalidation-consumer.
+# Outbound covers RDS, Redis, and 443 via NAT. No consumer uses that egress
+# today — ADR 19 deleted the one that called the CloudFront API — and it is
+# reviewed when modules/messaging places the first real function.
 # -----------------------------------------------------------------------------
 resource "aws_security_group" "lambda" {
   name        = "${var.prefix}-lambda"

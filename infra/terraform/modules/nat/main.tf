@@ -12,8 +12,9 @@
 # =============================================================================
 
 # The Elastic IP is the address private resources present to the internet on
-# outbound calls: Auth0 token verification from ECS, and the CloudFront API
-# from cdn-invalidation-consumer.
+# outbound calls — today that is the API fetching Google's JWKS to verify ID
+# tokens. Two earlier consumers of this route are gone: Auth0 (ADR 18) and
+# cdn-invalidation-consumer (ADR 19).
 resource "aws_eip" "nat" {
   count  = var.nat_gateway_count
   domain = "vpc"

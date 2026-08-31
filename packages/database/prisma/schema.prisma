@@ -637,8 +637,8 @@ model UserActivity {
 
 // What a recorded activity was. LESSON_COMPLETED was removed with the learning
 // hierarchy (ADR 22) — there are no lessons to complete, and the consumer that
-// would have reacted to one is re-scoped to review sessions by ADR 19. Add
-// members back when there are events to name.
+// would have reacted to one is re-scoped to review sessions by that same ADR.
+// Add members back when there are events to name.
 enum ActivityType {
   REVIEW_SESSION
 }
@@ -662,9 +662,12 @@ model AuditLog {
 
   changes Json?
 
-  // SQS message ID for idempotency in audit-consumer Lambda.
-  // SQS guarantees same messageId on retry — prevents duplicate audit entries.
-  // Nullable: audit logs can also be created synchronously (non-SQS paths).
+  // DEAD, and deliberately still here. The column carried idempotency for an
+  // asynchronous audit consumer; ADR 19 deleted that consumer and made audit
+  // writes synchronous, in the transaction as the change they describe, so
+  // nothing populates this and every row is null. It is dropped in the same
+  // migration that implements the audit write path — separating the two would
+  // mean two migrations to reach the same schema.
   sqsMessageId String? @unique @map("sqs_message_id")
 
   createdAt DateTime @default(now()) @map("created_at")
