@@ -104,6 +104,23 @@ module "messaging" {
   source = "../../../modules/messaging"
 
   prefix = local.prefix
+
+  # The consumer. Same image_tag as the task definitions, so one commit
+  # deploys everywhere rather than leaving the Lambda a version behind.
+  ecr_media_consumer_url = data.terraform_remote_state.foundation.outputs.ecr_media_consumer_url
+  image_tag              = var.image_tag
+
+  # VPC-attached for RDS. S3 goes over the gateway endpoint.
+  private_subnet_ids = data.terraform_remote_state.foundation.outputs.private_subnet_ids
+  lambda_sg_id       = data.terraform_remote_state.foundation.outputs.lambda_sg_id
+
+  assets_bucket_name = data.terraform_remote_state.foundation.outputs.assets_bucket_name
+  assets_bucket_arn  = data.terraform_remote_state.foundation.outputs.assets_bucket_arn
+
+  db_secret_arn = module.database.master_user_secret_arn
+  db_host       = module.database.endpoint
+  db_port       = module.database.port
+  db_name       = module.database.db_name
 }
 
 # TODO(feat/terraform-application-monitoring): module "monitoring"
