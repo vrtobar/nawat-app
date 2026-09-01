@@ -16,11 +16,15 @@ import {
   uploadNotYours,
 } from './media-errors';
 import { sourceKeyFor } from './media-keys';
+import { QueueService } from './queue.service';
 import { StorageService } from './storage.service';
 
 @Injectable()
 export class UploadsService {
-  constructor(private readonly storage: StorageService) {}
+  constructor(
+    private readonly storage: StorageService,
+    private readonly queue: QueueService,
+  ) {}
 
   // Creates the asset and hands back a capability to write ONE object at ONE
   // key. The row exists before the bytes do, which is what makes an abandoned
@@ -99,6 +103,16 @@ export class UploadsService {
       data: { status: 'PENDING' },
       select: MEDIA_ASSET_SELECT,
     });
+
+    // AFTER the update commits, never inside it. A consumer that read the row
+    // before it was visible would find AWAITING_UPLOAD and fail on an asset
+    // that is in fact ready — the same race an S3 notification would have
+    // introduced, reintroduced here by construction rather than by chance.
+    //
+    // A false return is not an error for this caller; QueueService documents
+    // why, and the reaper is what recovers the row.
+    await this.queue.publishMediaProcessing(assetId);
+
     return toMediaAsset(updated);
   }
 

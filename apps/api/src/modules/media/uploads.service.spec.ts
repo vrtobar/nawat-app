@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { QueueService } from './queue.service';
 import type { StorageService } from './storage.service';
 import { UploadsService } from './uploads.service';
 
@@ -47,10 +48,18 @@ const storage = {
   head: vi.fn(),
 };
 
-const service = new UploadsService(storage as unknown as StorageService);
+const queue = {
+  publishMediaProcessing: vi.fn(),
+};
+
+const service = new UploadsService(
+  storage as unknown as StorageService,
+  queue as unknown as QueueService,
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  queue.publishMediaProcessing.mockResolvedValue(true);
   storage.presignPut.mockResolvedValue({
     url: 'https://bucket.s3.amazonaws.com/source/med_1/source.mp3?X-Amz-Signature=x',
     headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': '2048' },
@@ -126,6 +135,56 @@ describe('complete', () => {
     // .strict() is the assertion that matters: sourceKey and uploaderId were on
     // the row read above, and neither may reach the response.
     expect(() => MediaAssetSchema.strict().parse(result)).not.toThrow();
+  });
+
+  it('queues the asset only after the PENDING write, never before it', async () => {
+    const order: string[] = [];
+    mediaAsset.findUnique.mockResolvedValue(
+      row({ uploaderId: 'usr_1', sourceKey: 'source/med_1/source.mp3' }) as never,
+    );
+    storage.head.mockResolvedValue({ sizeBytes: 2048, contentType: 'audio/mpeg' });
+    mediaAsset.update.mockImplementation((async () => {
+      order.push('update');
+      return row({ status: 'PENDING' });
+    }) as never);
+    queue.publishMediaProcessing.mockImplementation(async () => {
+      order.push('publish');
+      return true;
+    });
+
+    await service.complete('usr_1', 'med_1');
+
+    // The ordering IS the contract. A publish that raced the commit would hand
+    // the consumer a row still reading AWAITING_UPLOAD.
+    expect(order).toEqual(['update', 'publish']);
+    expect(queue.publishMediaProcessing).toHaveBeenCalledWith('med_1');
+  });
+
+  it('still succeeds when the queue publish fails, leaving the row for the reaper', async () => {
+    mediaAsset.findUnique.mockResolvedValue(
+      row({ uploaderId: 'usr_1', sourceKey: 'source/med_1/source.mp3' }) as never,
+    );
+    storage.head.mockResolvedValue({ sizeBytes: 2048, contentType: 'audio/mpeg' });
+    mediaAsset.update.mockResolvedValue(row({ status: 'PENDING' }) as never);
+    queue.publishMediaProcessing.mockResolvedValue(false);
+
+    // The upload happened and the row is committed. Failing here would return a
+    // 500 for a request that succeeded, and the contributor could not retry:
+    // completion refuses an asset that has left AWAITING_UPLOAD.
+    const result = await service.complete('usr_1', 'med_1');
+
+    expect(result.status).toBe('PENDING');
+  });
+
+  it('does not queue an asset whose upload could not be verified', async () => {
+    mediaAsset.findUnique.mockResolvedValue(
+      row({ uploaderId: 'usr_1', sourceKey: 'source/med_1/source.mp3' }) as never,
+    );
+    storage.head.mockResolvedValue(null);
+
+    await expect(service.complete('usr_1', 'med_1')).rejects.toThrow();
+
+    expect(queue.publishMediaProcessing).not.toHaveBeenCalled();
   });
 
   it('refuses when no object arrived, and leaves the asset retryable', async () => {

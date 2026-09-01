@@ -91,12 +91,16 @@ const EnvSchema = z
     S3_BUCKET: z.string().min(1),
     CDN_URL: z.url(),
 
-    // SQS — disabled locally (consumers run synchronously in-process)
+    // SQS — off locally, where there is no queue and no consumer. An upload
+    // completed on a developer's machine therefore stops at PENDING, which is
+    // the honest outcome: nothing is going to process it.
+    //
+    // ONE QUEUE. The four that were here named the consumers ADR 19 deleted,
+    // and nothing had ever read them — SQS_ENABLED is hardcoded false in the
+    // task definition. Queues follow workloads, so a second one arrives with a
+    // second workload rather than in advance of it.
     SQS_ENABLED: z.stringbool().default(false),
-    SQS_AUDIT_QUEUE_URL: z.url().optional(),
-    SQS_LESSON_COMPLETION_QUEUE_URL: z.url().optional(),
-    SQS_CACHE_INVALIDATION_QUEUE_URL: z.url().optional(),
-    SQS_CDN_INVALIDATION_QUEUE_URL: z.url().optional(),
+    SQS_MEDIA_QUEUE_URL: z.url().optional(),
 
     // CORS origin for the Next.js app
     WEB_URL: z.url().default('http://localhost:3000'),
@@ -120,21 +124,15 @@ const EnvSchema = z
       });
     }
 
-    if (env.SQS_ENABLED) {
-      for (const key of [
-        'SQS_AUDIT_QUEUE_URL',
-        'SQS_LESSON_COMPLETION_QUEUE_URL',
-        'SQS_CACHE_INVALIDATION_QUEUE_URL',
-        'SQS_CDN_INVALIDATION_QUEUE_URL',
-      ] as const) {
-        if (!env[key]) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [key],
-            message: `${key} is required when SQS_ENABLED=true`,
-          });
-        }
-      }
+    // Enabling SQS without telling the API where to publish would start a
+    // deployment that looks healthy and drops every message, so the pair is
+    // checked at boot rather than at the first upload.
+    if (env.SQS_ENABLED && !env.SQS_MEDIA_QUEUE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SQS_MEDIA_QUEUE_URL'],
+        message: 'SQS_MEDIA_QUEUE_URL is required when SQS_ENABLED=true',
+      });
     }
   });
 
