@@ -1,174 +1,27 @@
 import { z } from 'zod';
 
+// =============================================================================
+// SPACED REPETITION
+//
+// What survived the learning hierarchy. ADR 22 deferred Level → Course → Unit
+// → Lesson → Exercise and dropped its eleven models; the shapes describing
+// course, unit and lesson progress went with them, having never had a caller.
+//
+// The flashcard subsystem was never downstream of any of that:
+// UserCardProgress is keyed on (user, translation), so spaced repetition has
+// always been anchored to the dictionary rather than to a curriculum. That is
+// why this file has a surviving half at all.
+// =============================================================================
+
 // -----------------------------------------------------------------------------
 // ENUMS
 // -----------------------------------------------------------------------------
 
-export const CourseStatusSchema = z.enum(['UNLOCKED', 'COMPLETE']);
-export const UnitStatusSchema = z.enum(['LOCKED', 'UNLOCKED', 'COMPLETE']);
-export const LessonStatusSchema = z.enum(['IN_PROGRESS', 'COMPLETE']);
-export const LessonTypeSchema = z.enum(['STANDARD', 'RECAP']);
 export const CardStateSchema = z.enum(['NEW', 'LEARNING', 'REVIEW', 'RELEARNING']);
-export const ActivityTypeSchema = z.enum(['LESSON_COMPLETED', 'REVIEW_SESSION']);
-
-export type CourseStatus = z.infer<typeof CourseStatusSchema>;
-export type UnitStatus = z.infer<typeof UnitStatusSchema>;
-export type LessonStatus = z.infer<typeof LessonStatusSchema>;
-export type LessonType = z.infer<typeof LessonTypeSchema>;
 export type CardState = z.infer<typeof CardStateSchema>;
+
+export const ActivityTypeSchema = z.enum(['LESSON_COMPLETED', 'REVIEW_SESSION']);
 export type ActivityType = z.infer<typeof ActivityTypeSchema>;
-
-// -----------------------------------------------------------------------------
-// COURSE PROGRESS
-// Row created when user first starts a course (clicks "Start Course").
-// No LOCKED state — all courses within a published level freely accessible.
-// -----------------------------------------------------------------------------
-
-export const UserCourseProgressSchema = z.object({
-  courseId: z.string(),
-  status: CourseStatusSchema,
-  startedAt: z.iso.datetime(),
-  completedAt: z.iso.datetime().nullable(),
-});
-
-export type UserCourseProgress = z.infer<typeof UserCourseProgressSchema>;
-
-// -----------------------------------------------------------------------------
-// UNIT PROGRESS
-// Used to render course browser node states — LOCKED/UNLOCKED/COMPLETE.
-// -----------------------------------------------------------------------------
-
-export const UserUnitProgressSchema = z.object({
-  unitId: z.string(),
-  status: UnitStatusSchema,
-  unlockedAt: z.iso.datetime().nullable(),
-  completedAt: z.iso.datetime().nullable(),
-});
-
-export type UserUnitProgress = z.infer<typeof UserUnitProgressSchema>;
-
-// -----------------------------------------------------------------------------
-// LESSON PROGRESS
-// Used to render individual lesson node states on course browser.
-// bestScore shown on completed lessons.
-// -----------------------------------------------------------------------------
-
-export const UserLessonProgressSchema = z.object({
-  lessonId: z.string(),
-  status: LessonStatusSchema,
-  score: z.number().nullable(), // most recent score
-  bestScore: z.number().nullable(), // highest score across all attempts
-  attempts: z.number().int(),
-  startedAt: z.iso.datetime(),
-  completedAt: z.iso.datetime().nullable(),
-});
-
-export type UserLessonProgress = z.infer<typeof UserLessonProgressSchema>;
-
-// -----------------------------------------------------------------------------
-// COURSE BROWSER RESPONSE
-// Powers the main course browser page — lists all courses in a level
-// with user progress overlaid.
-// -----------------------------------------------------------------------------
-
-export const CourseSummarySchema = z.object({
-  id: z.string(),
-  titleEs: z.string(),
-  titleEn: z.string().nullable(),
-  descriptionEs: z.string().nullable(),
-  descriptionEn: z.string().nullable(),
-  order: z.number().int(),
-  unitCount: z.number().int(),
-  lessonCount: z.number().int(),
-  progress: UserCourseProgressSchema.nullable(), // null if never started
-});
-
-export const LevelWithCoursesSchema = z.object({
-  id: z.string(),
-  titleEs: z.string(),
-  titleEn: z.string().nullable(),
-  descriptionEs: z.string().nullable(),
-  descriptionEn: z.string().nullable(),
-  cefrLabel: z.string().nullable(),
-  order: z.number().int(),
-  isPublished: z.boolean(),
-  courses: z.array(CourseSummarySchema),
-});
-
-export type CourseSummary = z.infer<typeof CourseSummarySchema>;
-export type LevelWithCourses = z.infer<typeof LevelWithCoursesSchema>;
-
-// -----------------------------------------------------------------------------
-// COURSE DETAIL RESPONSE
-// Powers the course detail page — shows units and lessons within a course.
-// -----------------------------------------------------------------------------
-
-export const CourseUnitSchema = z.object({
-  id: z.string(),
-  titleEs: z.string(),
-  titleEn: z.string().nullable(),
-  descriptionEs: z.string().nullable(),
-  descriptionEn: z.string().nullable(),
-  order: z.number().int(),
-  progress: UserUnitProgressSchema.nullable(),
-  lessons: z.array(
-    z.object({
-      id: z.string(),
-      titleEs: z.string(),
-      titleEn: z.string().nullable(),
-      type: LessonTypeSchema,
-      order: z.number().int(),
-      xpReward: z.number().int(),
-      exerciseCount: z.number().int(), // 0 for RECAP (auto-generated)
-      progress: UserLessonProgressSchema.nullable(),
-    }),
-  ),
-});
-
-export const CourseDetailSchema = z.object({
-  id: z.string(),
-  titleEs: z.string(),
-  titleEn: z.string().nullable(),
-  descriptionEs: z.string().nullable(),
-  descriptionEn: z.string().nullable(),
-  progress: UserCourseProgressSchema.nullable(),
-  units: z.array(CourseUnitSchema),
-});
-
-export type CourseUnit = z.infer<typeof CourseUnitSchema>;
-export type CourseDetail = z.infer<typeof CourseDetailSchema>;
-
-// -----------------------------------------------------------------------------
-// LESSON COMPLETION SUBMISSION
-// Posted by frontend when user finishes all exercises in a lesson.
-// score = (correctAnswers / totalExercises) * 100
-// -----------------------------------------------------------------------------
-
-export const CompleteLessonSchema = z.object({
-  lessonId: z.string(),
-  score: z.number().min(0).max(100),
-});
-
-export type CompleteLesson = z.infer<typeof CompleteLessonSchema>;
-
-// -----------------------------------------------------------------------------
-// LESSON COMPLETION RESPONSE
-// Returned after lesson completion — frontend uses to animate XP gain,
-// streak update, and unit unlock notifications.
-// -----------------------------------------------------------------------------
-
-export const LessonCompletionResultSchema = z.object({
-  xpEarned: z.number().int(),
-  totalXp: z.number().int(), // user's new total XP
-  streakUpdated: z.boolean(),
-  currentStreak: z.number().int(),
-  unitCompleted: z.boolean(), // true if this lesson completed the unit
-  unitUnlocked: z.string().nullable(), // id of newly unlocked unit if any
-  lessonUnlocked: z.string().nullable(), // id of next unlocked lesson if any
-  cardsSeedCount: z.number().int(), // number of SRS cards seeded from vocabulary
-});
-
-export type LessonCompletionResult = z.infer<typeof LessonCompletionResultSchema>;
 
 // -----------------------------------------------------------------------------
 // SRS — USER CARD PROGRESS
