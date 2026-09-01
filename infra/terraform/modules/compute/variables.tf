@@ -126,6 +126,16 @@ variable "assets_bucket_name" {
   type        = string
 }
 
+variable "media_queue_url" {
+  description = <<-EOT
+    Media queue URL from the messaging module, injected as
+    SQS_MEDIA_QUEUE_URL. Supplying it is what enables the producer: the API
+    validates at boot that SQS_ENABLED implies this value, so the two are set
+    together or not at all.
+  EOT
+  type        = string
+}
+
 variable "assets_bucket_arn" {
   description = "Assets bucket ARN, for the API task role's S3 policy"
   type        = string
