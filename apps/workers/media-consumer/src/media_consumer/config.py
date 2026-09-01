@@ -58,3 +58,33 @@ AUDIO_BITRATE = "96k"
 IMAGE_WIDTHS = (320, 640, 960)
 IMAGE_PRIMARY_WIDTH = 640
 IMAGE_QUALITY = 82
+
+# -----------------------------------------------------------------------------
+# THE REAPER
+#
+# Runs on a schedule in the same image, under a DIFFERENT execution role. That
+# separation is the entire point: the reaper holds s3:DeleteObject on source/*,
+# which is the one grant deliberately kept off the request path, so that a bug
+# in an HTTP handler cannot reach an original recording.
+# -----------------------------------------------------------------------------
+
+# Where to republish a stale PENDING asset. The reaper is the API's counterpart
+# as a producer, and the only other thing that writes to this queue.
+MEDIA_QUEUE_URL = os.environ.get("MEDIA_QUEUE_URL", "")
+
+# How long a PENDING row may sit untouched before it is assumed the publish was
+# lost. Generous relative to the work — processing takes seconds — because the
+# cost of republishing early is a duplicate message the consumer discards, and
+# the cost of waiting is only that an asset is late.
+STALE_PENDING_MINUTES = int(os.environ.get("STALE_PENDING_MINUTES", "15"))
+
+# How long an upload may stay unclaimed before its row and object are removed.
+# The presigned URL expires in five minutes, so anything past an hour is
+# certainly abandoned; twenty-four is deliberately generous because deleting a
+# recording is unrecoverable and the cost of waiting is a few kilobytes.
+ABANDONED_UPLOAD_HOURS = int(os.environ.get("ABANDONED_UPLOAD_HOURS", "24"))
+
+# Bounds the work in one run. A backlog is drained over several runs rather
+# than in one invocation that might time out halfway through with no record of
+# how far it got.
+REAP_BATCH_LIMIT = int(os.environ.get("REAP_BATCH_LIMIT", "100"))

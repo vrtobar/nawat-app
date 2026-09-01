@@ -118,3 +118,67 @@ def mark_failed(asset_id: str, error: str) -> None:
             "UPDATE media_assets SET status = 'FAILED', error = %s WHERE id = %s",
             (error[:1000], asset_id),
         )
+
+
+# -----------------------------------------------------------------------------
+# THE REAPER'S QUERIES
+# -----------------------------------------------------------------------------
+
+
+def stale_pending(older_than_minutes: int, limit: int) -> list[str]:
+    """Assets queued but never picked up — the lost-publish case.
+
+    `attempts = 0` IS THE IMPORTANT CLAUSE. A row the consumer has already
+    received has attempts >= 1, and its fate belongs to the consumer's own
+    ceiling; republishing it would push it toward that ceiling faster than its
+    receives justify and turn a slow asset into a failed one.
+    """
+    with connection().cursor() as cur:
+        cur.execute(
+            """
+            SELECT id
+            FROM media_assets
+            WHERE status = 'PENDING'
+              AND attempts = 0
+              AND updated_at < now() - make_interval(mins => %s)
+            ORDER BY updated_at
+            LIMIT %s
+            """,
+            (older_than_minutes, limit),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def abandoned_uploads(older_than_hours: int, limit: int) -> list[tuple[str, str]]:
+    """Rows created by a presign whose bytes never arrived, or never got confirmed.
+
+    ATTACHED ASSETS ARE EXCLUDED. Attachment is independent of processing state
+    — an AWAITING_UPLOAD asset can legitimately be attached to an entry — and
+    both foreign keys are onDelete: Restrict, so a delete would fail anyway.
+    Excluding them here means the reaper does not spend every run colliding
+    with a constraint that is doing its job.
+    """
+    with connection().cursor() as cur:
+        cur.execute(
+            """
+            SELECT m.id, m.source_key
+            FROM media_assets m
+            WHERE m.status = 'AWAITING_UPLOAD'
+              AND m.created_at < now() - make_interval(hours => %s)
+              AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.image_asset_id = m.id)
+              AND NOT EXISTS (SELECT 1 FROM translations t WHERE t.audio_asset_id = m.id)
+            ORDER BY m.created_at
+            LIMIT %s
+            """,
+            (older_than_hours, limit),
+        )
+        return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def delete_asset(asset_id: str) -> None:
+    """Removes the row. The object is deleted first — see reaper.collect_abandoned."""
+    with connection().cursor() as cur:
+        cur.execute(
+            "DELETE FROM media_assets WHERE id = %s AND status = 'AWAITING_UPLOAD'",
+            (asset_id,),
+        )

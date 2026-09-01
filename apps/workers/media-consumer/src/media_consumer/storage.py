@@ -56,3 +56,18 @@ def upload_derivative(key: str, path: Path, content_type: str) -> int:
     except ClientError as err:
         raise TransientError(f"could not write {key}: {err}") from err
     return path.stat().st_size
+
+
+def delete_source(source_key: str) -> None:
+    """Removes an abandoned original.
+
+    THE ONLY DELETE IN THIS PACKAGE, and it is reachable only from the reaper,
+    which runs under a role the consumer does not have. S3 treats deleting a
+    key that is not there as success, which is what makes the reaper safe to
+    retry: an interrupted run that removed the object but not the row finishes
+    the job on its next pass rather than erroring forever.
+    """
+    try:
+        client().delete_object(Bucket=config.ASSETS_BUCKET, Key=source_key)
+    except ClientError as err:
+        raise TransientError(f"could not delete {source_key}: {err}") from err

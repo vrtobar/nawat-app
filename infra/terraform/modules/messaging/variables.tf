@@ -110,3 +110,37 @@ variable "alarm_topic_arn" {
   type        = string
   default     = null
 }
+
+# -----------------------------------------------------------------------------
+# THE REAPER
+# -----------------------------------------------------------------------------
+
+variable "reaper_schedule" {
+  description = "How often the reaper sweeps. Chosen for how long an upload may stay stuck, not for cost — the run sits well inside the Lambda free tier."
+  type        = string
+  default     = "rate(15 minutes)"
+}
+
+variable "reaper_timeout_seconds" {
+  description = "Two queries and a bounded batch of deletes. Generous; a run that hits this has found something pathological."
+  type        = number
+  default     = 120
+}
+
+variable "reaper_memory_mb" {
+  description = "Nothing here decodes media. Memory also sets the CPU share, which is most of why the reaper costs a fraction of the consumer per second."
+  type        = number
+  default     = 512
+}
+
+variable "stale_pending_minutes" {
+  description = "How long a PENDING row with no attempts may sit before its message is assumed lost and republished."
+  type        = number
+  default     = 15
+}
+
+variable "abandoned_upload_hours" {
+  description = "How long an unconfirmed upload survives. Generous because deleting a recording is unrecoverable and waiting costs kilobytes."
+  type        = number
+  default     = 24
+}
