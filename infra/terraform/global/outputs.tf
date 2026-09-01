@@ -43,6 +43,11 @@ output "ecr_web_url" {
   value       = aws_ecr_repository.web.repository_url
 }
 
+output "ecr_media_consumer_url" {
+  description = "ECR repository URL for the media consumer Lambda image"
+  value       = aws_ecr_repository.media_consumer.repository_url
+}
+
 output "ecr_registry" {
   description = "ECR registry URL (account + region) — used in GitHub Actions to authenticate"
   # repository_url is {account}.dkr.ecr.{region}.amazonaws.com/{name};

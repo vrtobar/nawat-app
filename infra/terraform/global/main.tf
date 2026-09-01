@@ -110,7 +110,26 @@ resource "aws_ecr_repository" "web" {
   }
 }
 
-# Shared by both repos — caps storage cost (~$0.10/GB/month)
+# The media consumer. A Lambda rather than an ECS service, and an image rather
+# than a zip, because an ffmpeg binary does not fit the zip packaging model —
+# which is what turns ADR 11's container decision from convenient into
+# required.
+#
+# The same immutable tags apply, and for a reason this repository already
+# relies on: everything running in production, ECS task or Lambda, is named by
+# a prod-{sha} tag identifying the commit that built it. Under zip, Lambda
+# would be identified by a bundle hash instead, and "what is running right
+# now" would have two different answers depending on which compute was asked.
+resource "aws_ecr_repository" "media_consumer" {
+  name                 = "nahuat-media-consumer"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# Shared by all three repos — caps storage cost (~$0.10/GB/month)
 locals {
   ecr_lifecycle_policy = jsonencode({
     rules = [
@@ -161,6 +180,16 @@ resource "aws_ecr_lifecycle_policy" "api" {
 
 resource "aws_ecr_lifecycle_policy" "web" {
   repository = aws_ecr_repository.web.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+# ⚠️ RULE 3 IS LOAD-BEARING FOR LAMBDA, not just tidiness. Expiring untagged
+# images would delete the children of a buildx image index out from under a
+# live function about a day after deploy, with no code change to blame. The
+# push must therefore set provenance and sbom false, exactly as the ECS image
+# builds already do.
+resource "aws_ecr_lifecycle_policy" "media_consumer" {
+  repository = aws_ecr_repository.media_consumer.name
   policy     = local.ecr_lifecycle_policy
 }
 
@@ -457,6 +486,7 @@ data "aws_iam_policy_document" "github_build" {
     resources = [
       aws_ecr_repository.api.arn,
       aws_ecr_repository.web.arn,
+      aws_ecr_repository.media_consumer.arn,
     ]
   }
 }
