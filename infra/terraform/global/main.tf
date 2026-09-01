@@ -183,6 +183,34 @@ resource "aws_ecr_lifecycle_policy" "web" {
   policy     = local.ecr_lifecycle_policy
 }
 
+# Lambda pulling this image needs permission from ONE side — either the
+# function's execution role or this repository policy; same-account access does
+# not require both, and only cross-account does. It is declared here rather
+# than left implicit because Lambda ADDS THIS POLICY ITSELF when it is missing
+# and the caller can set repository policies. A resource appearing out of band,
+# owned by nothing, is the kind of thing nobody finds later.
+data "aws_iam_policy_document" "media_consumer_lambda_pull" {
+  statement {
+    sid    = "LambdaECRImageRetrievalPolicy"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+
+    actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+  }
+}
+
+resource "aws_ecr_repository_policy" "media_consumer" {
+  repository = aws_ecr_repository.media_consumer.name
+  policy     = data.aws_iam_policy_document.media_consumer_lambda_pull.json
+}
+
 # ⚠️ RULE 3 IS LOAD-BEARING FOR LAMBDA, not just tidiness. Expiring untagged
 # images would delete the children of a buildx image index out from under a
 # live function about a day after deploy, with no code change to blame. The

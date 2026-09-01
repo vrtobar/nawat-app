@@ -25,3 +25,8 @@ output "media_dlq_name" {
   description = "Dead-letter queue name, used as the CloudWatch alarm dimension"
   value       = aws_sqs_queue.media_dlq.name
 }
+
+output "media_consumer_function_name" {
+  description = "Media consumer function name, for logs and the CloudWatch alarm dimension"
+  value       = aws_lambda_function.media_consumer.function_name
+}
