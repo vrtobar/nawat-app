@@ -20,7 +20,18 @@ import { z } from 'zod';
 export const CardStateSchema = z.enum(['NEW', 'LEARNING', 'REVIEW', 'RELEARNING']);
 export type CardState = z.infer<typeof CardStateSchema>;
 
-export const ActivityTypeSchema = z.enum(['LESSON_COMPLETED', 'REVIEW_SESSION']);
+// ⚠️ ONE MEMBER, AND IT MUST STAY IN STEP WITH schema.prisma. This carried
+// LESSON_COMPLETED until 2026-08-31, after ADR 22 removed it from the Postgres
+// enum — so the contract advertised a value the database would reject. Nothing
+// wrote UserActivity, so it never fired; it would have typechecked and failed
+// at the insert.
+//
+// The consumer most likely to have met it is the review-session worker, which
+// is Python, where no TypeScript type would have caught the mismatch either.
+// apps/api/src/common/schema-enums.spec.ts is the guard that now catches this
+// class. See the ActivityType comment in schema.prisma for when to add members
+// back.
+export const ActivityTypeSchema = z.enum(['REVIEW_SESSION']);
 export type ActivityType = z.infer<typeof ActivityTypeSchema>;
 
 // -----------------------------------------------------------------------------
