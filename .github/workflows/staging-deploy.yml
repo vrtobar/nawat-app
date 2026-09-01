@@ -47,8 +47,22 @@ jobs:
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: true
+      # An include list because CONTEXT DIFFERS PER IMAGE. api and web build
+      # from the repository root, since their Dockerfiles copy across
+      # workspaces; the media consumer is a self-contained Python package and
+      # building it from the root would hand Docker the whole repository to
+      # gain nothing. `app` still names the ECR repository and the cache scope.
       matrix:
-        app: [api, web]
+        include:
+          - app: api
+            context: .
+            file: apps/api/Dockerfile
+          - app: web
+            context: .
+            file: apps/web/Dockerfile
+          - app: media-consumer
+            context: apps/workers/media-consumer
+            file: apps/workers/media-consumer/Dockerfile
     steps:
       - uses: actions/checkout@v7
 
@@ -102,8 +116,8 @@ jobs:
         if: steps.existing.outputs.found == 'false'
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: apps/${{ matrix.app }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/arm64
           push: true
           tags: ${{ vars.ECR_REGISTRY }}/nahuat-${{ matrix.app }}:staging-${{ github.sha }}
