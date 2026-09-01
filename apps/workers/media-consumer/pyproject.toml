@@ -1,0 +1,53 @@
+[project]
+name = "media-consumer"
+version = "0.0.1"
+description = "Transcodes uploaded audio and derives image renditions for the Nawat dictionary"
+requires-python = ">=3.13"
+
+dependencies = [
+    # The Lambda Runtime Interface Client. Needed because this image is built
+    # from the official Python image rather than an AWS base image — see the
+    # Dockerfile for why that trade is worth making.
+    "awslambdaric>=3.1.1",
+    # boto3 ships inside AWS base images and NOT in a custom one, so it is a
+    # real dependency here rather than an ambient one.
+    "boto3>=1.40.0",
+    # Raw SQL, no ORM. ADR 11 puts this consumer in Python precisely because it
+    # writes a fixed shape and never reads the model; a generated client would
+    # buy a schema layer nothing here needs.
+    "psycopg[binary]>=3.2.0",
+    "Pillow>=11.0.0",
+    # Validates the generated contracts in contracts/. The shapes are authored
+    # in Zod and generated from it; this is the half that enforces them.
+    "jsonschema>=4.23.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "ruff>=0.14.0", "moto[s3]>=5.0.0"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# N802: test names carry database enum values verbatim — READY, FAILED,
+#   AWAITING_UPLOAD. Lowercasing them would break the link between the test
+#   name and the state it is about, which is the thing worth reading.
+# SIM117: a `with pytest.raises(...)` nested inside a group of patches is the
+#   readable form. Folding the assertion in among the mocks hides which line
+#   is the expectation.
+"tests/*" = ["N802", "SIM117"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
