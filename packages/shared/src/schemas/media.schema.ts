@@ -176,6 +176,40 @@ export const MediaDerivativesSchema = z.object({
 export type MediaDerivatives = z.infer<typeof MediaDerivativesSchema>;
 
 // -----------------------------------------------------------------------------
+// THE PROCESSING MESSAGE
+// -----------------------------------------------------------------------------
+
+// What the API puts on the media queue when an upload is confirmed, and the
+// first shape in this repository that crosses a language boundary — the
+// producer is TypeScript and the consumer is Python. It is defined here for
+// the same reason the derivatives are: one definition, generated for the other
+// side rather than transcribed. See docs/adr/0011.
+//
+// THE PRODUCER IS THE API, NOT AN S3 EVENT NOTIFICATION. ADR 19 originally
+// specified `S3 event -> SQS -> Lambda`; its amendment explains the change.
+// The short version is that S3 fires when bytes land, which happens for
+// abandoned uploads too, and processing one would contradict the meaning
+// AWAITING_UPLOAD exists to carry.
+//
+// JUST THE ID, deliberately. Every other fact about the asset — its kind, its
+// source key, the type and size that were signed — is on the row, and the
+// consumer must read that row anyway to check the status and increment
+// `attempts`. Copying those fields into the message would create a second
+// place for them to be true, and a message sitting in a queue across a
+// deployment is exactly where the two would drift.
+export const MediaProcessingMessageSchema = z.object({
+  // Producer and consumer deploy separately — ECS and Lambda, different
+  // pipelines — so a rolling release can have one running ahead of the other,
+  // and messages outlive both. An explicit version lets the consumer reject
+  // what it does not understand instead of silently misreading it.
+  version: z.literal(1),
+  assetId: z.string().min(1),
+});
+export type MediaProcessingMessage = z.infer<typeof MediaProcessingMessageSchema>;
+
+export const MEDIA_PROCESSING_MESSAGE_VERSION = 1 as const;
+
+// -----------------------------------------------------------------------------
 // ADMIN REVIEW
 // -----------------------------------------------------------------------------
 

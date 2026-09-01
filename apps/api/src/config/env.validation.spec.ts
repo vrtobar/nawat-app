@@ -57,13 +57,25 @@ describe('validateEnv', () => {
     );
   });
 
-  it('requires every queue URL once SQS_ENABLED is true', () => {
+  it('requires the media queue URL once SQS_ENABLED is true', () => {
     expect(() =>
       validateEnv({ ...baseEnv, ...localDb, ...localRedis, SQS_ENABLED: 'true' }),
     ).toThrow('Environment validation failed');
   });
 
-  it('defaults SQS_ENABLED to false, so queue URLs stay optional locally', () => {
+  it('accepts SQS_ENABLED with the media queue URL supplied', () => {
+    const env = validateEnv({
+      ...baseEnv,
+      ...localDb,
+      ...localRedis,
+      SQS_ENABLED: 'true',
+      SQS_MEDIA_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/nahuat-staging-media',
+    });
+
+    expect(env.SQS_ENABLED).toBe(true);
+  });
+
+  it('defaults SQS_ENABLED to false, so the queue URL stays optional locally', () => {
     const env = validateEnv({ ...baseEnv, ...localDb, ...localRedis });
 
     expect(env.SQS_ENABLED).toBe(false);
