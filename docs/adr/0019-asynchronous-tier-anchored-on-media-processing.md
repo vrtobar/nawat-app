@@ -1,6 +1,8 @@
 # 19. The asynchronous tier, anchored on media processing
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-08-31. **Read "Amendment: the producer is
+  the API, not S3" at the end before treating the Decision below as the shape
+  being built** — one element of the topology changed.
 - **Date:** 2026-08-28
 - **Applies to:** `apps/workers/`, the unbuilt `modules/messaging`, and
   `modules/monitoring`
@@ -64,9 +66,11 @@ reasons worth retrying, and operates on files rather than rows.
   carried as though it were a decision, and it is how `modules/monitoring` came
   to specify DLQ alarms for four queues that will not all exist.
 - **Media processing is the first queue built, and the tier's anchor.**
-  `S3 event → SQS → Lambda`, rather than S3 invoking Lambda directly: the queue
-  is what supplies retry with a dead-letter destination, which is the property
-  that makes this asynchronous rather than merely deferred.
+  ~~`S3 event → SQS → Lambda`~~ — **the producer changed; see the amendment.**
+  The reasoning that follows is untouched by it: rather than S3 invoking Lambda
+  directly, the queue is what supplies retry with a dead-letter destination,
+  which is the property that makes this asynchronous rather than merely
+  deferred.
 - **Keep `lesson-completion-consumer`, re-scoped.** It carries the side effects
   that may lag — activity logging, streak and XP recalculation. **SRS card
   seeding stays synchronous**, in the transaction that records the completion.
@@ -120,3 +124,79 @@ reasons worth retrying, and operates on files rather than rows.
 - **Keep the three skeletons as documentation of intent.** Rejected: they read
   as decisions rather than as sketches, and downstream records treated them that
   way. The intent is recorded here instead, where it can be argued with.
+
+## Amendment: the producer is the API, not S3
+
+**2026-08-31, before any of this was built.** The Decision above specifies
+`S3 event → SQS → Lambda`. The queue stays, the consumer stays, and the
+argument against invoking Lambda directly stands. What changes is who publishes:
+the API, from the upload-completion call, rather than an S3 bucket notification.
+
+**What this record did not have when it was written.** ADR 20 was accepted the
+same day and built the following one, and it introduced a state this record does
+not mention: `AWAITING_UPLOAD`, distinct from `PENDING`. The reason is recorded
+on the enum — this record makes an asset stuck in `PENDING` a _monitored_
+condition, the signal that a queue or a consumer is broken, and abandoned
+uploads are common enough to drown that signal from the first day. So `PENDING`
+was narrowed to mean exactly "queued and unprocessed".
+
+**That narrowing is what decides the producer.** S3 fires when bytes land, which
+happens for abandoned uploads too — a contributor who uploads and closes the
+tab never calls the completion endpoint, and their object is indistinguishable
+at the bucket from one that was confirmed. Under an S3 notification the consumer
+would process an asset still in `AWAITING_UPLOAD`, which either bypasses the
+state machine the API exists to enforce or burns three receives into the
+dead-letter queue for an event that is not an error. Worse, the reaper is
+specified to delete abandoned `AWAITING_UPLOAD` rows and their objects, so it
+would eventually destroy an asset the consumer had already processed. Two
+components, each behaving correctly, disagreeing about what a row is.
+
+Publishing from the completion call removes the class rather than handling it.
+No completion, no message, nothing processed, and the reaper collects the row
+exactly as designed. The message carries the asset id instead of a key to be
+parsed back into one, and the state machine remains the only thing that decides
+what gets worked on.
+
+**A secondary benefit, not the reason.** S3 notification delivery is
+"typically in seconds, but can sometimes take a minute or longer" and is not
+ordered, so a notification could arrive before the completion call had written
+`PENDING`. That race is self-healing — the consumer throws, SQS redelivers — and
+it is not what motivates this change. The abandoned upload is.
+
+### What it costs
+
+**A dual write.** The `PENDING` update commits and the publish then fails,
+leaving a row that will never be processed and no message to process it. This
+is now the only way media gets stuck, and it is a genuine cost: an S3
+notification, once configured, does not fail this way.
+
+The answer is a sweep the design already required for another reason. A reaper
+is specified for abandoned `AWAITING_UPLOAD` rows; finding `PENDING` rows older
+than a threshold and **republishing** them is a second query on the same
+schedule. It ships with the queue rather than after it, because until it exists
+the failure it covers is silent.
+
+That also answers a question the backlog left open — whether a stuck `PENDING`
+is the same class of thing as an abandoned upload. It is not. An abandoned
+upload is deleted; a stuck `PENDING` means a lost publish or a broken consumer,
+so it is republished and, if it persists, alarmed. Deleting it would remove the
+evidence of the failure this record wants monitored.
+
+### Ordering
+
+The publish happens after the `PENDING` write commits. Publishing inside the
+transaction would let a consumer read the row before it is visible and see
+`AWAITING_UPLOAD` — the same race, reintroduced by construction rather than by
+chance.
+
+### Consequences
+
+- **No `aws_s3_bucket_notification` anywhere.** The assets bucket lives in the
+  foundation layer and the queue in the application layer; a notification
+  spanning them would have coupled a resource that survives teardown to one that
+  does not. That coupling simply does not arise now.
+- **The message shape is ours**, so the contract question in ADR 11's
+  consequences becomes live: what crosses the language boundary is a shape this
+  repository defines, generated for the Python side rather than transcribed.
+- **`apps/api` gains an SQS client and the IAM to use it.** The API was
+  previously a producer of nothing.
