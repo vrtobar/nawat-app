@@ -27,6 +27,10 @@ permissions:
 
 env:
   NODE_VERSION: '24'
+  # Matches the media consumer's Dockerfile. Pinned rather than left to the
+  # runner: a version that passes here and is not what the image runs is a
+  # green check about the wrong interpreter.
+  PYTHON_VERSION: '3.13'
   TERRAFORM_VERSION: '1.15.8'
 
 jobs:
@@ -39,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       node: ${{ steps.filter.outputs.node }}
+      python: ${{ steps.filter.outputs.python }}
       terraform: ${{ steps.filter.outputs.terraform }}
       docker: ${{ steps.filter.outputs.docker }}
       workflows: ${{ steps.filter.outputs.workflows }}
@@ -49,12 +54,27 @@ jobs:
         id: filter
         with:
           filters: |
+            # NOT 'apps/**'. apps/workers is Python, and matching it here
+            # would run lint, typecheck and unit tests that have nothing to say
+            # about a Python change — and report success. A check that always
+            # answers, but answers about the wrong thing, is worse than one
+            # that is missing.
             node:
-              - 'apps/**'
+              - 'apps/api/**'
+              - 'apps/web/**'
               - 'packages/**'
               - 'package.json'
               - 'package-lock.json'
               - 'turbo.json'
+              # The generated contracts are an output of packages/shared, so a
+              # hand-edit here has to face the drift check in the quality job.
+              - 'apps/workers/media-consumer/contracts/**'
+              - '.github/workflows/ci.yml'
+            # The whole worker tree. It is single-language by design (ADR 11
+            # plus ADR 19's deletions), which is what lets this be one path
+            # rather than a list of directories that has to be maintained.
+            python:
+              - 'apps/workers/**'
               - '.github/workflows/ci.yml'
             terraform:
               - 'infra/terraform/**'
@@ -71,6 +91,9 @@ jobs:
               - 'package-lock.json'
               - 'apps/*/package.json'
               - 'packages/*/package.json'
+              # The Python equivalent of the package.json entries above: what
+              # gets installed into the consumer image.
+              - 'apps/workers/*/pyproject.toml'
               - '.github/workflows/ci.yml'
             # Every workflow, not just ci.yml. The deploy workflows were
             # previously matched by no filter at all, so a pull request
@@ -127,6 +150,19 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # The check that makes the generated contracts trustworthy. Without it
+      # they are a snapshot that looks authoritative while drifting from the
+      # Zod source they claim to mirror — which is worse than a hand-written
+      # file, because nobody thinks to distrust generated output.
+      - name: Contracts match their Zod source
+        run: |
+          npm run generate:contracts --workspace=@nahuat/shared
+          if ! git diff --quiet -- apps/workers/media-consumer/contracts; then
+            echo "::error::Generated contracts are stale. Run: npm run generate:contracts --workspace=@nahuat/shared"
+            git --no-pager diff -- apps/workers/media-consumer/contracts
+            exit 1
+          fi
+
   integration:
     name: Integration tests
     needs: changes
@@ -161,6 +197,40 @@ jobs:
       - name: Stop test infrastructure
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
+
+  # The consumer is the only Python here, and it is a Lambda rather than a
+  # service, so nothing else in CI would have exercised it. Pinned to the
+  # image's interpreter rather than the runner's default: a version that
+  # passes here and is absent from the image is a green check that proves
+  # nothing about what ships.
+  python:
+    name: Lint and test Python
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/workers/media-consumer
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/workers/media-consumer/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Unit tests
+        run: pytest
 
   terraform:
     name: Terraform validate
@@ -207,14 +277,28 @@ jobs:
   # opaque exec format error at task start, so building x86 here would validate
   # the wrong thing.
   image:
-    name: Build ${{ matrix.app }} image
+    name: Build ${{ matrix.name }} image
     needs: changes
     if: needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
+      # CONTEXT DIFFERS PER IMAGE, which is why this is an include list rather
+      # than a bare list of names. api and web are built from the repository
+      # root because they copy across workspaces; the media consumer is a
+      # self-contained Python package and building it from the root would ship
+      # the entire repository as its context for no benefit.
       matrix:
-        app: [api, web]
+        include:
+          - name: api
+            context: .
+            file: apps/api/Dockerfile
+          - name: web
+            context: .
+            file: apps/web/Dockerfile
+          - name: media-consumer
+            context: apps/workers/media-consumer
+            file: apps/workers/media-consumer/Dockerfile
     steps:
       - uses: actions/checkout@v7
 
@@ -223,8 +307,8 @@ jobs:
       - name: Build
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: apps/${{ matrix.app }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/arm64
           push: false
           # Matches the deploy workflow. buildx otherwise emits an image index
@@ -234,8 +318,8 @@ jobs:
           # two builds should not diverge.
           provenance: false
           sbom: false
-          cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   # Catches what YAML validity cannot: `needs` naming a job that does not
   # exist, ${{ }} expressions referencing missing outputs or contexts
@@ -267,7 +351,7 @@ jobs:
   # while a failure or cancellation is not.
   gate:
     name: All checks passed
-    needs: [quality, integration, terraform, image, workflows]
+    needs: [quality, integration, python, terraform, image, workflows]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -278,6 +362,7 @@ jobs:
           for result in \
             "quality=${{ needs.quality.result }}" \
             "integration=${{ needs.integration.result }}" \
+            "python=${{ needs.python.result }}" \
             "terraform=${{ needs.terraform.result }}" \
             "image=${{ needs.image.result }}" \
             "workflows=${{ needs.workflows.result }}"
