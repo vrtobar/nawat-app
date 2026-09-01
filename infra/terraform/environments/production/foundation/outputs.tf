@@ -140,6 +140,11 @@ output "ecr_web_url" {
   value       = data.terraform_remote_state.global.outputs.ecr_web_url
 }
 
+output "ecr_media_consumer_url" {
+  description = "ECR repository URL for the media consumer image"
+  value       = data.terraform_remote_state.global.outputs.ecr_media_consumer_url
+}
+
 # -----------------------------------------------------------------------------
 # Secrets Manager
 # ARNs only. Values are set by hand and never pass through Terraform.
