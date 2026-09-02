@@ -580,6 +580,7 @@ data "aws_iam_policy_document" "github_staging" {
       "application-autoscaling:*",
       "sqs:*",
       "lambda:*",
+      "events:*",
       "sns:*",
       "cloudwatch:*",
       "logs:*",
@@ -920,6 +921,7 @@ data "aws_iam_policy_document" "github_staging" {
       "arn:aws:ecs:us-east-1:${data.aws_caller_identity.current.account_id}:task-definition/nahuat-production-*:*",
       "arn:aws:lambda:us-east-1:${data.aws_caller_identity.current.account_id}:function:nahuat-production-*",
       "arn:aws:sqs:us-east-1:${data.aws_caller_identity.current.account_id}:nahuat-production-*",
+      "arn:aws:events:us-east-1:${data.aws_caller_identity.current.account_id}:rule/nahuat-production-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/nahuat-production-*",
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/nahuat-production-*",
     ]
