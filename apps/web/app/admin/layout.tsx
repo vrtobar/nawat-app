@@ -29,8 +29,13 @@ export const metadata: Metadata = {
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
 
-  // No session at all — send them to log in and come back here.
-  if (!session) {
+  // No usable session — send them to log in and come back here. A lapsed one
+  // counts: `error` means the refresh failed and the cookie no longer carries
+  // tokens, which is the same thing to this gate as having no cookie at all.
+  // Without it the request falls through to getMe(), which throws for want of a
+  // token, and Blocked tells someone to sign out when signing in is the thing
+  // that would fix them.
+  if (!session || session.error) {
     redirect(withCallback(AUTH_ROUTES.signIn, '/admin/entries'));
   }
 
@@ -99,9 +104,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 // one piece of information that would have helped.
 //
 // Note the state this describes is genuinely odd and worth naming for the
-// person in it: they ARE signed in — the public header greets them by name,
-// because that reads the Auth0 session and nothing else — while every
-// authenticated call fails. Signed in everywhere, recognised nowhere.
+// person in it: their session is live and refreshing normally, so nothing in
+// the browser suggests a problem, while every authenticated call fails. It is
+// the API declining to resolve them, not the session lapsing — which is why the
+// advice here is not simply "log in again".
+//
+// A LAPSED SESSION NO LONGER REACHES THIS. The gate above redirects it and the
+// public header renders a login link rather than a name, so what is left here
+// is the narrower case the branches below actually describe: a credential the
+// browser still holds and the API refuses.
 function Blocked({ error }: { error: unknown }) {
   const code = error instanceof ApiError ? error.code : undefined;
 

@@ -37,7 +37,19 @@ export async function AuthControl({
   const copy = COPY[locale];
   const destination = returnTo ?? `/${locale}`;
 
-  if (!session) {
+  // A SESSION WHOSE REFRESH FAILED IS NOT A SESSION. `error` is set by the jwt
+  // callback when the refresh token was revoked, spent, or belongs to a family
+  // the API no longer has — and the tokens are dropped from the cookie with it.
+  // What remains decrypts, so auth() still returns an object carrying the
+  // profile it was issued with, and checking only `!session` greets someone by
+  // name while every authenticated request they make fails.
+  //
+  // No "your session expired" copy. Saying so needs a fifth string and the
+  // message catalogue COPY's note defers, and this is the ambient "are you
+  // signed in" indicator — the answer is no, and the link is the action. Where
+  // a lapsed session actually costs someone mid-task, the admin panel explains
+  // it rather than leaving them to infer it from a header.
+  if (!session || session.error) {
     return (
       <a
         href={withCallback(AUTH_ROUTES.signIn, destination)}
