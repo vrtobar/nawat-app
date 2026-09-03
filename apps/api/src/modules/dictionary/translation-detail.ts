@@ -136,6 +136,12 @@ export const ADMIN_TRANSLATION_SELECT = {
   phonetic: true,
   partOfSpeech: true,
   audioUrl: true,
+  // TWO COLUMNS OFF THE ASSET AND NOTHING ELSE — not the id, not the keys.
+  // The editor has to distinguish "no recording" from "a recording that is
+  // still transcoding" from "one that failed", and `audioUrl` cannot: it stays
+  // null for all three until an ADMIN approves. The public select above is
+  // deliberately not given this.
+  audioAsset: { select: { status: true, error: true } },
   isPublished: true,
   createdAt: true,
   updatedAt: true,
@@ -172,6 +178,10 @@ export function toAdminTranslationDetail(t: AdminTranslationRow): AdminTranslati
     phonetic: t.phonetic,
     partOfSpeech: t.partOfSpeech,
     audioUrl: t.audioUrl,
+    // Null rather than absent when nothing is attached, so the client tests one
+    // field instead of the presence of an object.
+    audioStatus: t.audioAsset?.status ?? null,
+    audioError: t.audioAsset?.error ?? null,
     isPublished: t.isPublished,
     dialect: t.dialect,
     createdAt: t.createdAt.toISOString(),

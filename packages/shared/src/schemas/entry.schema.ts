@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { OptimisticLockSchema, PaginationParamsSchema } from './api-response.schema';
 import { LocaleSchema } from './locale.schema';
+import { MediaStatusSchema } from './media.schema';
 import {
   AdminTranslationDetailSchema,
   CreateTranslationSchema,
@@ -298,6 +299,11 @@ export const AdminEntryDetailSchema = z.object({
   nawatContent: z.string(),
   slug: z.string(),
   imageUrl: z.url().nullable(),
+  // The image's place in the pipeline, on the same terms as `audioStatus` on
+  // AdminTranslationDetail — see the note there for why a status is carried
+  // where an asset id is not. Null when nothing is attached.
+  imageStatus: MediaStatusSchema.nullable(),
+  imageError: z.string().nullable(),
   isPublished: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
