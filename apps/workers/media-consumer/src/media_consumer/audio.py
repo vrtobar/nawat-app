@@ -63,6 +63,20 @@ def normalise(source: Path, destination: Path) -> None:
     single words a second or two long, where the second pass refines a number
     that barely moves. It would double the ffmpeg time on every asset to buy
     precision nobody can hear.
+
+    THE DOWNMIX RUNS BEFORE loudnorm, IN THE SAME CHAIN, and the order is the
+    whole point rather than a stylistic choice. `-ac 1` is applied by the
+    encoder after the filter graph, so loudnorm would measure and correct the
+    stereo signal and the downmix would then change the level with nothing
+    re-checking it. How far it moves depends on how correlated the channels
+    are: a mono microphone written to a stereo file loses nothing, and
+    genuinely stereo material loses up to 3 dB. Measured on staging before the
+    fix, from a -33.0 LUFS source: channel-identical stereo delivered -16.4,
+    decorrelated stereo delivered -19.4 against the same -16.0 target.
+
+    That failure is silent — the asset reaches READY and sounds correct in
+    isolation. What it costs is the one thing normalisation exists to buy,
+    which is that two entries play back at the same volume.
     """
     result = _run(
         [
@@ -72,11 +86,10 @@ def normalise(source: Path, destination: Path) -> None:
             "-i",
             str(source),
             "-af",
-            f"loudnorm=I={config.LOUDNESS_TARGET_LUFS}"
+            "aformat=channel_layouts=mono"
+            f",loudnorm=I={config.LOUDNESS_TARGET_LUFS}"
             f":TP={config.LOUDNESS_TRUE_PEAK_DB}"
             f":LRA={config.LOUDNESS_RANGE}",
-            "-ac",
-            "1",
             "-c:a",
             "libmp3lame",
             "-b:a",
