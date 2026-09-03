@@ -37,7 +37,14 @@ jobs:
     name: Push ${{ matrix.app }}
     runs-on: ubuntu-24.04-arm
     strategy:
-      fail-fast: true
+      # fail-fast: false — the three images are INDEPENDENT ARTIFACTS, and
+      # cancelling the others buys nothing. On 2026-09-02 the consumer's scan
+      # gate failed and took the api and web builds down with it, so the
+      # release had a consumer image it could not deploy and no api image at
+      # all — the one needed to replace a crash-looping service. A failing
+      # image still fails this job and still blocks the deploy; what changes
+      # is that the images that were fine are on the registry afterwards.
+      fail-fast: false
       # An include list because CONTEXT DIFFERS PER IMAGE. api and web build
       # from the repository root, since their Dockerfiles copy across
       # workspaces; the media consumer is a self-contained Python package and
