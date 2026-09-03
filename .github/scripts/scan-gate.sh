@@ -27,7 +27,11 @@ set -euo pipefail
 
 REPO="${1:?repository required}"
 IMAGE_TAG="${2:?image tag required}"
-ALLOWLIST="${ALLOWLIST:-.github/image-cve-allowlist.json}"
+# Resolved against this script rather than the caller's cwd. Both workflows
+# happen to invoke it from the repository root, so a relative default works
+# today and would break silently the first time one of them sets a
+# working-directory — as the Python job in ci.yml already does.
+ALLOWLIST="${ALLOWLIST:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/image-cve-allowlist.json}"
 
 # Scanning is asynchronous. Findings read immediately after a push are empty,
 # which would report every image clean.
