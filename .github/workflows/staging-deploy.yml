@@ -46,7 +46,14 @@ jobs:
     if: inputs.action != 'down' && inputs.action != 'seed'
     runs-on: ubuntu-24.04-arm
     strategy:
-      fail-fast: true
+      # fail-fast: false — the three images are INDEPENDENT ARTIFACTS, and
+      # cancelling the others buys nothing. On 2026-09-02 the consumer's scan
+      # gate failed and took the api and web builds down with it, so the
+      # release had a consumer image it could not deploy and no api image at
+      # all — the one needed to replace a crash-looping service. A failing
+      # image still fails this job and still blocks the deploy; what changes
+      # is that the images that were fine are on the registry afterwards.
+      fail-fast: false
       # An include list because CONTEXT DIFFERS PER IMAGE. api and web build
       # from the repository root, since their Dockerfiles copy across
       # workspaces; the media consumer is a self-contained Python package and
@@ -129,6 +136,54 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=staging-${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=staging-${{ matrix.app }}
+
+      # THE SAME GATE THE PRODUCTION WORKFLOW APPLIES, and it is here because
+      # it was not: staging built and ran the media consumer image all evening
+      # while the first scan of it happened at the production boundary, which
+      # failed the release. An image whose first inspection is the deploy that
+      # needs it has been checked at the most expensive possible moment.
+      #
+      # NO `if:` CONDITION, deliberately — unlike the build above. A reused
+      # image still has to pass; gating this on `found == 'false'` would let
+      # anything already in ECR through unexamined, which is precisely the
+      # image most likely to predate a newly published CVE. The wait returns
+      # immediately for an image scanned on an earlier run.
+      #
+      # CRITICAL only, matching production. The threshold belongs to the
+      # organisation rather than the environment: a staging gate that stopped
+      # somewhere different would let an image pass here and fail there, which
+      # is the asymmetry this step exists to remove.
+      #
+      # Scanning is asynchronous, so the wait is required — findings are empty
+      # for a few seconds after a push, and reading them immediately would
+      # report a clean image every time.
+      #
+      # The body below is the production step's, differing only in the tag.
+      # Why it filters with jq rather than a JMESPath --query is recorded
+      # there and not repeated here.
+      - name: Scan gate
+        env:
+          IMAGE_TAG: staging-${{ github.sha }}
+          REPO: nahuat-${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          aws ecr wait image-scan-complete \
+            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG"
+
+          findings=$(aws ecr describe-image-scan-findings \
+            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG" --output json)
+
+          echo "$REPO:$IMAGE_TAG severities: $(echo "$findings" | jq -c '.imageScanFindings.findingSeverityCounts')"
+
+          # The decision reads findingSeverityCounts, not the length of the
+          # findings array: findings paginate, the counts do not.
+          critical=$(echo "$findings" | jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0')
+
+          if [ "$critical" -gt 0 ]; then
+            echo "::error::$REPO:$IMAGE_TAG has $critical CRITICAL finding(s); refusing to deploy."
+            echo "$findings" | jq -r '.imageScanFindings.findings[]? | select(.severity == "CRITICAL") | "\(.name)\t\(.uri)"'
+            exit 1
+          fi
 
   infra:
     name: Terraform ${{ inputs.action }}
