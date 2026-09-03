@@ -135,51 +135,17 @@ jobs:
           cache-from: type=gha,scope=production-${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=production-${{ matrix.app }}
 
-      # The registry has scanned on push since it was created, and until now
-      # nothing ever read the result — a critical finding sat in the console
-      # where no one looked. This is the read.
+      # The registry has scanned on push since it was created, and until this
+      # step nothing ever read the result — a critical finding sat in the
+      # console where no one looked. This is the read.
       #
-      # CRITICAL only, and that threshold is measured rather than guessed: the
-      # current images carry seven HIGH findings, every one an openssl CVE
-      # inherited from node:24-alpine and unfixable from this repository.
-      # Failing on HIGH would block every deploy on Alpine's patch schedule,
-      # which is how a gate gets deleted. Dependabot's docker updates are the
-      # path by which those get fixed; this is the line that stops something
-      # genuinely severe shipping.
-      #
-      # Scanning is asynchronous, so the wait is required — findings are empty
-      # for a few seconds after a push, and reading them immediately would
-      # report a clean image every time.
+      # The threshold, the accepted-findings policy and the reasons for both
+      # live in the script and in .github/image-cve-allowlist.json. They are
+      # not restated here: the same gate runs in the staging workflow, and a
+      # policy explained in three places is one that will disagree with
+      # itself.
       - name: Scan gate
-        env:
-          IMAGE_TAG: prod-${{ github.sha }}
-          REPO: nahuat-${{ matrix.app }}
-        run: |
-          set -euo pipefail
-          aws ecr wait image-scan-complete \
-            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG"
-
-          # Fetched once and filtered with jq rather than twice with JMESPath
-          # --query. A JMESPath literal is written in backticks, which the
-          # linter reads as command substitution suppressed by single quotes
-          # (SC2016) — correct about the shell, wrong about the query.
-          #
-          # (A comment line beginning with the linter's own name is parsed as a
-          # directive, so it is spelled around here rather than started with.)
-          findings=$(aws ecr describe-image-scan-findings \
-            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG" --output json)
-
-          echo "$REPO:$IMAGE_TAG severities: $(echo "$findings" | jq -c '.imageScanFindings.findingSeverityCounts')"
-
-          # The decision reads findingSeverityCounts, not the length of the
-          # findings array: findings paginate, the counts do not.
-          critical=$(echo "$findings" | jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0')
-
-          if [ "$critical" -gt 0 ]; then
-            echo "::error::$REPO:$IMAGE_TAG has $critical CRITICAL finding(s); refusing to deploy."
-            echo "$findings" | jq -r '.imageScanFindings.findings[]? | select(.severity == "CRITICAL") | "\(.name)\t\(.uri)"'
-            exit 1
-          fi
+        run: ./.github/scripts/scan-gate.sh nahuat-${{ matrix.app }} prod-${{ github.sha }}
 
   # ONE job, where staging uses four.
   #
