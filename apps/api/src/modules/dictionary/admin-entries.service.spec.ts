@@ -3,7 +3,9 @@ import {
   AdminEntriesQuerySchema,
   AdminEntryDetailSchema,
   AdminEntryListItemSchema,
+  DictionaryEntryDetailSchema,
   type JwtClaims,
+  TranslationDetailSchema,
 } from '@nahuat/shared';
 import { NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -336,6 +338,76 @@ describe('AdminEntriesService', () => {
       expect(result.translations[0]).toMatchObject({ contentEs: 'hombre', contentEn: 'man' });
       expect(result.translations[0]).not.toHaveProperty('locale');
       expect(result.translations[0]).not.toHaveProperty('content');
+    });
+  });
+
+  // WHAT THE EDITOR CANNOT SEE WITHOUT THESE. `imageUrl` and `audioUrl` are
+  // written only on approval, so they are null for an unattached row, for one
+  // mid-transcode and for one that failed — three states the editor has to
+  // distinguish and cannot. The consequence in the panel is a widget that
+  // renders empty after an upload, and a contributor who uploads again.
+  describe('media state', () => {
+    it('reports nothing attached as null rather than omitting the field', async () => {
+      // The default fixture carries no asset, which is the case that would pass
+      // whether the mapping existed or not — asserted so the two below are read
+      // as the difference they are.
+      const result = await service.detail('ent_1');
+
+      expect(result.imageStatus).toBeNull();
+      expect(result.imageError).toBeNull();
+      expect(result.translations[0]).toMatchObject({ audioStatus: null, audioError: null });
+    });
+
+    it('reports an image that is still being processed', async () => {
+      entry.findFirst.mockResolvedValue(
+        detailRow({ imageAsset: { status: 'PENDING', error: null } }) as never,
+      );
+
+      const result = await service.detail('ent_1');
+
+      // Still no URL — approval has not happened and may never — but the
+      // editor can now say "processing" instead of "no image".
+      expect(result).toMatchObject({ imageUrl: null, imageStatus: 'PENDING', imageError: null });
+    });
+
+    it('carries the reason a recording failed', async () => {
+      const row = detailRow();
+      row.translations[0] = {
+        ...row.translations[0],
+        audioAsset: { status: 'FAILED', error: 'the file contains no audio' },
+      } as never;
+      entry.findFirst.mockResolvedValue(row as never);
+
+      const result = await service.detail('ent_1');
+
+      expect(result.translations[0]).toMatchObject({
+        audioUrl: null,
+        audioStatus: 'FAILED',
+        audioError: 'the file contains no audio',
+      });
+    });
+
+    it('keeps the asset itself out of the response', async () => {
+      // The exclusion this amends is about REACHABILITY: a response must not
+      // become a second route to the object. A status is not a route, and no
+      // id or key is added, so the original decision stands.
+      entry.findFirst.mockResolvedValue(
+        detailRow({ imageAsset: { status: 'READY', error: null } }) as never,
+      );
+
+      const result = await service.detail('ent_1');
+
+      expect(result).not.toHaveProperty('imageAsset');
+      expect(result).not.toHaveProperty('imageAssetId');
+      expect(result.translations[0]).not.toHaveProperty('audioAsset');
+      expect(result.translations[0]).not.toHaveProperty('audioAssetId');
+    });
+
+    it('does not leak into the public shapes', async () => {
+      // The reader-facing shapes answer a different question: whether there is
+      // approved audio, and nothing about the pipeline behind it.
+      expect(Object.keys(TranslationDetailSchema.shape)).not.toContain('audioStatus');
+      expect(Object.keys(DictionaryEntryDetailSchema.shape)).not.toContain('imageStatus');
     });
   });
 });

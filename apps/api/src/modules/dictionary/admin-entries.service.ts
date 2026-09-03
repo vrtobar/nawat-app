@@ -42,6 +42,12 @@ const DETAIL_SELECT = {
   nawatContent: true,
   slug: true,
   imageUrl: true,
+  // Status and error only, matching ADMIN_TRANSLATION_SELECT — see the note
+  // there. `imageUrl` stays null until an ADMIN approves, so without this the
+  // editor cannot tell an entry with no image from one whose image is still
+  // being resized. LIST_SELECT above is deliberately not given it: the queue
+  // shows what to open, not what is mid-pipeline.
+  imageAsset: { select: { status: true, error: true } },
   isPublished: true,
   createdAt: true,
   updatedAt: true,
@@ -180,6 +186,8 @@ function toAdminDetail(entry: DetailRow): AdminEntryDetail {
     nawatContent: entry.nawatContent,
     slug: entry.slug,
     imageUrl: entry.imageUrl,
+    imageStatus: entry.imageAsset?.status ?? null,
+    imageError: entry.imageAsset?.error ?? null,
     isPublished: entry.isPublished,
     creator: entry.creator,
     updater: entry.updater,
