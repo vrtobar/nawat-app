@@ -146,44 +146,10 @@ jobs:
       # NO `if:` CONDITION, deliberately — unlike the build above. A reused
       # image still has to pass; gating this on `found == 'false'` would let
       # anything already in ECR through unexamined, which is precisely the
-      # image most likely to predate a newly published CVE. The wait returns
-      # immediately for an image scanned on an earlier run.
-      #
-      # CRITICAL only, matching production. The threshold belongs to the
-      # organisation rather than the environment: a staging gate that stopped
-      # somewhere different would let an image pass here and fail there, which
-      # is the asymmetry this step exists to remove.
-      #
-      # Scanning is asynchronous, so the wait is required — findings are empty
-      # for a few seconds after a push, and reading them immediately would
-      # report a clean image every time.
-      #
-      # The body below is the production step's, differing only in the tag.
-      # Why it filters with jq rather than a JMESPath --query is recorded
-      # there and not repeated here.
+      # image most likely to predate a newly published CVE. The wait inside
+      # the script returns immediately for an image scanned on an earlier run.
       - name: Scan gate
-        env:
-          IMAGE_TAG: staging-${{ github.sha }}
-          REPO: nahuat-${{ matrix.app }}
-        run: |
-          set -euo pipefail
-          aws ecr wait image-scan-complete \
-            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG"
-
-          findings=$(aws ecr describe-image-scan-findings \
-            --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG" --output json)
-
-          echo "$REPO:$IMAGE_TAG severities: $(echo "$findings" | jq -c '.imageScanFindings.findingSeverityCounts')"
-
-          # The decision reads findingSeverityCounts, not the length of the
-          # findings array: findings paginate, the counts do not.
-          critical=$(echo "$findings" | jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0')
-
-          if [ "$critical" -gt 0 ]; then
-            echo "::error::$REPO:$IMAGE_TAG has $critical CRITICAL finding(s); refusing to deploy."
-            echo "$findings" | jq -r '.imageScanFindings.findings[]? | select(.severity == "CRITICAL") | "\(.name)\t\(.uri)"'
-            exit 1
-          fi
+        run: ./.github/scripts/scan-gate.sh nahuat-${{ matrix.app }} staging-${{ github.sha }}
 
   infra:
     name: Terraform ${{ inputs.action }}
