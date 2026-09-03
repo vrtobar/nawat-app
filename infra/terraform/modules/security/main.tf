@@ -172,17 +172,19 @@ resource "aws_security_group" "rds" {
 # -----------------------------------------------------------------------------
 # ElastiCache Valkey
 #
-# TRADEOFF: only cache-invalidation-consumer needs Redis, but all four Lambdas
-# share one security group, so all four can reach it. Per-consumer groups would
-# close that gap at the cost of four more groups and four more rules to keep in
-# sync — not worth it while the consumers are all first-party code in this repo.
+# ONLY THE API REACHES REDIS. There was a second ingress admitting the Lambda
+# group, written for the cache-invalidation consumer that ADR 19 deleted; the
+# media consumer that replaced it reads S3 and Postgres and no cache, so the
+# rule was removed rather than left admitting a group with no reason to be
+# here. A queue consumer needing Redis would add it back with its own name on
+# it.
 #
 # There is no AUTH token either: access is controlled by VPC placement and this
 # group alone. See the backlog entry on Redis AUTH.
 # -----------------------------------------------------------------------------
 resource "aws_security_group" "redis" {
   name        = "${var.prefix}-redis"
-  description = "ElastiCache Valkey - accepts connections from ECS API and Lambda"
+  description = "ElastiCache Valkey - accepts connections from the ECS API"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -191,14 +193,6 @@ resource "aws_security_group" "redis" {
     to_port         = 6379
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs_api.id]
-  }
-
-  ingress {
-    description     = "Redis from Lambda (cache-invalidation-consumer)"
-    from_port       = 6379
-    to_port         = 6379
-    protocol        = "tcp"
-    security_groups = [aws_security_group.lambda.id]
   }
 
   egress {
@@ -219,8 +213,9 @@ resource "aws_security_group" "redis" {
 # The event source mapping invokes the function through the Lambda service
 # plane, so nothing needs to reach these ENIs inbound.
 #
-# Outbound covers RDS, Redis, and 443 via NAT for the CloudFront API used by
-# cdn-invalidation-consumer.
+# Outbound covers RDS, Redis, and 443 via NAT. No consumer uses that egress
+# today — ADR 19 deleted the one that called the CloudFront API — and it is
+# reviewed when modules/messaging places the first real function.
 # -----------------------------------------------------------------------------
 resource "aws_security_group" "lambda" {
   name        = "${var.prefix}-lambda"

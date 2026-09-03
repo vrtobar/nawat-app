@@ -35,17 +35,34 @@ cache_node_type = "cache.t4g.micro" # Graviton: ~6% cheaper than t3
 # Staging stays true — it is rebuilt constantly and has no users to disturb.
 apply_immediately = false
 
-# NOT the image that is running. The deploy workflow registers its own task
-# definition revision per release and the services ignore Terraform's, so this
-# value only takes effect when the environment is rebuilt from nothing. Treat
-# it as the disaster-recovery floor: the release a from-scratch apply would
-# come up on. Bump it when that floor should move, not on every deploy.
+# image_tag IS DELIBERATELY NOT SET HERE, matching staging. Pass it at apply
+# time: `terraform apply -var image_tag=prod-<sha>`.
 #
-# First real prod- tag, built by the production workflow from main at 809c161
-# and verified present in both ECR repositories. Replaces the all-zero
-# placeholder, which satisfied the format validation but named no image a
-# from-scratch rebuild could pull.
-image_tag = "prod-809c1618c1438495db43a09e7dbffeffa464e0df"
+# NOT the image that is running. The deploy workflow registers its own task
+# definition revision per release and the services ignore Terraform's, so the
+# value only takes effect when the environment is rebuilt from nothing.
+#
+# It was previously pinned here as a disaster-recovery floor — the release a
+# from-scratch apply would come up on — and the idea is sound. What it could
+# not survive is going stale silently, which it did three ways at once: the
+# commit it named was orphaned by the 2026-08-18 history rewrite, its images
+# aged out of both ECR repositories, and a third repository
+# (nahuat-media-consumer) was added that had never held a prod- tag at all.
+# None of that surfaced until an apply was attempted, because nothing reads
+# this value until then.
+#
+# A pinned value is only a floor while every repository still holds it, and
+# nothing in this configuration can check that. An unset variable fails the
+# plan immediately and names itself; a stale one fails minutes into an apply,
+# at Lambda image validation, having already created RDS. So the floor now
+# lives with whoever runs the apply, who must pick a tag and confirm it is
+# present in all three repositories first:
+#
+#   for r in nahuat-api nahuat-web nahuat-media-consumer; do
+#     aws ecr describe-images --repository-name "$r" \
+#       --image-ids imageTag="$TAG" --query 'imageDetails[].imagePushedAt' \
+#       --output text
+#   done
 
 # Compute — production: conservative rollout, one task serving throughout
 api_cpu                    = 256

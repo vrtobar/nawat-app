@@ -69,5 +69,15 @@ pnpm-debug.log*
 # http://localhost will verify — but a private key all the same.
 apps/api/.mock-oidc-key.json
 
+# Python — the media consumer is the only Python in the repository, and none
+# of the tooling that produces these is npm's, so nothing else would have
+# caught them.
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
 # Planning/handoff space 
 .claude/

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
+import { QueueService } from './queue.service';
 import { ReviewController } from './review.controller';
 import { ReviewService } from './review.service';
 import { StorageService } from './storage.service';
@@ -17,7 +18,7 @@ import { UploadsService } from './uploads.service';
 // distinction only ffmpeg cares about.
 @Module({
   controllers: [AttachmentsController, ReviewController, UploadsController],
-  providers: [AttachmentsService, ReviewService, StorageService, UploadsService],
+  providers: [AttachmentsService, QueueService, ReviewService, StorageService, UploadsService],
   // StorageService is the only S3 client in the API. Exported because the
   // approval gate needs it to move objects between prefixes, and a second
   // client would mean a second place the bucket name is resolved.

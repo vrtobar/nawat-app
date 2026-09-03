@@ -109,9 +109,14 @@ resource "aws_ecs_task_definition" "api" {
         { name = "S3_BUCKET", value = var.assets_bucket_name },
         { name = "CDN_URL", value = var.cdn_domain },
         { name = "WEB_URL", value = "https://${var.environment == "production" ? "nahuat.com" : "${var.environment}.nahuat.com"}" },
-        # Enables the real SQS producer instead of the synchronous local
-        # fallback. Queue URLs arrive with the messaging module.
-        { name = "SQS_ENABLED", value = "false" },
+        # The media queue, and the API's own publishing to it (ADR 19's
+        # amendment). There was never a "synchronous local fallback" as the
+        # previous comment here claimed — with SQS off, an upload simply stops
+        # at PENDING, which is honest locally because nothing would process it
+        # anyway. Deployed, both are set: env validation rejects a boot where
+        # SQS_ENABLED is true and the URL is missing.
+        { name = "SQS_ENABLED", value = "true" },
+        { name = "SQS_MEDIA_QUEUE_URL", value = var.media_queue_url },
         # `iss` and `aud` on every access token this API mints, and the values
         # it demands when verifying one. Derived from this environment's own API
         # hostname rather than shared, so a token minted for staging is

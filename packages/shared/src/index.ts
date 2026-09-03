@@ -29,11 +29,6 @@ export * from './schemas/media.schema';
 // Flashcards
 export * from './schemas/flashcard.schema';
 
-// Content hierarchy: Level → Course → Unit → Lesson → Exercise
-export * from './schemas/level.schema';
-export * from './schemas/exercise-configs.schema';
-export * from './schemas/exercise.schema';
-export * from './schemas/lesson.schema';
-
-// Progress & SRS
+// Spaced repetition. The content hierarchy that used to sit above this was
+// deferred by ADR 22, and its schemas went with its models.
 export * from './schemas/progress.schema';

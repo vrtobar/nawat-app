@@ -106,7 +106,7 @@ output "cdn_domain" {
 }
 
 output "cdn_distribution_id" {
-  description = "CDN distribution ID, used by cdn-invalidation-consumer"
+  description = "CDN distribution ID, for cache invalidation"
   value       = aws_cloudfront_distribution.cdn.id
 }
 
@@ -141,6 +141,11 @@ output "ecr_api_url" {
 output "ecr_web_url" {
   description = "ECR repository URL for the web image"
   value       = data.terraform_remote_state.global.outputs.ecr_web_url
+}
+
+output "ecr_media_consumer_url" {
+  description = "ECR repository URL for the media consumer image"
+  value       = data.terraform_remote_state.global.outputs.ecr_media_consumer_url
 }
 
 # -----------------------------------------------------------------------------
