@@ -82,6 +82,37 @@ resource "aws_s3_bucket_versioning" "assets" {
   }
 }
 
+# BROWSER UPLOADS NEED THIS AND NOTHING ELSE DOES. The presigned PUT goes from
+# the contributor's browser straight to S3 — that is the whole point of
+# presigning, and it is the one call in the upload path the API is not in. A
+# cross-origin PUT with a Content-Type of `audio/mpeg` is not a simple request,
+# so the browser sends a preflight first and refuses the upload if S3 does not
+# answer it.
+#
+# ⚠️ NOT DISCOVERED BY THE END-TO-END RUN, because that used curl, which does
+# not enforce CORS. The presigned upload had been exercised only by a client
+# that does not have the constraint its actual client has.
+#
+# `content-type` is listed because `audio/mpeg` is not a safelisted value and
+# therefore triggers the preflight. `content-length` is deliberately absent:
+# it is CORS-safelisted, and it is also a forbidden header name that scripts
+# cannot set at all — the browser writes it from the body.
+#
+# PUT ONLY. Reads never come from here: approved media is served through
+# CloudFront, and the review queue's preview is a presigned GET rendered by an
+# <audio> or <img> element, which is not a CORS request unless someone adds a
+# crossorigin attribute.
+resource "aws_s3_bucket_cors_configuration" "assets" {
+  bucket = aws_s3_bucket.assets.id
+
+  cors_rule {
+    allowed_methods = ["PUT"]
+    allowed_origins = ["https://nahuat.com"]
+    allowed_headers = ["content-type"]
+    max_age_seconds = 3600
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "assets" {
   bucket = aws_s3_bucket.assets.id
 
