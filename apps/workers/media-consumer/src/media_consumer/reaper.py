@@ -21,22 +21,34 @@ only way media gets stuck, and this is what unsticks it. Without this the
 amendment would have been a trade rather than an improvement.
 """
 
-import logging
+import time
 from typing import Any
 
-from . import config, db, queue, storage
+from . import config, db, observability, queue, storage
 from .errors import TransientError
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = observability.configure()
 
 
 def handler(_event: Any = None, _context: Any = None) -> dict[str, int]:
-    """Returns what it did, so a run that found nothing is distinguishable in the logs."""
+    """Returns what it did, so a run that found nothing is distinguishable in the logs.
+
+    That claim was previously false in the only place it mattered. The summary
+    below was written at INFO under a root logger the Lambda runtime had left at
+    WARNING, so every quiet run — which is almost all of them — left nothing
+    behind at all. See `observability` for why.
+    """
+    started = time.monotonic()
     republished = republish_stale()
     collected = collect_abandoned()
 
-    logger.info("reaper: republished %d, collected %d", republished, collected)
+    observability.log_event(
+        logger,
+        "media.reaped",
+        republished=republished,
+        collected=collected,
+        elapsedMs=round((time.monotonic() - started) * 1000),
+    )
     return {"republished": republished, "collected": collected}
 
 
