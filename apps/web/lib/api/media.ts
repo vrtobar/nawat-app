@@ -4,6 +4,7 @@ import {
   type MediaStatus,
   PresignedUploadSchema,
   type PresignUpload,
+  UploadListItemSchema,
 } from '@nahuat/shared';
 import { z } from 'zod';
 
@@ -69,14 +70,19 @@ export function completeUpload(assetId: string) {
   });
 }
 
-// GET /uploads — every asset this caller has uploaded, newest first.
+// GET /uploads — every asset this caller has uploaded, newest first, each with
+// what it is attached to.
+//
+// The attachment is why this list is worth showing: an unattached asset renders
+// in no editor, because nothing points at it, so this is the only place one can
+// be found.
 //
 // ⚠️ UNPAGINATED AND UNFILTERED, which is a property of the route rather than
-// an omission here: the API selects on `uploaderId` alone. That suits the media
-// tab, where a person is looking over their own recent work. It is the wrong
-// way to read ONE asset's status — see the note at the foot of this file.
+// an omission here: the API selects on `uploaderId` alone. That suits a person
+// looking over their own recent work. It is the wrong way to read ONE asset's
+// status — see `getUpload` below.
 export function listUploads() {
-  return authedItem('/uploads', z.array(MediaAssetSchema));
+  return authedItem('/uploads', z.array(UploadListItemSchema));
 }
 
 // -----------------------------------------------------------------------------

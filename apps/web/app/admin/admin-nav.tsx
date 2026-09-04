@@ -31,12 +31,10 @@ type Section = {
 
 const SECTIONS: Section[] = [
   { href: '/admin/entries', label: 'Entries', prefix: '/admin/entries' },
-  // ADMIN-only while /admin/media is the review queue and nothing else: the
-  // page gates itself, so offering the link to a contributor is an invitation
-  // to a refusal. When the contributor media tab lands this stops being
-  // adminOnly and the review queue becomes a tab inside it — the same shape
-  // the entries list already uses to hide "Pending translations".
-  { href: '/admin/media', label: 'Media', prefix: '/admin/media', adminOnly: true },
+  // CONTRIBUTOR+ since the Problems tab landed. The section now holds views for
+  // both ranks and gates PER TAB, so the link leads somewhere usable for
+  // everyone who can see it — which is what makes offering it honest.
+  { href: '/admin/media', label: 'Media', prefix: '/admin/media' },
 ];
 
 export function AdminNav({ role }: { role: string }) {
