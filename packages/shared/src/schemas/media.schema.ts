@@ -245,6 +245,36 @@ export const MEDIA_PROCESSING_MESSAGE_VERSION = 1 as const;
 // it is attached to, and who supplied it. Provenance is included here and
 // nowhere else — the public shapes have no business knowing who recorded a
 // word, and the reviewer has no way to judge without it.
+// What an asset is attached to, or null. Shared by the review queue and the
+// uploader's own list because it answers the same question in both — WHICH WORD
+// IS THIS? — and a second definition would be a second thing to keep in step.
+export const MediaAttachmentSchema = z
+  .object({
+    kind: z.enum(['ENTRY', 'TRANSLATION']),
+    id: z.string(),
+    // The headword for both kinds. Judging or placing a recording is impossible
+    // without knowing which word it claims to be.
+    nawatContent: z.string(),
+  })
+  .nullable();
+export type MediaAttachment = z.infer<typeof MediaAttachmentSchema>;
+
+// The uploader's own list — GET /uploads.
+//
+// MediaAssetSchema PLUS the attachment, and the attachment is the whole point:
+// an unattached asset is invisible in every editor by definition, so this list
+// is the only place one can be found. Without it the list can say an upload
+// exists and not whether it reached anything, which is the single question the
+// view is for.
+//
+// Not folded into MediaAssetSchema itself. Presign and complete return that
+// shape for an asset that by definition has no attachment yet, and an
+// always-null field on both would be noise carried for one caller's benefit.
+export const UploadListItemSchema = MediaAssetSchema.extend({
+  attachedTo: MediaAttachmentSchema,
+});
+export type UploadListItem = z.infer<typeof UploadListItemSchema>;
+
 export const AdminMediaAssetSchema = MediaAssetSchema.extend({
   uploader: z.object({
     id: z.string(),
@@ -254,15 +284,7 @@ export const AdminMediaAssetSchema = MediaAssetSchema.extend({
   // Null while the asset is unattached. An unattached asset cannot be
   // published — approval writes a URL onto a parent, and there is nowhere to
   // write it — so the queue shows them but the gate refuses them.
-  attachedTo: z
-    .object({
-      kind: z.enum(['ENTRY', 'TRANSLATION']),
-      id: z.string(),
-      // The headword, for both kinds. A reviewer judging a recording needs to
-      // know which word it claims to be.
-      nawatContent: z.string(),
-    })
-    .nullable(),
+  attachedTo: MediaAttachmentSchema,
   // A short-lived presigned GET against the PENDING prefix. Review plays the
   // recording through this and never through the CDN, which cannot see
   // unapproved media at all — that is the point of the prefix split.

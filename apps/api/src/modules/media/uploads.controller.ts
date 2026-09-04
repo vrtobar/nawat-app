@@ -4,6 +4,7 @@ import {
   type PresignedUpload,
   type PresignUpload,
   PresignUploadSchema,
+  type UploadListItem,
 } from '@nahuat/shared';
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 
@@ -45,7 +46,7 @@ export class UploadsController {
 
   @Roles('CONTRIBUTOR')
   @Get()
-  list(@CurrentUser() user: JwtClaims): Promise<MediaAsset[]> {
+  list(@CurrentUser() user: JwtClaims): Promise<UploadListItem[]> {
     return this.uploads.list(user.userId);
   }
 
