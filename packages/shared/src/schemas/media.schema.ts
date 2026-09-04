@@ -34,6 +34,15 @@ export const ACCEPTED_MEDIA_TYPES = {
     'audio/wav': 'wav',
     'audio/ogg': 'ogg',
     'audio/webm': 'webm',
+    // TWO SPELLINGS OF ONE FORMAT, both mapping to m4a. Browsers disagree about
+    // what an .m4a file is: `audio/mp4` is the registered type and
+    // `audio/x-m4a` is what several still report. Both halves of the upload
+    // path test membership of this map — the form before it presigns, the API
+    // before it signs — so listing one spelling would leave the file refused
+    // wherever the browser chose the other, and the refusal would look like a
+    // rule about the format rather than about its name.
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
   },
   IMAGE: {
     'image/jpeg': 'jpg',
@@ -52,7 +61,14 @@ export const ACCEPTED_MEDIA_TYPES = {
 // the consonants a documentation recording exists to preserve, and `source/` is
 // kept permanently for speakers who cannot be re-recorded.
 //
-// It stays because ffmpeg decodes it and dropping it would buy nothing. The
+// m4a is here because "at worst a capable phone" is the fallback capture path,
+// and iOS Voice Memos exports exactly that. It was refused at presign, so the
+// one device somebody always has with them produced files this application
+// would not take. ffmpeg reads the container by probing the file rather than
+// its name and decodes AAC natively, so nothing downstream changes.
+//
+// audio/webm stays for a related reason. It stays because ffmpeg decodes it and
+// dropping it would buy nothing. The
 // consumer shells out to ffmpeg, which reads webm regardless of what produced
 // it, so removing the type would refuse a file the pipeline can already
 // process — a narrower allowlist with no corresponding narrowing of what the
