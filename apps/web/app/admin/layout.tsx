@@ -79,6 +79,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span className="text-xs text-gray-500">{role}</span>
           </div>
           <div className="flex items-center gap-3 text-sm">
+            {/* ADMIN only, matching the page's own gate. A contributor reaching
+                /admin/media is told it is not their task, so offering the link
+                would be an invitation to a refusal. */}
+            {role === 'ADMIN' && (
+              <Link href="/admin/media" className="hover:underline">
+                Media
+              </Link>
+            )}
             <Link href="/" className="hover:underline">
               Dictionary
             </Link>
