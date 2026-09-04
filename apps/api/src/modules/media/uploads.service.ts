@@ -48,6 +48,10 @@ export class UploadsService {
         contentType: input.contentType,
         sizeBytes: input.sizeBytes,
         uploaderId: userId,
+        // Empty is stored as null rather than "". The column is nullable and
+        // null already means "nothing recorded"; an empty string would be a
+        // second way to say it, and every reader would have to know both.
+        notes: input.notes && input.notes.length > 0 ? input.notes : null,
         // Placeholder for one statement. The column is NOT NULL because an
         // asset without a source location is meaningless, and the update below
         // is in the same request — a row that kept this value would mean the
