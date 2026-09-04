@@ -16,9 +16,9 @@
     "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1121.0",
+    "@aws-sdk/client-s3": "^3.1123.0",
     "@aws-sdk/client-sqs": "^3.1123.0",
-    "@aws-sdk/s3-request-presigner": "^3.1121.0",
+    "@aws-sdk/s3-request-presigner": "^3.1123.0",
     "@nahuat/database": "*",
     "@nahuat/shared": "*",
     "@nestjs/common": "^11.2.3",
@@ -30,7 +30,7 @@
     "jose": "^6.2.10",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@nahuat/config": "*",
@@ -40,7 +40,7 @@
     "@swc/core": "^1.16.1",
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "unplugin-swc": "^1.5.11"
   }
