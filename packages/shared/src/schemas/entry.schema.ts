@@ -345,7 +345,16 @@ export type AdminEntryDetail = z.infer<typeof AdminEntryDetailSchema>;
 // reviewed. Merging them would make the queue mean two things. It also cannot
 // live under 'draft' without that word covering both "this entry is not live"
 // and "part of this live entry is not live".
-export const AdminEntryStatusSchema = z.enum(['draft', 'pending-translations', 'published', 'all']);
+// 'missing-audio' and 'pending-translations' are both questions about
+// TRANSLATIONS expressed as an entry status, because the entry is what the
+// panel lists and what a person opens to act on the answer.
+export const AdminEntryStatusSchema = z.enum([
+  'draft',
+  'pending-translations',
+  'missing-audio',
+  'published',
+  'all',
+]);
 export type AdminEntryStatus = z.infer<typeof AdminEntryStatusSchema>;
 
 export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({

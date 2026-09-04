@@ -236,6 +236,34 @@ describe('AdminEntriesService', () => {
     });
   });
 
+  describe("status 'missing-audio'", () => {
+    it('asks for entries holding a translation with no audio asset', async () => {
+      entry.findMany.mockResolvedValue([] as never);
+      entry.count.mockResolvedValue(0 as never);
+
+      await service.list(query({ status: 'missing-audio' }), admin);
+
+      // audioAssetId, NOT audioUrl. The URL is written only when an admin
+      // approves, so keying on it would report a translation whose recording is
+      // uploaded and merely awaiting review as still needing one — and it would
+      // be recorded a second time.
+      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]).toMatchObject({
+        where: expect.objectContaining({
+          translations: { some: { audioAssetId: null, deletedAt: null } },
+        }),
+      });
+    });
+
+    it('does not constrain isPublished — a draft can need recording too', async () => {
+      entry.findMany.mockResolvedValue([] as never);
+      entry.count.mockResolvedValue(0 as never);
+
+      await service.list(query({ status: 'missing-audio' }), admin);
+
+      expect(vi.mocked(entry.findMany).mock.calls[0]?.[0]?.where).not.toHaveProperty('isPublished');
+    });
+  });
+
   describe('unpublishedTranslationCount', () => {
     it('counts a dialect added after the entry went live', async () => {
       // The state the list could not previously show: the entry is public, one
