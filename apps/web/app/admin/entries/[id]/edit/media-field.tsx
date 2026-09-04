@@ -121,6 +121,13 @@ export function MediaField({
   // instead, which is why this is allowed to be null while status is PENDING.
   const [assetId, setAssetId] = useState<string | null>(null);
 
+  // Provenance, typed before the file is chosen and sent with the presign,
+  // which is where the row is created and the only moment it can be recorded —
+  // there is no route to edit a note afterwards. Held here rather than in the
+  // file input's onChange because the upload starts the instant a file is
+  // picked, so anything typed after that would have nowhere to go.
+  const [notes, setNotes] = useState('');
+
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const liveRef = useRef(true);
   useEffect(() => {
@@ -178,6 +185,10 @@ export function MediaField({
         kind,
         contentType: file.type,
         sizeBytes: file.size,
+        // Omitted when blank rather than sent as "": the API stores null for
+        // absent, and an empty string would be a second way to say the same
+        // thing.
+        ...(notes.trim() === '' ? {} : { notes: notes.trim() }),
       });
       if (!presigned.ok) {
         setPhase({ name: 'idle' });
@@ -231,7 +242,7 @@ export function MediaField({
       // Either way the server has more recent truth than this component does.
       router.refresh();
     },
-    [attachAction, kind, pollUntilSettled, router],
+    [attachAction, kind, notes, pollUntilSettled, router],
   );
 
   const detach = useCallback(async () => {
@@ -340,6 +351,19 @@ export function MediaField({
             )}
             <span className="text-xs text-gray-500">Published</span>
           </div>
+        )}
+
+        {!busy && status === null && !disabled && (
+          <label className="mb-2 block">
+            <span className="text-xs text-gray-500">Notes (optional)</span>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Who is heard, when it was recorded, and on what"
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+            />
+          </label>
         )}
 
         {!busy && status === null && (
