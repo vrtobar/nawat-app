@@ -117,6 +117,41 @@ describe('presign', () => {
       where: { uploaderId: 'usr_1', status: 'AWAITING_UPLOAD' },
     });
   });
+
+  it('stores provenance notes given at presign', async () => {
+    mediaAsset.count.mockResolvedValue(0 as never);
+    mediaAsset.create.mockResolvedValue(row() as never);
+    mediaAsset.update.mockResolvedValue(row() as never);
+    storage.presignPut.mockResolvedValue({ url: 'https://s3/put', headers: {} } as never);
+
+    await service.presign('usr_1', {
+      kind: 'AUDIO',
+      contentType: 'audio/mpeg',
+      sizeBytes: 2048,
+      notes: 'Recorded with a speaker in Izalco, March 2026',
+    });
+
+    expect(mediaAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ notes: 'Recorded with a speaker in Izalco, March 2026' }),
+      }),
+    );
+  });
+
+  it('stores null rather than an empty string when no note is given', async () => {
+    mediaAsset.count.mockResolvedValue(0 as never);
+    mediaAsset.create.mockResolvedValue(row() as never);
+    mediaAsset.update.mockResolvedValue(row() as never);
+    storage.presignPut.mockResolvedValue({ url: 'https://s3/put', headers: {} } as never);
+
+    await service.presign('usr_1', { kind: 'AUDIO', contentType: 'audio/mpeg', sizeBytes: 2048 });
+
+    // null, not ''. The column is nullable and null already means "nothing
+    // recorded"; an empty string would be a second way to say the same thing.
+    expect(mediaAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ notes: null }) }),
+    );
+  });
 });
 
 describe('complete', () => {

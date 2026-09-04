@@ -91,6 +91,24 @@ export const PresignUploadSchema = z
     kind: MediaKindSchema,
     contentType: z.string().min(1),
     sizeBytes: z.int().positive().max(MAX_UPLOAD_BYTES),
+    // PROVENANCE, AND THE ONLY PLACE IT CAN GO. `MediaAsset.notes` held
+    // everything that is not the uploader — who is heard, when the recording
+    // was made, the conditions, the equipment — and until now nothing could
+    // write it: the column was selected, mapped and returned, and set by
+    // nothing. The field a record calls "much of what makes a recording worth
+    // keeping" was read-only in practice.
+    //
+    // Set at PRESIGN, which is where the row is created, so a note cannot
+    // arrive after the fact and find no asset to attach to. There is no route
+    // to edit one afterwards; that is a real limit and is left until somebody
+    // needs it, rather than guessed at now.
+    //
+    // ONE FREE-TEXT FIELD, still. A form of separate labelled inputs composed
+    // into prose was considered and rejected: it would look structured while
+    // storing text, which invites the belief that it can be queried. See the
+    // amendment on docs/adr/0020 for why a Speaker table is the honest version
+    // of that and is deliberately deferred.
+    notes: z.string().max(2000).trim().optional(),
   })
   .refine((input) => input.contentType in ACCEPTED_MEDIA_TYPES[input.kind], {
     path: ['contentType'],
