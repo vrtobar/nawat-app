@@ -1,5 +1,5 @@
 import { prisma } from '@nahuat/database';
-import { MAX_UNRESOLVED_UPLOADS, MediaAssetSchema } from '@nahuat/shared';
+import { MAX_UNRESOLVED_UPLOADS, MediaAssetSchema, UploadListItemSchema } from '@nahuat/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -301,7 +301,10 @@ describe('get', () => {
 
 describe('list', () => {
   it('returns only the caller rows, newest first, in the contract shape', async () => {
-    mediaAsset.findMany.mockResolvedValue([row(), row({ id: 'med_2' })] as never);
+    mediaAsset.findMany.mockResolvedValue([
+      row({ entry: null, translation: null }),
+      row({ id: 'med_2', entry: null, translation: null }),
+    ] as never);
 
     const result = await service.list('usr_1');
 
@@ -312,7 +315,45 @@ describe('list', () => {
       }),
     );
     for (const asset of result) {
-      expect(() => MediaAssetSchema.strict().parse(asset)).not.toThrow();
+      expect(() => UploadListItemSchema.strict().parse(asset)).not.toThrow();
     }
+  });
+
+  // The attachment is the whole reason this list is worth showing: an
+  // unattached asset renders nowhere else, so a list that could not tell the
+  // two apart would not answer the question the view exists for.
+  it('reports an asset attached to a translation, naming its headword', async () => {
+    mediaAsset.findMany.mockResolvedValue([
+      row({
+        entry: null,
+        translation: { id: 'tr_1', entry: { nawatContent: 'takwatzin' } },
+      }),
+    ] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toEqual({
+      kind: 'TRANSLATION',
+      id: 'tr_1',
+      nawatContent: 'takwatzin',
+    });
+  });
+
+  it('reports an asset attached to an entry', async () => {
+    mediaAsset.findMany.mockResolvedValue([
+      row({ entry: { id: 'ent_1', nawatContent: 'takwatzin' }, translation: null }),
+    ] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toEqual({ kind: 'ENTRY', id: 'ent_1', nawatContent: 'takwatzin' });
+  });
+
+  it('reports null for an orphan, which is the row this view exists to surface', async () => {
+    mediaAsset.findMany.mockResolvedValue([row({ entry: null, translation: null })] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toBeNull();
   });
 });

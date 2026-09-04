@@ -2,8 +2,10 @@ import { prisma } from '@nahuat/database';
 import {
   MAX_UNRESOLVED_UPLOADS,
   type MediaAsset,
+  type MediaAttachment,
   type PresignedUpload,
   type PresignUpload,
+  type UploadListItem,
 } from '@nahuat/shared';
 import { Injectable } from '@nestjs/common';
 
@@ -146,12 +148,45 @@ export class UploadsService {
   // An uploader's own assets, newest first. Scoped to the caller: an
   // unattached upload is not content yet, so there is nothing for another
   // contributor to collaborate on.
-  async list(userId: string): Promise<MediaAsset[]> {
+  //
+  // CARRIES THE ATTACHMENT, which is the only reason this list is worth
+  // showing. An unattached asset is invisible in every editor by definition —
+  // nothing renders it, because nothing points at it — so this is the one place
+  // it can be found, and a list that could not say whether an upload had
+  // reached anything would not answer the question it exists for.
+  async list(userId: string): Promise<UploadListItem[]> {
     const rows = await prisma.mediaAsset.findMany({
       where: { uploaderId: userId },
-      select: MEDIA_ASSET_SELECT,
+      select: {
+        ...MEDIA_ASSET_SELECT,
+        entry: { select: { id: true, nawatContent: true } },
+        translation: { select: { id: true, entry: { select: { nawatContent: true } } } },
+      },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map(toMediaAsset);
+
+    return rows.map((row) => ({ ...toMediaAsset(row), attachedTo: attachmentOf(row) }));
   }
+}
+
+// The same derivation review.service makes for its queue rows. An asset points
+// at an entry or a translation, never both — the attach endpoints enforce the
+// kind — so this reads whichever is set and reports the headword either way.
+// A translation's headword lives on its parent entry, which is why the two
+// branches differ in depth rather than only in name.
+function attachmentOf(row: {
+  entry: { id: string; nawatContent: string } | null;
+  translation: { id: string; entry: { nawatContent: string } } | null;
+}): MediaAttachment {
+  if (row.entry) {
+    return { kind: 'ENTRY', id: row.entry.id, nawatContent: row.entry.nawatContent };
+  }
+  if (row.translation) {
+    return {
+      kind: 'TRANSLATION',
+      id: row.translation.id,
+      nawatContent: row.translation.entry.nawatContent,
+    };
+  }
+  return null;
 }
