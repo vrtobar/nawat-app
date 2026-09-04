@@ -8,6 +8,7 @@ import { auth } from '../../auth';
 import { getMe } from '../../lib/api/admin';
 import { ApiError } from '../../lib/api/client';
 import { AUTH_ROUTES, withCallback } from '../../lib/auth-routes';
+import { AdminNav } from './admin-nav';
 
 // Not indexed, and not a mistake to state twice: the panel is behind a session
 // anyway, but a crawler that somehow reaches it should not retain the URL.
@@ -71,28 +72,29 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <html lang="en">
       <body>
+        {/* Three groups, and the grouping is the point: who you are, where you
+            can go INSIDE the panel, and the ways OUT of it. They were one row
+            of identical links before, which put a section next to a sign-out.
+            The wordmark points at /admin, which redirects — so the panel has a
+            root rather than a brand that happens to link to one of its
+            sections. */}
         <header className="flex items-center justify-between border-b border-gray-200 px-6 py-3">
-          <div className="flex items-baseline gap-3">
-            <Link href="/admin/entries" className="font-semibold">
-              Nawat admin
-            </Link>
-            <span className="text-xs text-gray-500">{role}</span>
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            {/* ADMIN only, matching the page's own gate. A contributor reaching
-                /admin/media is told it is not their task, so offering the link
-                would be an invitation to a refusal. */}
-            {role === 'ADMIN' && (
-              <Link href="/admin/media" className="hover:underline">
-                Media
+          <div className="flex items-center gap-6">
+            <div className="flex items-baseline gap-3">
+              <Link href="/admin" className="font-semibold">
+                Nawat admin
               </Link>
-            )}
+              <span className="text-xs text-gray-500">{role}</span>
+            </div>
+            <AdminNav role={role} />
+          </div>
+          <div className="flex items-center gap-4 border-l border-gray-200 pl-4 text-sm">
             {/* /dictionary, not / — the label says Dictionary and pointed at
                 the homepage. Locale-less on purpose: the panel is not
                 localized, and proxy.ts prepends the reader's locale to any
                 path that has none, so this resolves to /es/dictionary or
                 /en/dictionary without the panel having to know which. */}
-            <Link href="/dictionary" className="hover:underline">
+            <Link href="/dictionary" className="text-gray-500 hover:text-gray-900">
               Dictionary
             </Link>
             <a
