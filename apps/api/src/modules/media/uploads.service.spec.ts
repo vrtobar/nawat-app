@@ -238,6 +238,32 @@ describe('complete', () => {
   });
 });
 
+describe('get', () => {
+  it('returns the caller own asset in the contract shape', async () => {
+    mediaAsset.findUnique.mockResolvedValue(row({ uploaderId: 'usr_1', status: 'READY' }) as never);
+
+    const result = await service.get('usr_1', 'med_1');
+
+    expect(result.status).toBe('READY');
+    // .strict() is the assertion that matters: `uploaderId` is selected to make
+    // the ownership check and must not survive into the response, and neither
+    // must sourceKey if the select ever widens.
+    expect(() => MediaAssetSchema.strict().parse(result)).not.toThrow();
+  });
+
+  it('refuses an asset belonging to another contributor', async () => {
+    mediaAsset.findUnique.mockResolvedValue(row({ uploaderId: 'usr_2' }) as never);
+
+    await expect(service.get('usr_1', 'med_1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('404s an unknown asset', async () => {
+    mediaAsset.findUnique.mockResolvedValue(null as never);
+
+    await expect(service.get('usr_1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
 describe('list', () => {
   it('returns only the caller rows, newest first, in the contract shape', async () => {
     mediaAsset.findMany.mockResolvedValue([row(), row({ id: 'med_2' })] as never);
