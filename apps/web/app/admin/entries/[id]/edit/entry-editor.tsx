@@ -198,6 +198,7 @@ export function EntryEditor({
           status={entry.imageStatus}
           url={entry.imageUrl}
           error={entry.imageError}
+          savedNotes={entry.imageNotes}
           disabled={!isAdmin && entry.imageUrl !== null}
           attachAction={(assetId) => attachImageAction(entry.id, assetId)}
           detachAction={() => detachImageAction(entry.id)}

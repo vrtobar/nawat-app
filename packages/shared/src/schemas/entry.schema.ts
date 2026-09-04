@@ -304,6 +304,8 @@ export const AdminEntryDetailSchema = z.object({
   // where an asset id is not. Null when nothing is attached.
   imageStatus: MediaStatusSchema.nullable(),
   imageError: z.string().nullable(),
+  // As `audioNotes` on AdminTranslationDetail — see the note there.
+  imageNotes: z.string().nullable(),
   isPublished: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
