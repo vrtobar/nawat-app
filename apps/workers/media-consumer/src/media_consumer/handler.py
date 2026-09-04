@@ -22,16 +22,15 @@ dead-letter queue".
 """
 
 import json
-import logging
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
-from . import audio, config, contracts, db, images, storage
+from . import audio, config, contracts, db, images, observability, storage
 from .errors import TerminalError, TransientError
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = observability.configure()
 
 # Keys are RELATIVE to the asset's prefix — `audio.mp3`, not
 # `pending/med_1/audio.mp3`. That is what makes approval a prefix swap: the same
@@ -93,6 +92,7 @@ def process_record(record: dict[str, Any]) -> None:
 
     attempts = db.increment_attempts(asset_id)
     last_attempt = attempts >= config.MAX_ATTEMPTS
+    started = time.monotonic()
 
     try:
         derivatives = _process(asset)
@@ -109,7 +109,29 @@ def process_record(record: dict[str, Any]) -> None:
 
     contracts.validate_derivatives(derivatives)
     db.mark_ready(asset_id, derivatives)
-    logger.info("asset %s is READY with %d file(s)", asset_id, len(derivatives["files"]))
+
+    # THE LINE THIS FUNCTION EXISTS TO LEAVE BEHIND. A DLQ alarm covers
+    # processing that fails; nothing covers processing that succeeds and
+    # produces the wrong thing, and without this the only evidence a run
+    # happened at all is the row changing state.
+    #
+    # ⚠️ It does NOT verify the output. The keys and sizes are what was written,
+    # not a measurement of it — the loudness defect fixed in `audio` would have
+    # produced an identical line, because the file was the right size, the right
+    # duration and at the wrong level. Verifying that needs the delivered object
+    # measured, which is a second ffmpeg pass and a separate decision.
+    observability.log_event(
+        logger,
+        "media.processed",
+        assetId=asset_id,
+        kind=asset["kind"],
+        attempt=attempts,
+        primary=derivatives["primary"],
+        files=[f["key"] for f in derivatives["files"]],
+        bytes=sum(f["bytes"] for f in derivatives["files"]),
+        durationSec=derivatives.get("durationSec"),
+        elapsedMs=round((time.monotonic() - started) * 1000),
+    )
 
 
 def _process(asset: dict[str, Any]) -> dict[str, Any]:

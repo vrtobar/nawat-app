@@ -1,5 +1,5 @@
 import { prisma } from '@nahuat/database';
-import { MAX_UNRESOLVED_UPLOADS, MediaAssetSchema } from '@nahuat/shared';
+import { MAX_UNRESOLVED_UPLOADS, MediaAssetSchema, UploadListItemSchema } from '@nahuat/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -116,6 +116,41 @@ describe('presign', () => {
     expect(mediaAsset.count).toHaveBeenCalledWith({
       where: { uploaderId: 'usr_1', status: 'AWAITING_UPLOAD' },
     });
+  });
+
+  it('stores provenance notes given at presign', async () => {
+    mediaAsset.count.mockResolvedValue(0 as never);
+    mediaAsset.create.mockResolvedValue(row() as never);
+    mediaAsset.update.mockResolvedValue(row() as never);
+    storage.presignPut.mockResolvedValue({ url: 'https://s3/put', headers: {} } as never);
+
+    await service.presign('usr_1', {
+      kind: 'AUDIO',
+      contentType: 'audio/mpeg',
+      sizeBytes: 2048,
+      notes: 'Recorded with a speaker in Izalco, March 2026',
+    });
+
+    expect(mediaAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ notes: 'Recorded with a speaker in Izalco, March 2026' }),
+      }),
+    );
+  });
+
+  it('stores null rather than an empty string when no note is given', async () => {
+    mediaAsset.count.mockResolvedValue(0 as never);
+    mediaAsset.create.mockResolvedValue(row() as never);
+    mediaAsset.update.mockResolvedValue(row() as never);
+    storage.presignPut.mockResolvedValue({ url: 'https://s3/put', headers: {} } as never);
+
+    await service.presign('usr_1', { kind: 'AUDIO', contentType: 'audio/mpeg', sizeBytes: 2048 });
+
+    // null, not ''. The column is nullable and null already means "nothing
+    // recorded"; an empty string would be a second way to say the same thing.
+    expect(mediaAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ notes: null }) }),
+    );
   });
 });
 
@@ -238,9 +273,38 @@ describe('complete', () => {
   });
 });
 
+describe('get', () => {
+  it('returns the caller own asset in the contract shape', async () => {
+    mediaAsset.findUnique.mockResolvedValue(row({ uploaderId: 'usr_1', status: 'READY' }) as never);
+
+    const result = await service.get('usr_1', 'med_1');
+
+    expect(result.status).toBe('READY');
+    // .strict() is the assertion that matters: `uploaderId` is selected to make
+    // the ownership check and must not survive into the response, and neither
+    // must sourceKey if the select ever widens.
+    expect(() => MediaAssetSchema.strict().parse(result)).not.toThrow();
+  });
+
+  it('refuses an asset belonging to another contributor', async () => {
+    mediaAsset.findUnique.mockResolvedValue(row({ uploaderId: 'usr_2' }) as never);
+
+    await expect(service.get('usr_1', 'med_1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('404s an unknown asset', async () => {
+    mediaAsset.findUnique.mockResolvedValue(null as never);
+
+    await expect(service.get('usr_1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
 describe('list', () => {
   it('returns only the caller rows, newest first, in the contract shape', async () => {
-    mediaAsset.findMany.mockResolvedValue([row(), row({ id: 'med_2' })] as never);
+    mediaAsset.findMany.mockResolvedValue([
+      row({ entry: null, translation: null }),
+      row({ id: 'med_2', entry: null, translation: null }),
+    ] as never);
 
     const result = await service.list('usr_1');
 
@@ -251,7 +315,45 @@ describe('list', () => {
       }),
     );
     for (const asset of result) {
-      expect(() => MediaAssetSchema.strict().parse(asset)).not.toThrow();
+      expect(() => UploadListItemSchema.strict().parse(asset)).not.toThrow();
     }
+  });
+
+  // The attachment is the whole reason this list is worth showing: an
+  // unattached asset renders nowhere else, so a list that could not tell the
+  // two apart would not answer the question the view exists for.
+  it('reports an asset attached to a translation, naming its headword', async () => {
+    mediaAsset.findMany.mockResolvedValue([
+      row({
+        entry: null,
+        translation: { id: 'tr_1', entry: { nawatContent: 'takwatzin' } },
+      }),
+    ] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toEqual({
+      kind: 'TRANSLATION',
+      id: 'tr_1',
+      nawatContent: 'takwatzin',
+    });
+  });
+
+  it('reports an asset attached to an entry', async () => {
+    mediaAsset.findMany.mockResolvedValue([
+      row({ entry: { id: 'ent_1', nawatContent: 'takwatzin' }, translation: null }),
+    ] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toEqual({ kind: 'ENTRY', id: 'ent_1', nawatContent: 'takwatzin' });
+  });
+
+  it('reports null for an orphan, which is the row this view exists to surface', async () => {
+    mediaAsset.findMany.mockResolvedValue([row({ entry: null, translation: null })] as never);
+
+    const [asset] = await service.list('usr_1');
+
+    expect(asset?.attachedTo).toBeNull();
   });
 });

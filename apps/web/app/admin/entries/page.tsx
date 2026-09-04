@@ -38,6 +38,10 @@ const VIEWS: View[] = [
     status: 'pending-translations',
     adminOnly: true,
   },
+  // The list a contributor takes to a recording session. NOT admin-only,
+  // unlike the queue above: anyone who can attach a recording can act on it,
+  // and attaching is CONTRIBUTOR.
+  { key: 'missing-audio', label: 'Needs recording', status: 'missing-audio' },
   { key: 'published', label: 'Published', status: 'published' },
   { key: 'all', label: 'All', status: 'all' },
 ];
@@ -46,6 +50,7 @@ const EMPTY: Record<string, string> = {
   mine: 'Nothing of yours yet — entries you create, and dialects you add to other entries, appear here.',
   draft: 'No drafts.',
   'pending-translations': 'Nothing waiting — every published entry has all its translations live.',
+  'missing-audio': 'Every translation has a recording attached. Nothing is waiting to be recorded.',
   published: 'Nothing published yet.',
   all: 'No entries.',
 };

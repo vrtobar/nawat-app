@@ -4,6 +4,7 @@ import {
   type PresignedUpload,
   type PresignUpload,
   PresignUploadSchema,
+  type UploadListItem,
 } from '@nahuat/shared';
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 
@@ -45,7 +46,16 @@ export class UploadsController {
 
   @Roles('CONTRIBUTOR')
   @Get()
-  list(@CurrentUser() user: JwtClaims): Promise<MediaAsset[]> {
+  list(@CurrentUser() user: JwtClaims): Promise<UploadListItem[]> {
     return this.uploads.list(user.userId);
+  }
+
+  // What a client polls while the processor works. Declared after @Get() so
+  // the literal collection route is matched first — Nest resolves in
+  // declaration order, and ':id' would otherwise swallow it.
+  @Roles('CONTRIBUTOR')
+  @Get(':id')
+  get(@CurrentUser() user: JwtClaims, @Param('id') id: string): Promise<MediaAsset> {
+    return this.uploads.get(user.userId, id);
   }
 }

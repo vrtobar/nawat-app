@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { OptimisticLockSchema, PaginationParamsSchema } from './api-response.schema';
 import { LocaleSchema } from './locale.schema';
+import { MediaStatusSchema } from './media.schema';
 import {
   AdminTranslationDetailSchema,
   CreateTranslationSchema,
@@ -298,6 +299,13 @@ export const AdminEntryDetailSchema = z.object({
   nawatContent: z.string(),
   slug: z.string(),
   imageUrl: z.url().nullable(),
+  // The image's place in the pipeline, on the same terms as `audioStatus` on
+  // AdminTranslationDetail — see the note there for why a status is carried
+  // where an asset id is not. Null when nothing is attached.
+  imageStatus: MediaStatusSchema.nullable(),
+  imageError: z.string().nullable(),
+  // As `audioNotes` on AdminTranslationDetail — see the note there.
+  imageNotes: z.string().nullable(),
   isPublished: z.boolean(),
   creator: AdminActorSchema,
   updater: AdminActorSchema,
@@ -339,7 +347,16 @@ export type AdminEntryDetail = z.infer<typeof AdminEntryDetailSchema>;
 // reviewed. Merging them would make the queue mean two things. It also cannot
 // live under 'draft' without that word covering both "this entry is not live"
 // and "part of this live entry is not live".
-export const AdminEntryStatusSchema = z.enum(['draft', 'pending-translations', 'published', 'all']);
+// 'missing-audio' and 'pending-translations' are both questions about
+// TRANSLATIONS expressed as an entry status, because the entry is what the
+// panel lists and what a person opens to act on the answer.
+export const AdminEntryStatusSchema = z.enum([
+  'draft',
+  'pending-translations',
+  'missing-audio',
+  'published',
+  'all',
+]);
 export type AdminEntryStatus = z.infer<typeof AdminEntryStatusSchema>;
 
 export const AdminEntriesQuerySchema = PaginationParamsSchema.extend({

@@ -34,6 +34,15 @@ export const ACCEPTED_MEDIA_TYPES = {
     'audio/wav': 'wav',
     'audio/ogg': 'ogg',
     'audio/webm': 'webm',
+    // TWO SPELLINGS OF ONE FORMAT, both mapping to m4a. Browsers disagree about
+    // what an .m4a file is: `audio/mp4` is the registered type and
+    // `audio/x-m4a` is what several still report. Both halves of the upload
+    // path test membership of this map — the form before it presigns, the API
+    // before it signs — so listing one spelling would leave the file refused
+    // wherever the browser chose the other, and the refusal would look like a
+    // rule about the format rather than about its name.
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
   },
   IMAGE: {
     'image/jpeg': 'jpg',
@@ -42,11 +51,28 @@ export const ACCEPTED_MEDIA_TYPES = {
   },
 } as const satisfies Record<MediaKind, Record<string, string>>;
 
-// audio/webm is accepted alongside the three the API reference lists, because
-// MediaRecorder in Chrome and Firefox produces it by default. Recording in the
-// browser is the shortest path from a speaker to an asset, and refusing the
-// format that path produces would push every contributor through a file
-// manager.
+// audio/webm is accepted alongside the three the API reference lists. IT IS NOT
+// KEPT FOR THE REASON IT WAS ADDED: the original justification was that
+// MediaRecorder produces it in Chrome and Firefox, and that recording in the
+// browser is the shortest path from a speaker to an asset. In-browser recording
+// was examined and rejected on 2026-09-02 — capture happens on a field recorder
+// outside this application, because MediaRecorder's format differs by engine,
+// its defaults apply noise suppression and automatic gain that damage exactly
+// the consonants a documentation recording exists to preserve, and `source/` is
+// kept permanently for speakers who cannot be re-recorded.
+//
+// m4a is here because "at worst a capable phone" is the fallback capture path,
+// and iOS Voice Memos exports exactly that. It was refused at presign, so the
+// one device somebody always has with them produced files this application
+// would not take. ffmpeg reads the container by probing the file rather than
+// its name and decodes AAC natively, so nothing downstream changes.
+//
+// audio/webm stays for a related reason. It stays because ffmpeg decodes it and
+// dropping it would buy nothing. The
+// consumer shells out to ffmpeg, which reads webm regardless of what produced
+// it, so removing the type would refuse a file the pipeline can already
+// process — a narrower allowlist with no corresponding narrowing of what the
+// processor handles.
 
 // 10MB, matching the published reference. Not a content constraint — a
 // single-word recording is orders of magnitude below it even uncompressed —
@@ -81,6 +107,24 @@ export const PresignUploadSchema = z
     kind: MediaKindSchema,
     contentType: z.string().min(1),
     sizeBytes: z.int().positive().max(MAX_UPLOAD_BYTES),
+    // PROVENANCE, AND THE ONLY PLACE IT CAN GO. `MediaAsset.notes` held
+    // everything that is not the uploader — who is heard, when the recording
+    // was made, the conditions, the equipment — and until now nothing could
+    // write it: the column was selected, mapped and returned, and set by
+    // nothing. The field a record calls "much of what makes a recording worth
+    // keeping" was read-only in practice.
+    //
+    // Set at PRESIGN, which is where the row is created, so a note cannot
+    // arrive after the fact and find no asset to attach to. There is no route
+    // to edit one afterwards; that is a real limit and is left until somebody
+    // needs it, rather than guessed at now.
+    //
+    // ONE FREE-TEXT FIELD, still. A form of separate labelled inputs composed
+    // into prose was considered and rejected: it would look structured while
+    // storing text, which invites the belief that it can be queried. See the
+    // amendment on docs/adr/0020 for why a Speaker table is the honest version
+    // of that and is deliberately deferred.
+    notes: z.string().max(2000).trim().optional(),
   })
   .refine((input) => input.contentType in ACCEPTED_MEDIA_TYPES[input.kind], {
     path: ['contentType'],
@@ -217,6 +261,36 @@ export const MEDIA_PROCESSING_MESSAGE_VERSION = 1 as const;
 // it is attached to, and who supplied it. Provenance is included here and
 // nowhere else — the public shapes have no business knowing who recorded a
 // word, and the reviewer has no way to judge without it.
+// What an asset is attached to, or null. Shared by the review queue and the
+// uploader's own list because it answers the same question in both — WHICH WORD
+// IS THIS? — and a second definition would be a second thing to keep in step.
+export const MediaAttachmentSchema = z
+  .object({
+    kind: z.enum(['ENTRY', 'TRANSLATION']),
+    id: z.string(),
+    // The headword for both kinds. Judging or placing a recording is impossible
+    // without knowing which word it claims to be.
+    nawatContent: z.string(),
+  })
+  .nullable();
+export type MediaAttachment = z.infer<typeof MediaAttachmentSchema>;
+
+// The uploader's own list — GET /uploads.
+//
+// MediaAssetSchema PLUS the attachment, and the attachment is the whole point:
+// an unattached asset is invisible in every editor by definition, so this list
+// is the only place one can be found. Without it the list can say an upload
+// exists and not whether it reached anything, which is the single question the
+// view is for.
+//
+// Not folded into MediaAssetSchema itself. Presign and complete return that
+// shape for an asset that by definition has no attachment yet, and an
+// always-null field on both would be noise carried for one caller's benefit.
+export const UploadListItemSchema = MediaAssetSchema.extend({
+  attachedTo: MediaAttachmentSchema,
+});
+export type UploadListItem = z.infer<typeof UploadListItemSchema>;
+
 export const AdminMediaAssetSchema = MediaAssetSchema.extend({
   uploader: z.object({
     id: z.string(),
@@ -226,15 +300,7 @@ export const AdminMediaAssetSchema = MediaAssetSchema.extend({
   // Null while the asset is unattached. An unattached asset cannot be
   // published — approval writes a URL onto a parent, and there is nowhere to
   // write it — so the queue shows them but the gate refuses them.
-  attachedTo: z
-    .object({
-      kind: z.enum(['ENTRY', 'TRANSLATION']),
-      id: z.string(),
-      // The headword, for both kinds. A reviewer judging a recording needs to
-      // know which word it claims to be.
-      nawatContent: z.string(),
-    })
-    .nullable(),
+  attachedTo: MediaAttachmentSchema,
   // A short-lived presigned GET against the PENDING prefix. Review plays the
   // recording through this and never through the CDN, which cannot see
   // unapproved media at all — that is the point of the prefix split.

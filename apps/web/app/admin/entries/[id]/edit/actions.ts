@@ -1,6 +1,12 @@
 'use server';
 
-import { type CreateTranslation, type UpdateEntry, type UpdateTranslation } from '@nahuat/shared';
+import {
+  type CreateTranslation,
+  type MediaStatus,
+  type PresignUpload,
+  type UpdateEntry,
+  type UpdateTranslation,
+} from '@nahuat/shared';
 import { revalidatePath } from 'next/cache';
 
 import {
@@ -11,6 +17,15 @@ import {
   updateTranslation,
 } from '../../../../../lib/api/admin';
 import { ApiError } from '../../../../../lib/api/client';
+import {
+  attachAudio,
+  attachImage,
+  completeUpload,
+  detachAudio,
+  detachImage,
+  getUpload,
+  presignUpload,
+} from '../../../../../lib/api/media';
 
 // `updatedAt` comes back on success because the form holds it as its optimistic
 // lock and must advance it, or its own next save conflicts with itself.
@@ -148,6 +163,147 @@ export async function publishPendingTranslationsAction(entryId: string): Promise
       ok: false,
       message: error instanceof Error ? error.message : 'Could not publish',
     };
+  }
+  revalidateEntry(entryId);
+  return { ok: true };
+}
+
+// -----------------------------------------------------------------------------
+// MEDIA
+// -----------------------------------------------------------------------------
+
+// The upload path, as Server Actions. Every call below reaches the API with the
+// caller's access token, which the browser never holds — auth.ts keeps it on
+// the encrypted JWT and the session callback withholds it — so none of this can
+// run from a client component.
+//
+// EXACTLY ONE STEP IS MISSING FROM THIS FILE: the PUT of the bytes, which goes
+// from the browser straight to S3 against the presigned URL. That is what
+// presigning is for, and it is the only part of the flow the API is not in.
+//
+// ⚠️ THE FIRST THREE ARE NOT EDITOR-SPECIFIC. presign, complete and status
+// concern an asset that is not attached to anything yet, and the contributor
+// media tab will want them too. They are here because the editor is the only
+// caller today; moving them to a shared module is the right change the moment
+// there is a second one, and doing it now would be structure without a user.
+
+// Attaching returns NO updatedAt, unlike every other write in this file, and
+// that is the contract rather than an omission: attaching sets a foreign key
+// and deliberately does not move the parent's `updatedAt` (docs/adr/0020), so
+// there is no optimistic lock to advance. Reusing SaveResult here would hand
+// the card a version to store and quietly break its next save.
+export type PresignResult =
+  | { ok: true; assetId: string; uploadUrl: string; headers: Record<string, string> }
+  | { ok: false; message: string };
+
+export type UploadStatusResult =
+  { ok: true; status: MediaStatus; error: string | null } | { ok: false; message: string };
+
+function toMediaFailure(error: unknown, fallback: string): { ok: false; message: string } {
+  return { ok: false, message: error instanceof Error ? error.message : fallback };
+}
+
+// Step 1. The row is created at AWAITING_UPLOAD before any bytes exist, and
+// what comes back is a capability to write one object at one key.
+//
+// `Content-Length` IS STRIPPED HERE rather than left for the caller to notice.
+// The API signs it, and the presign contract says to send the headers verbatim
+// — but it is a forbidden header name: `fetch` ignores an attempt to set it and
+// XHR throws. The browser writes it from the body, which is why the signature
+// still matches. Filtering at the boundary means the one place that knows this
+// is this comment, instead of every component that loops over the map.
+export async function presignUploadAction(body: PresignUpload): Promise<PresignResult> {
+  let presigned;
+  try {
+    presigned = await presignUpload(body);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not start the upload');
+  }
+  if (!presigned) return { ok: false, message: 'The upload could not be prepared' };
+
+  const headers = Object.fromEntries(
+    Object.entries(presigned.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
+  );
+
+  return { ok: true, assetId: presigned.assetId, uploadUrl: presigned.uploadUrl, headers };
+}
+
+// Step 3, after the browser's PUT. The API HEADs the object and compares its
+// size against what was signed before moving the row to PENDING and queueing
+// it — "I uploaded it" is not evidence that anything is in the bucket.
+//
+// A failure here leaves the asset AWAITING_UPLOAD on purpose, so the same
+// presigned URL can be retried rather than stranding it and signing another.
+export async function completeUploadAction(assetId: string): Promise<UploadStatusResult> {
+  let asset;
+  try {
+    asset = await completeUpload(assetId);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not confirm the upload');
+  }
+  if (!asset) return { ok: false, message: 'The upload could not be confirmed' };
+
+  return { ok: true, status: asset.status, error: asset.error };
+}
+
+// Step 4. Polled while the processor works, roughly every two seconds.
+//
+// Do not treat a ceiling as failure. The first upload of a session pays the
+// Lambda cold start — 26.6s measured against 2.3s warm — so a short fixed
+// timeout reports it as broken. Offer a manual re-check instead.
+export async function uploadStatusAction(assetId: string): Promise<UploadStatusResult> {
+  try {
+    const asset = await getUpload(assetId);
+    return { ok: true, status: asset.status, error: asset.error };
+  } catch (error) {
+    return toMediaFailure(error, 'Could not read the upload status');
+  }
+}
+
+// Step 5. Order-independent: an asset may be attached before or after it
+// finishes processing, and the gate refuses to publish one attached to nothing.
+export async function attachAudioAction(
+  entryId: string,
+  translationId: string,
+  assetId: string,
+): Promise<ActionResult> {
+  try {
+    await attachAudio(translationId, assetId);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not attach the recording');
+  }
+  revalidateEntry(entryId);
+  return { ok: true };
+}
+
+export async function detachAudioAction(
+  entryId: string,
+  translationId: string,
+): Promise<ActionResult> {
+  try {
+    await detachAudio(translationId);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not remove the recording');
+  }
+  revalidateEntry(entryId);
+  return { ok: true };
+}
+
+export async function attachImageAction(entryId: string, assetId: string): Promise<ActionResult> {
+  try {
+    await attachImage(entryId, assetId);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not attach the image');
+  }
+  revalidateEntry(entryId);
+  return { ok: true };
+}
+
+export async function detachImageAction(entryId: string): Promise<ActionResult> {
+  try {
+    await detachImage(entryId);
+  } catch (error) {
+    return toMediaFailure(error, 'Could not remove the image');
   }
   revalidateEntry(entryId);
   return { ok: true };

@@ -44,7 +44,7 @@ type Query = Record<string, string | number | boolean | undefined>;
 
 type RequestOptions = {
   query?: Query;
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   // A bearer token, when the route requires one. Passed in rather than fetched
   // here so this stays a plain HTTP helper: the public dictionary reads never
@@ -204,7 +204,11 @@ export async function authedPage<T extends z.ZodType>(
 // than 204 so every response parses the same way (TransformInterceptor).
 export async function mutate<T extends z.ZodType>(
   path: string,
-  options: { method: 'POST' | 'PATCH' | 'DELETE'; body?: unknown; schema?: T },
+  // PUT is here for media attachment and nothing else. `PUT /entries/:id/image`
+  // and `PUT /translations/:id/audio` set a foreign key on a row they do not
+  // otherwise modify (docs/adr/0020), which is why they are neither a PATCH of
+  // the parent nor a POST to a collection.
+  options: { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown; schema?: T },
 ): Promise<z.infer<T> | null> {
   const responseBody = await requestJson(path, {
     method: options.method,

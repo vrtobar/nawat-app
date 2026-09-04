@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { OptimisticLockSchema } from './api-response.schema';
 import { DialectSchema } from './dialect.schema';
 import { LocaleSchema } from './locale.schema';
+import { MediaStatusSchema } from './media.schema';
 
 // -----------------------------------------------------------------------------
 // ENUMS
@@ -172,6 +173,34 @@ export const AdminTranslationDetailSchema = z.object({
   phonetic: z.string().nullable(),
   partOfSpeech: PartOfSpeechSchema.nullable(),
   audioUrl: z.url().nullable(),
+  // WHERE AN ATTACHED RECORDING IS IN THE PIPELINE, and null when nothing is
+  // attached. AMENDS the exclusion stated at the top of this file, which keeps
+  // the asset id and its keys out of every response so that a response cannot
+  // become a second route to the object. A processing state is not storage and
+  // names nothing reachable, so that reasoning is untouched — and the editor
+  // needs this, because `audioUrl` stays null until an ADMIN approves and
+  // without it an editor cannot tell an unattached translation from one whose
+  // recording is mid-transcode. It rendered empty, and the contributor
+  // uploaded again.
+  //
+  // NO ASSET ID, deliberately, and it turns out none is needed: detaching is
+  // DELETE /translations/:id/audio, keyed on the parent.
+  //
+  // ADMIN SHAPES ONLY. TranslationDetail is unchanged — a reader has no
+  // business knowing that a recording exists but is not approved.
+  audioStatus: MediaStatusSchema.nullable(),
+  // Why processing gave up, for a FAILED asset. Carried so the person who can
+  // re-record sees the reason where they are, rather than a bare failure.
+  audioError: z.string().nullable(),
+  // The provenance written when the recording was uploaded — who is heard,
+  // when, on what. Carried for the same reason as the two above: the editor is
+  // where a person stands when they need it, and it was otherwise readable
+  // only in the media review queue, which a contributor cannot open.
+  //
+  // ADMIN SHAPES ONLY, like the rest of this block. Consent to be recorded is
+  // not consent to be named, so nothing about who is heard belongs on a public
+  // response — and no public shape selects it.
+  audioNotes: z.string().nullable(),
   isPublished: z.boolean(),
   dialect: DialectSchema,
   createdAt: z.iso.datetime(),

@@ -220,6 +220,16 @@ jobs:
           cache: pip
           cache-dependency-path: apps/workers/media-consumer/pyproject.toml
 
+      # The consumer shells out to ffmpeg and ffprobe, so without them the
+      # tests that measure a real transcode can only skip — and a skipped
+      # assertion looks identical to a passing one in a summary line. The
+      # loudness defect fixed in the audio module was reachable only by running
+      # ffmpeg, which meant it could not surface until a deploy.
+      #
+      # The runner image does not carry ffmpeg. apt is the whole cost.
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Install
         run: pip install -e ".[dev]"
 

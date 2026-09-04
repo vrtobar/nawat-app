@@ -42,6 +42,12 @@ const DETAIL_SELECT = {
   nawatContent: true,
   slug: true,
   imageUrl: true,
+  // Status and error only, matching ADMIN_TRANSLATION_SELECT — see the note
+  // there. `imageUrl` stays null until an ADMIN approves, so without this the
+  // editor cannot tell an entry with no image from one whose image is still
+  // being resized. LIST_SELECT above is deliberately not given it: the queue
+  // shows what to open, not what is mid-pipeline.
+  imageAsset: { select: { status: true, error: true, notes: true } },
   isPublished: true,
   createdAt: true,
   updatedAt: true,
@@ -137,6 +143,19 @@ export class AdminEntriesService {
             translations: { some: { isPublished: false, deletedAt: null } },
           }
         : {}),
+      // WHAT STILL NEEDS RECORDING, which is the list a contributor takes to a
+      // session. Keyed on `audioAssetId` rather than `audioUrl`: the URL is
+      // written only when an ADMIN approves (docs/adr/0020), so a translation
+      // whose recording is uploaded and awaiting review would otherwise read as
+      // still needing one and be recorded twice.
+      //
+      // `some` rather than `every`: one entry may carry several dialects, and a
+      // dialect without audio is a gap whether or not its siblings have any.
+      // Asking for entries where EVERY translation lacks audio would hide
+      // exactly the half-finished ones worth finishing.
+      ...(params.status === 'missing-audio'
+        ? { translations: { some: { audioAssetId: null, deletedAt: null } } }
+        : {}),
       // 'all' adds no predicate — deletedAt above is the only fence.
       ...(params.type ? { type: params.type } : {}),
       ...(params.q ? { nawatContent: { contains: params.q, mode: 'insensitive' } } : {}),
@@ -180,6 +199,9 @@ function toAdminDetail(entry: DetailRow): AdminEntryDetail {
     nawatContent: entry.nawatContent,
     slug: entry.slug,
     imageUrl: entry.imageUrl,
+    imageStatus: entry.imageAsset?.status ?? null,
+    imageError: entry.imageAsset?.error ?? null,
+    imageNotes: entry.imageAsset?.notes ?? null,
     isPublished: entry.isPublished,
     creator: entry.creator,
     updater: entry.updater,

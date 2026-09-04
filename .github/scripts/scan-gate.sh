@@ -27,12 +27,47 @@ set -euo pipefail
 
 REPO="${1:?repository required}"
 IMAGE_TAG="${2:?image tag required}"
-ALLOWLIST="${ALLOWLIST:-.github/image-cve-allowlist.json}"
+# Resolved against this script rather than the caller's cwd. Both workflows
+# happen to invoke it from the repository root, so a relative default works
+# today and would break silently the first time one of them sets a
+# working-directory — as the Python job in ci.yml already does.
+ALLOWLIST="${ALLOWLIST:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/image-cve-allowlist.json}"
 
 # Scanning is asynchronous. Findings read immediately after a push are empty,
 # which would report every image clean.
-aws ecr wait image-scan-complete \
-  --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG"
+#
+# THE SCAN RECORD IS ASYNCHRONOUS TOO, which the bare waiter does not survive.
+# `wait image-scan-complete` polls until a scan reaches COMPLETE and treats
+# IN_PROGRESS as "keep waiting" — but ScanNotFoundException, the window between
+# a push finishing and ECR registering the scan, is not in its acceptors, so it
+# is terminal. The gate then fails on an image that scans clean seconds later.
+# Measured: a consumer image pushed at 23:58:51Z was gated at 23:58:53Z and its
+# scan completed at 23:59:10Z. The api and web images passed the same gate in
+# the same run, on nothing but a longer gap between their push and their gate.
+#
+# So the not-yet-registered case retries and every other error still fails at
+# once. The ceiling matters as much as the retry: a scan that never appears has
+# to stop the deploy rather than hang the job until the runner times out.
+SCAN_WAIT_SECONDS="${SCAN_WAIT_SECONDS:-300}"
+scan_wait_deadline=$((SECONDS + SCAN_WAIT_SECONDS))
+until scan_wait_error=$(aws ecr wait image-scan-complete \
+  --repository-name "$REPO" --image-id "imageTag=$IMAGE_TAG" 2>&1); do
+  case "$scan_wait_error" in
+  *ScanNotFoundException*) ;;
+  *)
+    echo "$scan_wait_error" >&2
+    echo "::error::waiting for the $REPO:$IMAGE_TAG scan failed."
+    exit 1
+    ;;
+  esac
+
+  if [ "$SECONDS" -ge "$scan_wait_deadline" ]; then
+    echo "::error::no scan appeared for $REPO:$IMAGE_TAG within ${SCAN_WAIT_SECONDS}s of the push."
+    exit 1
+  fi
+
+  sleep 5
+done
 
 # Fetched once and filtered with jq rather than twice with JMESPath --query. A
 # JMESPath literal is written in backticks, which the linter reads as command
