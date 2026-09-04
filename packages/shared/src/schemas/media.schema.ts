@@ -42,11 +42,21 @@ export const ACCEPTED_MEDIA_TYPES = {
   },
 } as const satisfies Record<MediaKind, Record<string, string>>;
 
-// audio/webm is accepted alongside the three the API reference lists, because
-// MediaRecorder in Chrome and Firefox produces it by default. Recording in the
-// browser is the shortest path from a speaker to an asset, and refusing the
-// format that path produces would push every contributor through a file
-// manager.
+// audio/webm is accepted alongside the three the API reference lists. IT IS NOT
+// KEPT FOR THE REASON IT WAS ADDED: the original justification was that
+// MediaRecorder produces it in Chrome and Firefox, and that recording in the
+// browser is the shortest path from a speaker to an asset. In-browser recording
+// was examined and rejected on 2026-09-02 — capture happens on a field recorder
+// outside this application, because MediaRecorder's format differs by engine,
+// its defaults apply noise suppression and automatic gain that damage exactly
+// the consonants a documentation recording exists to preserve, and `source/` is
+// kept permanently for speakers who cannot be re-recorded.
+//
+// It stays because ffmpeg decodes it and dropping it would buy nothing. The
+// consumer shells out to ffmpeg, which reads webm regardless of what produced
+// it, so removing the type would refuse a file the pipeline can already
+// process — a narrower allowlist with no corresponding narrowing of what the
+// processor handles.
 
 // 10MB, matching the published reference. Not a content constraint — a
 // single-word recording is orders of magnitude below it even uncompressed —
