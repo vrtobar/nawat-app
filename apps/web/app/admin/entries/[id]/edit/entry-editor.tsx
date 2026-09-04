@@ -14,10 +14,13 @@ import { useState, useTransition } from 'react';
 import { blankDraft, toCreateTranslation, type TranslationDraft } from '../../translation-draft';
 import { TranslationFields } from '../../translation-fields';
 import {
+  attachImageAction,
   createTranslationAction,
+  detachImageAction,
   publishPendingTranslationsAction,
   updateEntryAction,
 } from './actions';
+import { MediaField } from './media-field';
 import { TranslationCard } from './translation-card';
 
 const labelClass = 'block text-xs font-medium uppercase tracking-wide text-gray-500';
@@ -185,6 +188,20 @@ export function EntryEditor({
             </span>
           )}
         </div>
+
+        {/* Not gated on canEditEntry, which is the entry's rule. Media has its
+            own: only media a reviewer already approved is admin-only to change,
+            so a contributor may add an image to a published entry. */}
+        <MediaField
+          kind="IMAGE"
+          noun="image"
+          status={entry.imageStatus}
+          url={entry.imageUrl}
+          error={entry.imageError}
+          disabled={!isAdmin && entry.imageUrl !== null}
+          attachAction={(assetId) => attachImageAction(entry.id, assetId)}
+          detachAction={() => detachImageAction(entry.id)}
+        />
       </section>
 
       <section className="space-y-4">
@@ -248,6 +265,7 @@ export function EntryEditor({
             canEdit={isAdmin || !translation.isPublished}
             // ADMIN-only on the API, so the button is not offered otherwise.
             canDelete={isAdmin}
+            isAdmin={isAdmin}
           />
         ))}
       </section>

@@ -6,7 +6,13 @@ import { useState, useTransition } from 'react';
 
 import { draftFrom, toUpdateTranslation, type TranslationDraft } from '../../translation-draft';
 import { TranslationFields } from '../../translation-fields';
-import { deleteTranslationAction, updateTranslationAction } from './actions';
+import {
+  attachAudioAction,
+  deleteTranslationAction,
+  detachAudioAction,
+  updateTranslationAction,
+} from './actions';
+import { MediaField } from './media-field';
 
 // One existing translation, saving on its own.
 //
@@ -19,6 +25,7 @@ export function TranslationCard({
   entryPublished,
   canEdit,
   canDelete,
+  isAdmin,
 }: {
   entryId: string;
   translation: AdminTranslationDetail;
@@ -32,6 +39,13 @@ export function TranslationCard({
   // Save that is going to 403.
   canEdit: boolean;
   canDelete: boolean;
+  // Media has its OWN rule, and it is not canEdit. The API refuses to replace
+  // or remove media a reviewer already approved unless the caller is an ADMIN
+  // — "absent media, or media still awaiting review, is anyone's to change" —
+  // so a contributor may add a recording to a PUBLISHED translation. That is
+  // the contribution the sub-resource exists to make possible, and reusing
+  // canEdit here would take it away.
+  isAdmin: boolean;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<TranslationDraft>(() => draftFrom(translation));
@@ -197,6 +211,20 @@ export function TranslationCard({
           No English gloss — this translation is not shown to English readers.
         </p>
       )}
+
+      {/* Outside the save boundary above on purpose: attaching does not move
+          this row's updatedAt, so it neither contends for the lock nor needs
+          Save pressed. See media-field.tsx. */}
+      <MediaField
+        kind="AUDIO"
+        noun="recording"
+        status={translation.audioStatus}
+        url={translation.audioUrl}
+        error={translation.audioError}
+        disabled={!isAdmin && translation.audioUrl !== null}
+        attachAction={(assetId) => attachAudioAction(entryId, translation.id, assetId)}
+        detachAction={() => detachAudioAction(entryId, translation.id)}
+      />
 
       {conflict && (
         <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
