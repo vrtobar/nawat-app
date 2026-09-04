@@ -93,6 +93,7 @@ export function MediaField({
   status,
   url,
   error,
+  savedNotes,
   disabled = false,
   attachAction,
   detachAction,
@@ -107,6 +108,10 @@ export function MediaField({
   status: MediaStatus | null;
   url: string | null;
   error: string | null;
+  // The provenance written when this was uploaded. Read-only here: it is set at
+  // presign and there is no route to change it, so showing an editable box
+  // would offer a save that cannot happen.
+  savedNotes: string | null;
   disabled?: boolean;
   attachAction: (assetId: string) => Promise<MediaActionResult>;
   detachAction: () => Promise<MediaActionResult>;
@@ -392,6 +397,17 @@ export function MediaField({
           </label>
         )}
       </div>
+
+      {/* Shown wherever a recording is attached, in every state — a note about a
+          FAILED asset is exactly what tells you whether re-recording means
+          going back to the same speaker. A block rather than a tooltip: it is
+          the only record of who is heard, and a tooltip cannot be reached on a
+          touch screen or from a keyboard. */}
+      {status !== null && savedNotes && (
+        <p className="mt-2 max-w-prose whitespace-pre-line border-l-2 border-gray-200 pl-2 text-xs text-gray-500">
+          {savedNotes}
+        </p>
+      )}
 
       {failure && <p className="mt-2 text-xs text-red-700">{failure}</p>}
     </div>

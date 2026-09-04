@@ -221,6 +221,7 @@ export function TranslationCard({
         status={translation.audioStatus}
         url={translation.audioUrl}
         error={translation.audioError}
+        savedNotes={translation.audioNotes}
         disabled={!isAdmin && translation.audioUrl !== null}
         attachAction={(assetId) => attachAudioAction(entryId, translation.id, assetId)}
         detachAction={() => detachAudioAction(entryId, translation.id)}

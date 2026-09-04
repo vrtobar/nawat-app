@@ -141,7 +141,7 @@ export const ADMIN_TRANSLATION_SELECT = {
   // still transcoding" from "one that failed", and `audioUrl` cannot: it stays
   // null for all three until an ADMIN approves. The public select above is
   // deliberately not given this.
-  audioAsset: { select: { status: true, error: true } },
+  audioAsset: { select: { status: true, error: true, notes: true } },
   isPublished: true,
   createdAt: true,
   updatedAt: true,
@@ -182,6 +182,7 @@ export function toAdminTranslationDetail(t: AdminTranslationRow): AdminTranslati
     // field instead of the presence of an object.
     audioStatus: t.audioAsset?.status ?? null,
     audioError: t.audioAsset?.error ?? null,
+    audioNotes: t.audioAsset?.notes ?? null,
     isPublished: t.isPublished,
     dialect: t.dialect,
     createdAt: t.createdAt.toISOString(),

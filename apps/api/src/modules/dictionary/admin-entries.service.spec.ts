@@ -431,6 +431,45 @@ describe('AdminEntriesService', () => {
       expect(result.translations[0]).not.toHaveProperty('audioAssetId');
     });
 
+    it('carries the provenance note to the editor that collects it', async () => {
+      // Written at presign and otherwise readable only in the media review
+      // queue, which a contributor cannot open — so without this the person who
+      // recorded the audio could not see what they wrote about it.
+      const row = detailRow();
+      row.translations[0] = {
+        ...row.translations[0],
+        audioAsset: {
+          status: 'READY',
+          error: null,
+          notes: 'Recorded with a speaker in Izalco, March 2026',
+        },
+      } as never;
+      entry.findFirst.mockResolvedValue(row as never);
+
+      const result = await service.detail('ent_1');
+
+      expect(result.translations[0]).toMatchObject({
+        audioNotes: 'Recorded with a speaker in Izalco, March 2026',
+      });
+    });
+
+    it('reports a null note rather than omitting the field', async () => {
+      entry.findFirst.mockResolvedValue(
+        detailRow({ imageAsset: { status: 'READY', error: null, notes: null } }) as never,
+      );
+
+      const result = await service.detail('ent_1');
+
+      expect(result.imageNotes).toBeNull();
+    });
+
+    it('keeps provenance out of the public shapes', () => {
+      // Consent to be recorded is not consent to be named. Nothing about who is
+      // heard belongs on a response an anonymous reader can fetch.
+      expect(Object.keys(TranslationDetailSchema.shape)).not.toContain('audioNotes');
+      expect(Object.keys(DictionaryEntryDetailSchema.shape)).not.toContain('imageNotes');
+    });
+
     it('does not leak into the public shapes', async () => {
       // The reader-facing shapes answer a different question: whether there is
       // approved audio, and nothing about the pipeline behind it.

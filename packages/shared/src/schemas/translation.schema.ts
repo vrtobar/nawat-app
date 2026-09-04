@@ -192,6 +192,15 @@ export const AdminTranslationDetailSchema = z.object({
   // Why processing gave up, for a FAILED asset. Carried so the person who can
   // re-record sees the reason where they are, rather than a bare failure.
   audioError: z.string().nullable(),
+  // The provenance written when the recording was uploaded — who is heard,
+  // when, on what. Carried for the same reason as the two above: the editor is
+  // where a person stands when they need it, and it was otherwise readable
+  // only in the media review queue, which a contributor cannot open.
+  //
+  // ADMIN SHAPES ONLY, like the rest of this block. Consent to be recorded is
+  // not consent to be named, so nothing about who is heard belongs on a public
+  // response — and no public shape selects it.
+  audioNotes: z.string().nullable(),
   isPublished: z.boolean(),
   dialect: DialectSchema,
   createdAt: z.iso.datetime(),
