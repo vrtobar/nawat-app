@@ -116,6 +116,29 @@ export class UploadsService {
     return toMediaAsset(updated);
   }
 
+  // ONE asset, for the client watching an upload move PENDING -> READY | FAILED.
+  //
+  // This exists so that poll does not go through `list`. Processing takes tens
+  // of seconds — 26.6s measured on a cold Lambda, 2.3s warm — so a client polls
+  // repeatedly for a single row, and reading it out of the caller's whole
+  // upload history would re-transfer every recording that contributor has ever
+  // made on each tick. The cost of the poll would grow with how much work the
+  // person had done, which is precisely backwards.
+  //
+  // Scoped to the uploader like every other route here, and refused the same
+  // way: missing is a 404, someone else's is a 403. The asset is not content
+  // until it is attached, so there is nothing for another contributor to read.
+  async get(userId: string, assetId: string): Promise<MediaAsset> {
+    const asset = await prisma.mediaAsset.findUnique({
+      where: { id: assetId },
+      select: { ...MEDIA_ASSET_SELECT, uploaderId: true },
+    });
+    if (!asset) throw mediaAssetNotFound();
+    if (asset.uploaderId !== userId) throw uploadNotYours();
+
+    return toMediaAsset(asset);
+  }
+
   // An uploader's own assets, newest first. Scoped to the caller: an
   // unattached upload is not content yet, so there is nothing for another
   // contributor to collaborate on.

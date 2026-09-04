@@ -48,4 +48,13 @@ export class UploadsController {
   list(@CurrentUser() user: JwtClaims): Promise<MediaAsset[]> {
     return this.uploads.list(user.userId);
   }
+
+  // What a client polls while the processor works. Declared after @Get() so
+  // the literal collection route is matched first — Nest resolves in
+  // declaration order, and ':id' would otherwise swallow it.
+  @Roles('CONTRIBUTOR')
+  @Get(':id')
+  get(@CurrentUser() user: JwtClaims, @Param('id') id: string): Promise<MediaAsset> {
+    return this.uploads.get(user.userId, id);
+  }
 }
