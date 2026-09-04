@@ -87,7 +87,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 Media
               </Link>
             )}
-            <Link href="/" className="hover:underline">
+            {/* /dictionary, not / — the label says Dictionary and pointed at
+                the homepage. Locale-less on purpose: the panel is not
+                localized, and proxy.ts prepends the reader's locale to any
+                path that has none, so this resolves to /es/dictionary or
+                /en/dictionary without the panel having to know which. */}
+            <Link href="/dictionary" className="hover:underline">
               Dictionary
             </Link>
             <a
