@@ -24,11 +24,22 @@ COPY packages/config/package.json packages/config/
 COPY packages/database/package.json packages/database/
 COPY packages/shared/package.json packages/shared/
 RUN npm ci --ignore-scripts
+# npm nests some dependencies per workspace rather than hoisting them all, so
+# `node_modules` alone is not the installation. Downstream stages copy these
+# too; mkdir means the COPY works even for a workspace with nothing nested,
+# where npm creates no directory at all.
+RUN mkdir -p apps/api/node_modules packages/shared/node_modules packages/database/node_modules
 
 # --- build: generate Prisma client, compile shared → database → api ----------
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# After `COPY . .`, which cannot supply these: .dockerignore excludes every
+# node_modules from the build context. main.ts imports @nestjs/platform-express
+# directly, so its absence here is a COMPILE error, not just a runtime one.
+COPY --from=deps /app/apps/api/node_modules apps/api/node_modules
+COPY --from=deps /app/packages/shared/node_modules packages/shared/node_modules
+COPY --from=deps /app/packages/database/node_modules packages/database/node_modules
 RUN npm run generate --workspace=@nahuat/database \
   && npx turbo run build --filter=api...
 
@@ -38,6 +49,13 @@ RUN npm run generate --workspace=@nahuat/database \
 FROM deps AS prod-deps
 RUN npm prune --omit=dev --ignore-scripts
 
+# NPM DOES NOT HOIST EVERYTHING TO THE ROOT, and this stage's output is not one
+# tree. `@nestjs/platform-express` installs under apps/api/node_modules — npm
+# places it there whether the production tree is reached by pruning this one or
+# by a fresh `npm ci --omit=dev`, so it is a layout decision and not an artefact
+# of the prune. Copying only the root tree therefore ships an incomplete
+# installation, which is what broke every boot of the 2026-09-04 image.
+
 # --- runner ------------------------------------------------------------------
 FROM base AS runner
 ENV NODE_ENV=production
@@ -45,6 +63,11 @@ ENV NODE_ENV=production
 RUN addgroup -g 1001 nodejs && adduser -S -u 1001 nestjs
 
 COPY --from=prod-deps --chown=nestjs:nodejs /app/node_modules ./node_modules
+# The nested trees too — see prod-deps. main.ts imports the HTTP adapter
+# explicitly so it resolves from here rather than from the root.
+COPY --from=prod-deps --chown=nestjs:nodejs /app/apps/api/node_modules apps/api/node_modules
+COPY --from=prod-deps --chown=nestjs:nodejs /app/packages/shared/node_modules packages/shared/node_modules
+COPY --from=prod-deps --chown=nestjs:nodejs /app/packages/database/node_modules packages/database/node_modules
 COPY --chown=nestjs:nodejs package.json ./
 
 # Workspace packages — node_modules/@nahuat/* are symlinks into these paths
