@@ -343,8 +343,7 @@ jobs:
 
       # services-stable gives up after ~10 minutes, which is longer than a
       # healthy rollout and shorter than waiting on one that will never
-      # converge. The circuit breaker may also roll back underneath us; either
-      # way this fails rather than reporting success.
+      # converge.
       - name: Wait for both services
         env:
           CLUSTER: ${{ steps.out.outputs.cluster }}
@@ -354,6 +353,42 @@ jobs:
           set -euo pipefail
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$API" "$WEB"
           echo "Both services stable."
+
+      # STABLE IS NOT THE SAME AS DEPLOYED. When a task will not start, ECS's
+      # circuit breaker rolls the service back to the previous task definition,
+      # and the rollback reaches a steady state — so `wait services-stable`
+      # returns 0 and the step above passes. Staging demonstrated this on
+      # 2026-09-04: a green run for a commit whose image exited on boot, with
+      # both services still serving the previous release.
+      #
+      # Readiness below would not catch it either. The old image is a working
+      # API, so /api/health/ready answers 200 — it proves something is serving,
+      # not that this release is.
+      - name: Verify the running image is the one deployed
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          API: ${{ steps.out.outputs.api_service }}
+          WEB: ${{ steps.out.outputs.web_service }}
+          EXPECTED_TAG: prod-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for svc in "$API" "$WEB"; do
+            td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+                  --query 'services[0].taskDefinition' --output text)
+            image=$(aws ecs describe-task-definition --task-definition "$td" \
+                     --query 'taskDefinition.containerDefinitions[0].image' --output text)
+            running_tag=${image##*:}
+            if [ "$running_tag" = "$EXPECTED_TAG" ]; then
+              printf '%-28s %s\n' "$svc" "$running_tag"
+            else
+              printf '::error::%s is running %s, expected %s — the deployment was rolled back\n' \
+                "$svc" "$running_tag" "$EXPECTED_TAG"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ] || exit 1
+          echo "Both services are running ${EXPECTED_TAG}."
 
       # services-stable used to prove database connectivity as a side effect:
       # the ALB health check ran the Prisma indicator, so no task reached steady

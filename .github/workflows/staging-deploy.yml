@@ -410,8 +410,7 @@ jobs:
 
       # services-stable gives up after ~10 minutes, which is longer than a
       # healthy rollout and shorter than waiting on one that will never
-      # converge. The circuit breaker may also roll back underneath us; either
-      # way this fails rather than reporting success.
+      # converge.
       - name: Wait for both services
         env:
           CLUSTER: ${{ needs.infra.outputs.cluster }}
@@ -421,6 +420,43 @@ jobs:
           set -euo pipefail
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$API" "$WEB"
           echo "Both services stable."
+
+      # STABLE IS NOT THE SAME AS DEPLOYED, and the step above cannot tell the
+      # difference. When a task will not start, ECS's circuit breaker rolls the
+      # service back to the previous task definition — and that rollback then
+      # reaches a steady state, so `wait services-stable` returns 0. On
+      # 2026-09-04 that produced a green staging deploy of f1b0102 while both
+      # services ran the b27e9cf image, because the new one exited on boot.
+      # A deploy that reports success while the old code is serving is worse
+      # than one that fails, because nothing afterwards questions it.
+      #
+      # So the running task definition's image is compared against the tag this
+      # run built. This is the only check here that would notice a rollback.
+      - name: Verify the running image is the one deployed
+        env:
+          CLUSTER: ${{ needs.infra.outputs.cluster }}
+          API: ${{ needs.infra.outputs.api_service }}
+          WEB: ${{ needs.infra.outputs.web_service }}
+          EXPECTED_TAG: staging-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for svc in "$API" "$WEB"; do
+            td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+                  --query 'services[0].taskDefinition' --output text)
+            image=$(aws ecs describe-task-definition --task-definition "$td" \
+                     --query 'taskDefinition.containerDefinitions[0].image' --output text)
+            running_tag=${image##*:}
+            if [ "$running_tag" = "$EXPECTED_TAG" ]; then
+              printf '%-28s %s\n' "$svc" "$running_tag"
+            else
+              printf '::error::%s is running %s, expected %s — the deployment was rolled back\n' \
+                "$svc" "$running_tag" "$EXPECTED_TAG"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ] || exit 1
+          echo "Both services are running ${EXPECTED_TAG}."
 
       # Without this the failure above is just a timeout, and the actual reason
       # lives in the console. Task placement failures in particular (secrets,
