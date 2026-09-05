@@ -21,12 +21,31 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # A reached limit is SILENT — dependabot opens no further PRs and says
+    # nothing about the ones it withheld. That is how the NestJS 12 major
+    # arrived as an unbuildable subset: three of its packages fit under the
+    # limit and the two that would have made them coherent did not. Grouping,
+    # below, is the fix; this number is only the thing that made the gap
+    # invisible.
     open-pull-requests-limit: 5
     groups:
       # Patch and minor bumps arrive as one PR per week rather than a dozen.
       # Majors stay separate: they are the ones that need reading.
       minor-and-patch:
         update-types: [minor, patch]
+
+      # The exception to "majors stay separate", because a NestJS major is not
+      # several updates that happen to coincide — it is one update spread over
+      # several packages. Every package's peer range names the others, so a PR
+      # raising one of them and not the rest fails on arrival rather than
+      # failing review: platform-express at 12 against core at 11 aborts with
+      # `PackageLoader: The "@nestjs/platform-express" package is missing`.
+      #
+      # Grouped, the set is one PR — which is also the only form in which it can
+      # be read, since no individual bump in it is meaningful alone.
+      nestjs:
+        patterns: ['@nestjs/*']
+        update-types: [major]
 
   # The base images are where the vulnerabilities actually are — every HIGH
   # finding in ECR today is an openssl CVE inherited from node:24-alpine, which

@@ -4,13 +4,27 @@ import './env-bootstrap'; // MUST be first — see comment in that file
 // the SDK must patch http/https/pg before anything else imports them.
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { ExpressAdapter } from '@nestjs/platform-express';
 
 import { AppModule } from './app.module';
 import type { Env } from './config/env.validation';
 import { configureApp } from './configure-app';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // THE ADAPTER IS PASSED EXPLICITLY, and that is a deployment requirement
+  // rather than a style preference. Left out, @nestjs/core selects a default by
+  // calling `require('@nestjs/platform-express')` from ITS OWN directory — the
+  // hoisted root of the workspace. npm does not promise to hoist, and as of
+  // @nestjs 12 it places the driver under apps/api/node_modules, where core
+  // cannot see it: the production image failed every boot with "No driver
+  // (HTTP) has been selected" while the package sat installed a few
+  // directories away.
+  //
+  // Importing it here moves the resolution to this file, which is inside the
+  // workspace that declares the dependency, so it resolves wherever npm chose
+  // to put it. That is a property of the code rather than of a layout npm is
+  // free to change.
+  const app = await NestFactory.create(AppModule, new ExpressAdapter());
   const config = app.get(ConfigService<Env, true>);
 
   // Prefix and versioning live in configure-app.ts so the HTTP tests boot an

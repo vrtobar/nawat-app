@@ -7,8 +7,12 @@ import { getEntryBySlug } from '../../../../lib/api/dictionary';
 import { isLocale, type Locale } from '../../../../lib/locale';
 
 const STRINGS = {
-  es: { back: '← Volver al diccionario', expression: 'expresión' },
-  en: { back: '← Back to the dictionary', expression: 'expression' },
+  es: { back: '← Volver al diccionario', expression: 'expresión', illustration: 'Ilustración de' },
+  en: {
+    back: '← Back to the dictionary',
+    expression: 'expression',
+    illustration: 'Illustration of',
+  },
 } as const satisfies Record<Locale, Record<string, string>>;
 
 const POS_LABELS = {
@@ -106,6 +110,31 @@ export default async function EntryDetailPage({ params }: { params: Promise<Para
           </span>
         )}
       </header>
+
+      {/* THE ENTRY'S IMAGE, not a translation's — which is why it sits here
+          rather than inside the list below. `imageUrl` hangs off the entry and
+          `audioUrl` off each translation, and the layout follows that ownership.
+
+          A plain <img>, and next/image is not an option rather than merely
+          unnecessary: it requires width and height (or fill), and
+          DictionaryEntryDetail carries the URL and no dimensions. Nothing here
+          can state an intrinsic ratio, so the image reflows as it loads. That
+          is a known cost of the shape, not an oversight.
+
+          The consumer emits WebP at up to three widths with the 640 as primary,
+          so there is a srcset to be had — but the widths it produces depend on
+          the source (it never upscales), so a client cannot derive the URLs and
+          the shape exposes only the primary. Both the srcset and the reserved
+          box need the same thing: the rendition set, with dimensions, on the
+          entry. */}
+      {entry.imageUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={entry.imageUrl}
+          alt={`${t.illustration} ${entry.nawatContent}`}
+          className="mt-6 w-full max-w-md rounded-md border border-gray-100"
+        />
+      )}
 
       <section className="mt-8 space-y-8">
         {entry.translations.map((tr) => (

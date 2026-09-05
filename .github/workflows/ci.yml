@@ -94,6 +94,11 @@ jobs:
               # The Python equivalent of the package.json entries above: what
               # gets installed into the consumer image.
               - 'apps/workers/*/pyproject.toml'
+              # The smoke test itself. Without this a change to the script runs
+              # no image job, so the check would be edited without ever being
+              # exercised. NOTE the same is true of the other gate scripts under
+              # .github/scripts — no filter matches them at all.
+              - '.github/scripts/smoke-image.sh'
               - '.github/workflows/ci.yml'
             # Every workflow, not just ci.yml. The deploy workflows were
             # previously matched by no filter at all, so a pull request
@@ -214,7 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -321,6 +326,11 @@ jobs:
           file: ${{ matrix.file }}
           platforms: linux/arm64
           push: false
+          # Loaded into the local daemon so the next step can run it. A build
+          # that is never started proves the Dockerfile parses and the compile
+          # succeeds, and nothing about whether the artifact works.
+          load: true
+          tags: nahuat-${{ matrix.name }}:ci
           # Matches the deploy workflow. buildx otherwise emits an image index
           # whose children are pushed untagged, and the ECR lifecycle rule
           # expiring untagged images after a day would delete them out from
@@ -330,6 +340,16 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # THE ONLY CHECK HERE THAT RUNS THE THING BEING SHIPPED. Everything else
+      # in this workflow reads the repository, where module resolution and
+      # configuration differ from the pruned image — see the script for the
+      # defect that reached staging through a fully green pipeline.
+      #
+      # The runner is arm64 and the image is built for linux/arm64, so this
+      # executes natively rather than under emulation.
+      - name: Smoke test the image
+        run: ./.github/scripts/smoke-image.sh "${{ matrix.name }}" "nahuat-${{ matrix.name }}:ci"
 
   # Catches what YAML validity cannot: `needs` naming a job that does not
   # exist, ${{ }} expressions referencing missing outputs or contexts
